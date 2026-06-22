@@ -41,7 +41,7 @@ def clean_text(text):
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
 
-# --- 2. FACEBOOK MULTI-PHOTO & SINGLE-PHOTO ENGINE ---
+# --- 2. FACEBOOK ACCESS ENGINE WITH DETAILED ERROR LOGGING ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token:
         print("  [!] Error: Master User Access Token is empty!")
@@ -343,21 +343,26 @@ async def process_sync(config, memory):
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 if not og_match:
                                     og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
+                                
+                                # Temporary list to collect new scraped images
+                                scraped_imgs = []
                                 if og_match:
-                                    # Insert featured image to top of the list
                                     page_img = og_match.group(1)
-                                    if page_img not in img_url:
-                                        img_url = page_img
-                                        img_urls = [page_img] + img_url_list if 'img_url' in locals() else [page_img]
+                                    scraped_imgs.append(page_img)
 
                                 # Scan article body context for more images
                                 body_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 for url in body_imgs:
                                     # Filter out icons, UI elements
-                                    if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner']):
+                                    if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
                                         continue
-                                    if url not in img_urls:
-                                        img_urls.append(url)
+                                    if url not in scraped_imgs:
+                                        scraped_imgs.append(url)
+                                        
+                                # Merge scraped images with existing RSS images safely
+                                for img in scraped_imgs:
+                                    if img not in img_urls:
+                                        img_urls.append(img)
                         except Exception as e:
                             print(f"  [!] Failed to scrape website for multi-images: {e}")
 
