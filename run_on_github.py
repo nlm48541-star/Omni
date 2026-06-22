@@ -42,6 +42,9 @@ def clean_text(text):
 
 # --- 2. FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
+    if not master_user_token:
+        print("[!] Warning: Master User Access Token is empty.")
+        return None
     url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}"
     try:
         r = requests.get(url).json()
@@ -97,11 +100,26 @@ async def process_sync(config, memory):
     # Determine real platform names after clearing emojis from config string
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else "Website")
 
+    # Safe Fallbacks for all dictionary credentials keys to prevent KeyErrors
+    tg_session = credentials.get('tg_session', '')
+    tg_api_id = credentials.get('tg_api_id', '')
+    tg_api_hash = credentials.get('tg_api_hash', '')
+    wp_username = credentials.get('wp_username', '')
+    wp_app_password = credentials.get('wp_app_password', '')
+    
+    # Safe Fallback to check both old key 'fb_token' and new key 'fb_user_token'
+    fb_user_token = credentials.get('fb_user_token', credentials.get('fb_token', ''))
+
     # Pre-authorize Telegram Client only if needed
     tg_client = None
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
-        tg_client = TelegramClient(StringSession(credentials['tg_session']), int(credentials['tg_api_id']), credentials['tg_api_hash'])
-        await tg_client.start()
+        if tg_session and tg_api_id and tg_api_hash:
+            try:
+                tg_client = TelegramClient(StringSession(tg_session), int(tg_api_id), tg_api_hash)
+                await tg_client.start()
+            except Exception as e:
+                print(f"[!] Error initializing Telegram Client: {e}")
+                tg_client = None
 
     current_time = datetime.now(timezone.utc)
 
@@ -148,18 +166,18 @@ async def process_sync(config, memory):
                     if rule['txt'] and cleaned_text:
                         for dest_id in dest_ids:
                             if dest_platform == "Facebook":
-                                token = get_page_access_token(credentials['fb_user_token'], dest_id)
+                                token = get_page_access_token(fb_user_token, dest_id)
                                 if token:
                                     post_text_to_facebook(dest_id, token, cleaned_text)
                             elif dest_platform == "Website":
-                                post_to_wordpress(dest_id, credentials['wp_username'], credentials['wp_app_password'], "Telegram Update", cleaned_text)
+                                post_to_wordpress(dest_id, wp_username, wp_app_password, "Telegram Update", cleaned_text)
 
                     # Publish Images to all destination outputs
                     if rule.get('img', True) and msg.photo:
                         photo_path = await msg.download_media()
                         for dest_id in dest_ids:
                             if dest_platform == "Facebook":
-                                token = get_page_access_token(credentials['fb_user_token'], dest_id)
+                                token = get_page_access_token(fb_user_token, dest_id)
                                 if token:
                                     post_photo_to_facebook(dest_id, token, photo_path, cleaned_text)
                         if os.path.exists(photo_path):
@@ -170,7 +188,7 @@ async def process_sync(config, memory):
                         video_path = await msg.download_media()
                         for dest_id in dest_ids:
                             if dest_platform == "Facebook":
-                                token = get_page_access_token(credentials['fb_user_token'], dest_id)
+                                token = get_page_access_token(fb_user_token, dest_id)
                                 if token:
                                     post_video_to_facebook(dest_id, token, video_path, cleaned_text)
                         if os.path.exists(video_path):
@@ -200,11 +218,11 @@ async def process_sync(config, memory):
                     if entry_link in processed_links:
                         continue
 
-                    # Extract raw description/content
+                    # 1. Extract raw description/content
                     raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
                     cleaned_description = strip_html(raw_description)
 
-                    # Count words on the FULL post content (Title + Description Body)
+                    # 2. Count words on the FULL post content (Title + Description Body)
                     full_content_for_counting = clean_text(entry.title + " " + cleaned_description)
                     word_count = len(full_content_for_counting.split())
 
@@ -213,7 +231,7 @@ async def process_sync(config, memory):
                         print(f"[-] Skipped Web Post: Word count ({word_count}) is less than required ({min_words}).")
                         continue
 
-                    # Dynamic Image Extraction Logic from RSS Feed tags
+                    # 3. Dynamic Image Extraction Logic from RSS Feed tags
                     img_url = None
                     if 'enclosures' in entry and len(entry.enclosures) > 0:
                         for enc in entry.enclosures:
@@ -243,6 +261,7 @@ async def process_sync(config, memory):
                     if img_url and rule.get('img', True):
                         try:
                             img_response = requests.get(img_url, timeout=10)
+                            # FIX STAMP: status_code is corrected from buggy status_color
                             if img_response.status_code == 200 or img_response.content:
                                 photo_path = f"temp_rss_img_{hash(entry_link)}.jpg"
                                 with open(photo_path, 'wb') as f:
@@ -251,7 +270,7 @@ async def process_sync(config, memory):
                             print(f"[!] Warning: Failed to download RSS image: {e}")
                             photo_path = None
 
-                    # Post Publishing on Destination
+                    # 4. Post Publishing on Destination
                     posted_successfully = False
                     if rule['txt']:
                         for dest_id in dest_ids:
@@ -263,7 +282,7 @@ async def process_sync(config, memory):
                                 posted_successfully = True
                                     
                             elif dest_platform == "Facebook":
-                                token = get_page_access_token(credentials['fb_user_token'], dest_id)
+                                token = get_page_access_token(fb_user_token, dest_id)
                                 if token:
                                     if photo_path:
                                         # Posts on Facebook as a Photo Post with text as caption
