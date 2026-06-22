@@ -6,5 +6,18 @@
         "fb_token": "EAAg7BAxGYrEBR4E059Jdg4ASic8A4oKqSiTbV3mGdSMeyhZAW81gtKgemjh8MBZAencLnUBPVEVyIOWw4X5qyqhXwgagQEe1rLCKttb5ZBiAKmVUr5ZALYZAUjznlrwCqJ5Gc5RQrpHObIHPBmeCdBhBm0g4W7U2cGFvkMuJ3rZBsmzwmIfNTJAJ7m5ZB4F",
         "web_auth_token": ""
     },
-    "rules": []
+    "rules": [
+        {
+            "source": "\ud83c\udf10 Website",
+            "source_id": "https://morss.it/:nolink:noref/https://bdgovtjob.net/",
+            "destination": "\ud83d\udc65 Facebook",
+            "dest_id": "1114356038435251",
+            "txt": true,
+            "img": true,
+            "vid": false,
+            "title_only": true,
+            "min_words": 2,
+            "lookback_hours": 24.0
+        }
+    ]
 }
