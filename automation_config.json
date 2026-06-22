@@ -8,14 +8,15 @@
     },
     "rules": [
         {
-            "source": "Website",
+            "source": "\ud83c\udf10 Website",
             "source_id": "https://rss.app/feeds/MT9GYZFVMzeGmlTN.xml",
-            "destination": "Facebook",
+            "destination": "\ud83d\udc65 Facebook",
             "dest_id": "61591261828799",
             "txt": true,
             "img": true,
             "vid": false,
-            "min_words": 60
+            "min_words": 60,
+            "lookback_hours": 24.0
         }
     ]
 }
