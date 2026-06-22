@@ -1,0 +1,21 @@
+{
+    "credentials": {
+        "tg_api_id": "",
+        "tg_api_hash": "",
+        "tg_session": "",
+        "fb_token": "EAAg7BAxGYrEBR54xygA2zCDJyjKLLT62ULxQiDSxHd1RA1ULzgZBf2nosoX3EeC2AO0bbA8ZAI01wtxIZBLVL64YoA8jXJYHUbqoZBEPtLUiyA4KuLzlxyUS0SAvOr1q5nyJdv3q6ea4I6Kdf7TWgmW99jSGRxUuvym0tgZAjcZADkkpCPvvqtGGgdns5C",
+        "web_auth_token": ""
+    },
+    "rules": [
+        {
+            "source": "Website",
+            "source_id": "https://rss.app/feeds/MT9GYZFVMzeGmlTN.xml",
+            "destination": "Facebook",
+            "dest_id": "61591261828799",
+            "txt": true,
+            "img": true,
+            "vid": false,
+            "min_words": 60
+        }
+    ]
+}
