@@ -5,6 +5,7 @@ import asyncio
 import requests
 import feedparser
 from time import mktime
+from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -40,7 +41,7 @@ def clean_text(text):
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
 
-# --- 2. FACEBOOK ACCESS ENGINE WITH DETAILED ERROR LOGGING ---
+# --- 2. FACEBOOK MULTI-PHOTO & SINGLE-PHOTO ENGINE ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token:
         print("  [!] Error: Master User Access Token is empty!")
@@ -90,6 +91,49 @@ def post_photo_to_facebook(page_id, page_token, photo_path, caption):
         print(f"  [!] Facebook Request Exception (Photo): {e}")
         return False
 
+def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
+    """
+    Uploads multiple photos to Facebook as unpublished, 
+    then publishes them linked together as a single Album Post.
+    """
+    try:
+        attached_media = []
+        for idx, path in enumerate(photo_paths):
+            url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
+            payload = {
+                'published': 'false', # Keep it unpublished initially
+                'access_token': page_token
+            }
+            files = {'source': open(path, 'rb')}
+            r = requests.post(url, data=payload, files=files)
+            if r.status_code == 200:
+                photo_id = r.json().get('id')
+                attached_media.append({"media_fbid": photo_id})
+                print(f"  [+] Uploaded unpublished photo {idx+1}/{len(photo_paths)}: ID {photo_id}")
+            else:
+                print(f"  [!] Error uploading photo {idx+1}: {r.status_code} - {r.text}")
+
+        if not attached_media:
+            print("  [!] Error: No photos could be uploaded to Facebook.")
+            return False
+
+        # Link all uploaded photos into a single post on Page Feed
+        feed_url = f"https://graph.facebook.com/v20.0/{page_id}/feed"
+        feed_payload = {
+            'message': caption,
+            'attached_media': json.dumps(attached_media),
+            'access_token': page_token
+        }
+        r_feed = requests.post(feed_url, data=feed_payload)
+        if r_feed.status_code == 200:
+            return True
+        else:
+            print(f"  [!] Error publishing Album Feed Post: {r_feed.status_code} - {r_feed.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Facebook Multi-Photo Exception: {e}")
+        return False
+
 def post_video_to_facebook(page_id, page_token, video_path, caption):
     url = f"https://graph.facebook.com/v20.0/{page_id}/videos"
     payload = {'description': caption, 'access_token': page_token}
@@ -114,18 +158,10 @@ def post_to_wordpress(wp_url, username, app_password, title, content):
         'content': content,
         'status': 'publish'
     }
-    try:
-        r = requests.post(url, json=payload, headers=headers, auth=(username, app_password))
-        if r.status_code == 201:
-            return True
-        else:
-            print(f"  [!] WordPress API Error: {r.status_code} - {r.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] WordPress Request Exception: {e}")
-        return False
+    r = requests.post(url, json=payload, headers=headers, auth=(username, app_password))
+    return r.status_code == 201
 
-# --- 4. CORE PIPELINE CONTROLLER ---
+# --- 4. CORE PIPELINE CONTROLLER WITH MULTI-IMAGE ALBUMS ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -273,28 +309,71 @@ async def process_sync(config, memory):
                             print(f"  [-] Skipped: Word count ({word_count}) is less than required ({min_words}).")
                             continue
 
-                        # Image Extraction Logic
-                        img_url = None
+                        # --- MULTI-IMAGE EXTRACTION FLOW ---
+                        img_urls = []
+                        # 1. Grab image from enclosure
                         if 'enclosures' in entry and len(entry.enclosures) > 0:
                             for enc in entry.enclosures:
-                                if enc.get('type', '').startswith('image/'):
-                                    img_url = enc.get('href')
-                                    break
-                        if not img_url and 'media_content' in entry and len(entry.media_content) > 0:
-                            img_url = entry.media_content[0].get('url')
-                        if not img_url and 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
-                            img_url = entry.media_thumbnail[0].get('url')
-                        if not img_url:
-                            img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_description)
-                            if img_match:
-                                img_url = img_match.group(1)
+                                href = enc.get('href', '')
+                                if enc.get('type', '').startswith('image/') or href.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                                    img_urls.append(href)
+                        # 2. Grab from media tags
+                        if 'media_content' in entry and len(entry.media_content) > 0:
+                            for m_content in entry.media_content:
+                                url = m_content.get('url')
+                                if url and url not in img_urls:
+                                    img_urls.append(url)
+                        if 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
+                            for m_thumb in entry.media_thumbnail:
+                                url = m_thumb.get('url')
+                                if url and url not in img_urls:
+                                    img_urls.append(url)
+                        # 3. Grab from description HTML tags
+                        desc_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_description, re.IGNORECASE)
+                        for url in desc_imgs:
+                            if url and url not in img_urls:
+                                img_urls.append(url)
+
+                        # 4. ROBUST WEB SCRAPER FALLBACK (Scrapes actual website post for images)
+                        try:
+                            print(f"  [~] Scraping website body for multiple images: {entry.link}")
+                            web_res = requests.get(entry.link, timeout=10)
+                            if web_res.status_code == 200:
+                                # Fetch og:image (featured image) first
+                                og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
+                                if not og_match:
+                                    og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
+                                if og_match:
+                                    # Insert featured image to top of the list
+                                    page_img = og_match.group(1)
+                                    if page_img not in img_url:
+                                        img_url = page_img
+                                        img_urls = [page_img] + img_url_list if 'img_url' in locals() else [page_img]
+
+                                # Scan article body context for more images
+                                body_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
+                                for url in body_imgs:
+                                    # Filter out icons, UI elements
+                                    if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner']):
+                                        continue
+                                    if url not in img_urls:
+                                        img_urls.append(url)
+                        except Exception as e:
+                            print(f"  [!] Failed to scrape website for multi-images: {e}")
+
+                        # Clean relative URLs and limit total images to 9 (Facebook limit/safety)
+                        cleaned_img_urls = []
+                        for url in img_urls[:9]:
+                            if not url.startswith(('http://', 'https://')):
+                                url = urljoin(entry.link, url)
+                            if url not in cleaned_img_urls:
+                                cleaned_img_urls.append(url)
 
                         # Timing / Title Only Filter check
                         title_only_flag = rule.get('title_only', False)
                         
-                        # Decide what format to upload based on "Title Only" checkbox state
+                        # Format final published text
                         if title_only_flag:
-                            # Posts ONLY the Title (Completely skips links and body descriptions!)
                             final_post_text = clean_text(f"📝 {entry.title}")
                         else:
                             short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
@@ -303,28 +382,29 @@ async def process_sync(config, memory):
                             else:
                                 final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry.link}")
 
-                        # Download RSS Image
-                        photo_path = None
-                        if img_url and rule.get('img', True):
-                            try:
-                                print(f"  [+] Attempting to download image: {img_url}")
-                                img_response = requests.get(img_url, timeout=10)
-                                if img_response.status_code == 200 or img_response.content:
-                                    photo_path = f"temp_rss_img_{hash(entry_link)}.jpg"
-                                    with open(photo_path, 'wb') as f:
-                                        f.write(img_response.content)
-                                    print("  [+] Image download successful!")
-                            except Exception as e:
-                                print(f"  [!] Warning: Failed to download RSS image: {e}")
-                                photo_path = None
+                        # Download all found images locally
+                        photo_paths = []
+                        if cleaned_img_urls and rule.get('img', True):
+                            for idx, url in enumerate(cleaned_img_urls):
+                                try:
+                                    print(f"  [+] Downloading image {idx+1}/{len(cleaned_img_urls)}: {url}")
+                                    img_response = requests.get(url, timeout=10)
+                                    if img_response.status_code == 200:
+                                        path = f"temp_rss_img_{hash(entry_link)}_{idx}.jpg"
+                                        with open(path, 'wb') as f:
+                                            f.write(img_response.content)
+                                        photo_paths.append(path)
+                                except Exception as e:
+                                    print(f"  [!] Warning: Failed to download RSS image {idx+1}: {e}")
 
-                        # Post Publishing
+                        # Post Publishing logic based on photo counts
                         posted_successfully = False
                         if rule['txt']:
                             for dest_id in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
-                                    if photo_path:
-                                        await tg_client.send_file(dest_id, photo_path, caption=final_post_text)
+                                    if photo_paths:
+                                        # Telethon natively groups multiple paths into a single Album Group!
+                                        await tg_client.send_file(dest_id, photo_paths, caption=final_post_text)
                                     else:
                                         await tg_client.send_message(dest_id, final_post_text)
                                     posted_successfully = True
@@ -332,16 +412,23 @@ async def process_sync(config, memory):
                                 elif dest_platform == "Facebook":
                                     token = get_page_access_token(fb_user_token, dest_id)
                                     if token:
-                                        if photo_path:
-                                            posted_successfully = post_photo_to_facebook(dest_id, token, photo_path, final_post_text)
+                                        if len(photo_paths) > 1:
+                                            # Publish as a multi-photo album post
+                                            posted_successfully = post_multi_photo_to_facebook(dest_id, token, photo_paths, final_post_text)
+                                        elif len(photo_paths) == 1:
+                                            # Publish as a single photo post
+                                            posted_successfully = post_photo_to_facebook(dest_id, token, photo_paths[0], final_post_text)
                                         else:
+                                            # Publish as a text-only status post
                                             posted_successfully = post_text_to_facebook(dest_id, token, final_post_text)
                                             
-                        if photo_path and os.path.exists(photo_path):
-                            os.remove(photo_path)
+                        # Delete all temporary files to clean workspace
+                        for path in photo_paths:
+                            if os.path.exists(path):
+                                os.remove(path)
                         
                         if posted_successfully:
-                            print(f"  [+] Success: Successfully posted '{entry.title}' to destination!")
+                            print(f"  [+] Success: Successfully posted '{entry.title}' with {len(photo_paths)} images!")
                             new_processed_links.append(entry_link)
                         else:
                             print(f"  [!] Fail: Skipping memory logging because post failed.")
