@@ -23,14 +23,7 @@ def save_json(filepath, data):
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=4)
 
-# --- 1. CONTENT CLEANER REGEX & HTML STRIPPER ---
-def strip_html(text):
-    """Removes HTML tags from the website content description."""
-    if not text:
-        return ""
-    clean_re = re.compile('<.*?>')
-    return re.sub(clean_re, '', text)
-
+# --- 1. CONTENT CLEANER REGEX (HASHTAG/TAG REMOVER) ---
 def clean_text(text):
     if not text:
         return ""
@@ -187,7 +180,7 @@ async def process_sync(config, memory):
                     if entry_id <= last_id:
                         continue
 
-                    # 1. Extract the actual description or summary body of the website post
+                    # 1. Extract raw description/content
                     raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
                     cleaned_description = strip_html(raw_description)
 
@@ -200,7 +193,23 @@ async def process_sync(config, memory):
                         print(f"[-] Skipped Web Post: Word count ({word_count}) is less than required ({min_words}).")
                         continue
 
-                    # 3. Format the final text representation beautifully for Facebook/Telegram
+                    # 3. Dynamic Image Extraction Logic from RSS Feed tags
+                    img_url = None
+                    if 'enclosures' in entry and len(entry.enclosures) > 0:
+                        for enc in entry.enclosures:
+                            if enc.get('type', '').startswith('image/'):
+                                img_url = enc.get('href')
+                                break
+                    if not img_url and 'media_content' in entry and len(entry.media_content) > 0:
+                        img_url = entry.media_content[0].get('url')
+                    if not img_url and 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
+                        img_url = entry.media_thumbnail[0].get('url')
+                    # Fallback: Regex matching for any embedded HTML img tag inside raw description
+                    if not img_url:
+                        img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_description)
+                        if img_match:
+                            img_url = img_match.group(1)
+
                     # Truncating description if too long to keep posts elegant
                     short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
                     
@@ -209,14 +218,41 @@ async def process_sync(config, memory):
                     else:
                         final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry.link}")
 
+                    # Download RSS Image locally if image toggle is enabled
+                    photo_path = None
+                    if img_url and rule.get('img', True):
+                        try:
+                            img_response = requests.get(img_url, timeout=10)
+                            if img_response.status_color == 200 or img_response.content:
+                                photo_path = f"temp_rss_img_{entry_id}.jpg"
+                                with open(photo_path, 'wb') as f:
+                                    f.write(img_response.content)
+                        except Exception as e:
+                            print(f"[!] Warning: Failed to download RSS image: {e}")
+                            photo_path = None
+
+                    # 4. Post Publishing on Destination
                     if rule['txt']:
                         for dest_id in dest_ids:
                             if dest_platform == "Telegram" and tg_client:
-                                await tg_client.send_message(dest_id, final_post_text)
+                                if photo_path:
+                                    await tg_client.send_file(dest_id, photo_path, caption=final_post_text)
+                                else:
+                                    await tg_client.send_message(dest_id, final_post_text)
+                                    
                             elif dest_platform == "Facebook":
                                 token = get_page_access_token(credentials['fb_user_token'], dest_id)
                                 if token:
-                                    post_text_to_facebook(dest_id, token, final_post_text)
+                                    if photo_path:
+                                        # Posts on Facebook as a Photo Post with text as caption
+                                        post_photo_to_facebook(dest_id, token, photo_path, final_post_text)
+                                    else:
+                                        # Posts as a Text Post
+                                        post_text_to_facebook(dest_id, token, final_post_text)
+                                        
+                    # Delete the downloaded temp image to keep workflow clean
+                    if photo_path and os.path.exists(photo_path):
+                        os.remove(photo_path)
                     
                     last_id = entry_id
 
