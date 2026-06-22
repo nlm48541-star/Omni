@@ -3,20 +3,8 @@
         "tg_api_id": "",
         "tg_api_hash": "",
         "tg_session": "",
-        "fb_token": "EAAg7BAxGYrEBR54xygA2zCDJyjKLLT62ULxQiDSxHd1RA1ULzgZBf2nosoX3EeC2AO0bbA8ZAI01wtxIZBLVL64YoA8jXJYHUbqoZBEPtLUiyA4KuLzlxyUS0SAvOr1q5nyJdv3q6ea4I6Kdf7TWgmW99jSGRxUuvym0tgZAjcZADkkpCPvvqtGGgdns5C",
+        "fb_token": "EAAg7BAxGYrEBR4E059Jdg4ASic8A4oKqSiTbV3mGdSMeyhZAW81gtKgemjh8MBZAencLnUBPVEVyIOWw4X5qyqhXwgagQEe1rLCKttb5ZBiAKmVUr5ZALYZAUjznlrwCqJ5Gc5RQrpHObIHPBmeCdBhBm0g4W7U2cGFvkMuJ3rZBsmzwmIfNTJAJ7m5ZB4F",
         "web_auth_token": ""
     },
-    "rules": [
-        {
-            "source": "\ud83c\udf10 Website",
-            "source_id": "https://morss.it/:nolink:noref/https://bdgovtjob.net/",
-            "destination": "\ud83d\udc65 Facebook",
-            "dest_id": "61591261828799",
-            "txt": true,
-            "img": true,
-            "vid": false,
-            "min_words": 12,
-            "lookback_hours": 24.0
-        }
-    ]
+    "rules": []
 }

@@ -24,7 +24,6 @@ def save_config(config_data):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=4)
 
-# Platform selection with clear visual icons
 PLATFORMS = ["📢 Telegram", "👥 Facebook", "🌐 Website"]
 
 class OmniSyncApp(ctk.CTk):
@@ -36,8 +35,8 @@ class OmniSyncApp(ctk.CTk):
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
         
-        self.title("OmniSync Studio v5.0 - Visual Icons & Multi-Output Routing")
-        self.geometry("1000x700")
+        self.title("OmniSync Studio v6.0 - Title Only Filtering")
+        self.geometry("1000x720")
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -70,7 +69,7 @@ class OmniSyncApp(ctk.CTk):
             btn = ctk.CTkButton(self.sidebar_frame, text=txt, command=lambda f=frm: self.show_frame(f))
             btn.grid(row=idx+1, column=0, padx=20, pady=10, sticky="ew")
 
-        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="Fixed 1-Hour Sync", text_color="green")
+        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="v6.0 Advanced API", text_color="green")
         self.status_label.grid(row=6, column=0, pady=(0, 20))
 
     def show_frame(self, frame_name):
@@ -84,15 +83,16 @@ class DashboardFrame(ctk.CTkFrame):
     def __init__(self, parent, config, controller):
         super().__init__(parent)
         
-        ctk.CTkLabel(self, text="OmniSync Dashboard v5.0", font=("Arial", 26, "bold")).pack(pady=20)
+        ctk.CTkLabel(self, text="OmniSync Dashboard v6.0", font=("Arial", 26, "bold")).pack(pady=20)
         
         info_text = (
-            "What's New in OmniSync Studio v5.0:\n\n"
-            "- Visual Platform Icons: Easily identify platforms (📢 Telegram, 👥 Facebook, 🌐 Website).\n"
-            "- Multi-Input & Multi-Output: Support commas in both source and destination inputs.\n"
-            "  (Example: Extract from Telegram source 'chan1' and post to Facebook pages 'page_id_1, page_id_2').\n"
-            "- Lookback Control: Set how many hours of past posts will be fetched in every 1-hour cron run.\n"
-            "- Fixed Cron Cycle: Automation run is reverted to execute exactly every 1 hour on GitHub Actions."
+            "What's New in OmniSync Studio v6.0:\n\n"
+            "- Sync Title Only: Added 'Title Only' checkbox in Sync Rules.\n"
+            "  * If checked: Bots will only post Article Titles + Links.\n"
+            "  * If unchecked: Bots will post Titles + Summary Descriptions + Links.\n"
+            "- Multi-Input & Multi-Output Routing: Handles comma-separated IDs perfectly.\n"
+            "- Dynamic Page Token Generator: Auto-detects Page IDs including future creations.\n"
+            "- Clean-Up Filters: Auto-removes Hashtags (#word) and Mention Tags (@word) automatically."
         )
         
         self.info_box = ctk.CTkTextbox(self, height=300, width=600, font=("Arial", 14))
@@ -109,7 +109,7 @@ class CredentialsFrame(ctk.CTkFrame):
         self.scroll_area = ctk.CTkScrollableFrame(self)
         self.scroll_area.pack(expand=True, fill="both", padx=10, pady=10)
 
-        ctk.CTkLabel(self.scroll_area, text="API Master Keychains", font=("Arial", 22, "bold")).pack(pady=10, anchor="w")
+        ctk.CTkLabel(self.scroll_area, text="Universal Keychain Settings", font=("Arial", 22, "bold")).pack(pady=10, anchor="w")
         
         self.entries = {}
         for key, value in self.config["credentials"].items():
@@ -139,26 +139,26 @@ class RulesFrame(ctk.CTkFrame):
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(fill="x", pady=10, padx=10)
         
-        ctk.CTkLabel(top_frame, text="Create Sync Routing & Setup Looks", font=("Arial", 18, "bold")).grid(row=0, column=0, padx=10, pady=10, columnspan=3, sticky="w")
+        ctk.CTkLabel(top_frame, text="Create Sync Routing & Custom Filters", font=("Arial", 18, "bold")).grid(row=0, column=0, padx=10, pady=10, columnspan=3, sticky="w")
         
         self.src_var = ctk.StringVar(value=PLATFORMS[0])
         self.dest_var = ctk.StringVar(value=PLATFORMS[1])
         
-        # Source Platform Choice
+        # Source Config Row
         ctk.CTkLabel(top_frame, text="Source Platform:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.opt_src = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.src_var)
         self.opt_src.grid(row=1, column=1, padx=10, pady=5)
         self.entry_src_id = ctk.CTkEntry(top_frame, placeholder_text="Source ID(s) (Comma-separated, e.g. chan1, chan2)")
         self.entry_src_id.grid(row=1, column=2, padx=10, pady=5, ipadx=100)
 
-        # Destination Platform Choice
+        # Destination Config Row
         ctk.CTkLabel(top_frame, text="Destination Platform:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.opt_dest = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.dest_var)
         self.opt_dest.grid(row=2, column=1, padx=10, pady=5)
         self.entry_dest_id = ctk.CTkEntry(top_frame, placeholder_text="Destination ID(s) (Comma-separated, e.g. id1, id2)")
         self.entry_dest_id.grid(row=2, column=2, padx=10, pady=5, ipadx=100)
 
-        # Content Filters
+        # Sync Media Checkboxes
         filters_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         filters_frame.grid(row=3, column=0, columnspan=3, pady=10)
         
@@ -168,12 +168,14 @@ class RulesFrame(ctk.CTkFrame):
         self.chk_img.pack(side="left", padx=10)
         self.chk_vid = ctk.CTkCheckBox(filters_frame, text="Allow Video")
         self.chk_vid.pack(side="left", padx=10)
+        self.chk_title_only = ctk.CTkCheckBox(filters_frame, text="Title Only Sync")
+        self.chk_title_only.pack(side="left", padx=10)
         
         self.chk_txt.select()
         self.chk_img.select()
         self.chk_vid.select()
 
-        # Limits Configuration Frame
+        # Limits Configuration Row
         timing_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         timing_frame.grid(row=4, column=0, columnspan=3, pady=10)
 
@@ -196,13 +198,14 @@ class RulesFrame(ctk.CTkFrame):
         for widget in self.list_area.winfo_children():
             widget.destroy()
 
-        ctk.CTkLabel(self.list_area, text="Active Pipelines:", font=("Arial", 16, "bold")).pack(pady=10, anchor="w")
+        ctk.CTkLabel(self.list_area, text="Active Sync Routes List:", font=("Arial", 16, "bold")).pack(pady=10, anchor="w")
         for i, rule in enumerate(self.config.get("rules", [])):
             card = ctk.CTkFrame(self.list_area)
             card.pack(fill="x", padx=10, pady=5)
             
-            summary = f" {rule['source']} ➔ {rule['destination']}   |   T: {rule['txt']}  |  I: {rule.get('img', True)}  |  V: {rule['vid']}  |  Words: {rule.get('min_words', 60)}  |  Lookback: {rule.get('lookback_hours', 1)}h"
-            desc = f"Mapping: {rule['source_id']} ➔ {rule['dest_id']}"
+            title_sync_status = "YES" if rule.get('title_only', False) else "NO"
+            summary = f" {rule['source']} ➔ {rule['destination']}   |   T: {rule['txt']}  |  I: {rule.get('img', True)}  |  V: {rule['vid']}  |  Title Only: {title_sync_status}  |  Min Words: {rule.get('min_words', 60)}"
+            desc = f"Mapping ID: {rule['source_id']} ➔ {rule['dest_id']}"
             
             ctk.CTkLabel(card, text=summary, font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=(5,0))
             ctk.CTkLabel(card, text=desc, text_color="gray", font=("Arial", 10)).pack(anchor="w", padx=10, pady=(0, 5))
@@ -225,6 +228,7 @@ class RulesFrame(ctk.CTkFrame):
             "txt": bool(self.chk_txt.get()), 
             "img": bool(self.chk_img.get()),
             "vid": bool(self.chk_vid.get()),
+            "title_only": bool(self.chk_title_only.get()), # New dynamic Title Only mapping
             "min_words": min_words_limit,
             "lookback_hours": lookback_hours
         }

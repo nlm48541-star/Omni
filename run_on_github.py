@@ -193,6 +193,7 @@ async def process_sync(config, memory):
                         cleaned_text = clean_text(msg.text) if msg.text else ""
                         word_count = len(cleaned_text.split())
 
+                        # Skip if the copied text is shorter than words limit
                         if rule['txt'] and word_count < min_words:
                             print(f"[-] Skipped TG Post: Word count ({word_count}) is less than required ({min_words}).")
                             continue
@@ -288,12 +289,19 @@ async def process_sync(config, memory):
                             if img_match:
                                 img_url = img_match.group(1)
 
-                        short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
+                        # Timing / Title Only Filter check
+                        title_only_flag = rule.get('title_only', False)
                         
-                        if short_description:
-                            final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry.link}")
+                        # Decide what format to upload based on "Title Only" checkbox state
+                        if title_only_flag:
+                            # Posts ONLY the Title (Completely skips links and body descriptions!)
+                            final_post_text = clean_text(f"📝 {entry.title}")
                         else:
-                            final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry.link}")
+                            short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
+                            if short_description:
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry.link}")
+                            else:
+                                final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry.link}")
 
                         # Download RSS Image
                         photo_path = None
