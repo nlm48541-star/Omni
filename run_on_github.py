@@ -285,9 +285,21 @@ async def process_sync(config, memory):
                         else:
                             entry_time = current_time
 
-                        entry_link = entry.link
+                        # --- DYNAMIC SAFE URL EXTRACTION WITH FALLBACKS ---
+                        entry_link = entry.get('link', '').strip()
+                        if not entry_link and 'links' in entry and len(entry.links) > 0:
+                            entry_link = entry.links[0].get('href', '').strip()
+                        if not entry_link:
+                            entry_link = entry.get('id', entry.get('guid', '')).strip()
+
+                        # Safety gate: Skip if absolutely no valid URL can be parsed
+                        if not entry_link or not entry_link.startswith(('http://', 'https://')):
+                            print(f"📝 Found post: {entry.title} (Published: {entry_time})")
+                            print(f"  [!] Skipped: Invalid or empty URL link.")
+                            continue
                         
                         print(f"📝 Found post: {entry.title} (Published: {entry_time})")
+                        print(f"  [~] Article URL: {entry_link}")
 
                         if entry_time < lookback_threshold:
                             print(f"  [-] Skipped: Post is older than lookback limit ({lookback_hours} hours).")
@@ -336,8 +348,8 @@ async def process_sync(config, memory):
 
                         # 4. ROBUST WEB SCRAPER FALLBACK (Scrapes actual website post for images)
                         try:
-                            print(f"  [~] Scraping website body for multiple images: {entry.link}")
-                            web_res = requests.get(entry.link, timeout=10)
+                            print(f"  [~] Scraping website body for multiple images: {entry_link}")
+                            web_res = requests.get(entry_link, timeout=10)
                             if web_res.status_code == 200:
                                 # Fetch og:image (featured image) first
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
@@ -355,7 +367,7 @@ async def process_sync(config, memory):
                                 for url in body_imgs:
                                     # Filter out icons, UI elements
                                     if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
-                                        continue
+                                            continue
                                     if url not in scraped_imgs:
                                         scraped_imgs.append(url)
                                         
@@ -370,7 +382,7 @@ async def process_sync(config, memory):
                         cleaned_img_urls = []
                         for url in img_urls[:9]:
                             if not url.startswith(('http://', 'https://')):
-                                url = urljoin(entry.link, url)
+                                url = urljoin(entry_link, url)
                             if url not in cleaned_img_urls:
                                 cleaned_img_urls.append(url)
 
@@ -383,9 +395,9 @@ async def process_sync(config, memory):
                         else:
                             short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
                             if short_description:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry.link}")
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry_link}")
                             else:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry.link}")
+                                final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry_link}")
 
                         # Download all found images locally
                         photo_paths = []
@@ -408,7 +420,6 @@ async def process_sync(config, memory):
                             for dest_id in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
                                     if photo_paths:
-                                        # Telethon natively groups multiple paths into a single Album Group!
                                         await tg_client.send_file(dest_id, photo_paths, caption=final_post_text)
                                     else:
                                         await tg_client.send_message(dest_id, final_post_text)
