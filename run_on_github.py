@@ -23,7 +23,14 @@ def save_json(filepath, data):
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=4)
 
-# --- 1. CONTENT CLEANER REGEX (HASHTAG/TAG REMOVER) ---
+# --- 1. CONTENT CLEANER REGEX & HTML STRIPPER ---
+def strip_html(text):
+    """Removes HTML tags from the website content description."""
+    if not text:
+        return ""
+    clean_re = re.compile('<.*?>')
+    return re.sub(clean_re, '', text)
+
 def clean_text(text):
     if not text:
         return ""
@@ -180,21 +187,36 @@ async def process_sync(config, memory):
                     if entry_id <= last_id:
                         continue
 
-                    cleaned_text = clean_text(entry.title + "\n\n" + entry.link)
-                    word_count = len(cleaned_text.split())
+                    # 1. Extract the actual description or summary body of the website post
+                    raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
+                    cleaned_description = strip_html(raw_description)
 
+                    # 2. Count words on the FULL post content (Title + Description Body)
+                    full_content_for_counting = clean_text(entry.title + " " + cleaned_description)
+                    word_count = len(full_content_for_counting.split())
+
+                    # Skip if the actual website post doesn't meet word limit requirements
                     if rule['txt'] and word_count < min_words:
                         print(f"[-] Skipped Web Post: Word count ({word_count}) is less than required ({min_words}).")
                         continue
 
+                    # 3. Format the final text representation beautifully for Facebook/Telegram
+                    # Truncating description if too long to keep posts elegant
+                    short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
+                    
+                    if short_description:
+                        final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry.link}")
+                    else:
+                        final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry.link}")
+
                     if rule['txt']:
                         for dest_id in dest_ids:
                             if dest_platform == "Telegram" and tg_client:
-                                await tg_client.send_message(dest_id, cleaned_text)
+                                await tg_client.send_message(dest_id, final_post_text)
                             elif dest_platform == "Facebook":
                                 token = get_page_access_token(credentials['fb_user_token'], dest_id)
                                 if token:
-                                    post_text_to_facebook(dest_id, token, cleaned_text)
+                                    post_text_to_facebook(dest_id, token, final_post_text)
                     
                     last_id = entry_id
 
