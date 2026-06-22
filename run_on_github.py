@@ -23,7 +23,14 @@ def save_json(filepath, data):
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=4)
 
-# --- 1. CONTENT CLEANER REGEX (HASHTAG/TAG REMOVER) ---
+# --- 1. CONTENT CLEANER REGEX & HTML STRIPPER ---
+def strip_html(text):
+    """Removes HTML tags from the website content description."""
+    if not text:
+        return ""
+    clean_re = re.compile('<.*?>')
+    return re.sub(clean_re, '', text)
+
 def clean_text(text):
     if not text:
         return ""
@@ -223,7 +230,8 @@ async def process_sync(config, memory):
                     if img_url and rule.get('img', True):
                         try:
                             img_response = requests.get(img_url, timeout=10)
-                            if img_response.status_color == 200 or img_response.content:
+                            # FIX STAMP: status_code is corrected from buggy status_color
+                            if img_response.status_code == 200 or img_response.content:
                                 photo_path = f"temp_rss_img_{entry_id}.jpg"
                                 with open(photo_path, 'wb') as f:
                                     f.write(img_response.content)
