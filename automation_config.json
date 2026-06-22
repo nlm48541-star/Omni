@@ -15,7 +15,7 @@
             "txt": true,
             "img": true,
             "vid": false,
-            "min_words": 60,
+            "min_words": 12,
             "lookback_hours": 24.0
         }
     ]
