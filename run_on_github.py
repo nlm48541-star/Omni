@@ -13,6 +13,14 @@ from telethon.sessions import StringSession
 CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 
+# Real Browser Headers to bypass Cloudflare / Security Blocks
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Connection': 'keep-alive'
+}
+
 # Helper functions to handle config and memory checkpoints
 def load_json(filepath, default_val):
     if os.path.exists(filepath):
@@ -346,10 +354,11 @@ async def process_sync(config, memory):
                             if url and url not in img_urls:
                                 img_urls.append(url)
 
-                        # 4. ROBUST WEB SCRAPER FALLBACK (Scrapes actual website post for images)
+                        # 4. ROBUST WEB SCRAPER FALLBACK (Scrapes actual website post for images with Chrome Headers)
                         try:
                             print(f"  [~] Scraping website body for multiple images: {entry_link}")
-                            web_res = requests.get(entry_link, timeout=10)
+                            web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
+                            print(f"  [~] Web scrape HTTP Response Status: {web_res.status_code}")
                             if web_res.status_code == 200:
                                 # Fetch og:image (featured image) first
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
@@ -357,10 +366,10 @@ async def process_sync(config, memory):
                                     og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
                                 
                                 # Temporary list to collect new scraped images
-                                temp_scraped_list = []
+                                scraped_imgs = []
                                 if og_match:
                                     page_img = og_match.group(1)
-                                    temp_scraped_list.append(page_img)
+                                    scraped_imgs.append(page_img)
 
                                 # Scan article body context for more images
                                 body_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
@@ -368,11 +377,11 @@ async def process_sync(config, memory):
                                     # Filter out icons, UI elements
                                     if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
                                             continue
-                                    if url not in temp_scraped_list:
-                                        temp_scraped_list.append(url)
+                                    if url not in scraped_imgs:
+                                        scraped_imgs.append(url)
                                         
                                 # Merge scraped images with existing RSS images safely
-                                for img in temp_scraped_list:
+                                for img in scraped_imgs:
                                     if img not in img_urls:
                                         img_urls.append(img)
                         except Exception as e:
@@ -399,13 +408,13 @@ async def process_sync(config, memory):
                             else:
                                 final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry_link}")
 
-                        # Download all found images locally
+                        # Download all found images locally using Chrome Headers
                         photo_paths = []
                         if cleaned_img_urls and rule.get('img', True):
                             for idx, url in enumerate(cleaned_img_urls):
                                 try:
                                     print(f"  [+] Downloading image {idx+1}/{len(cleaned_img_urls)}: {url}")
-                                    img_response = requests.get(url, timeout=10)
+                                    img_response = requests.get(url, headers=HEADERS, timeout=10)
                                     if img_response.status_code == 200:
                                         path = f"temp_rss_img_{hash(entry_link)}_{idx}.jpg"
                                         with open(path, 'wb') as f:
