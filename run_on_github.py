@@ -107,7 +107,6 @@ async def process_sync(config, memory):
 
     for idx, rule in enumerate(rules):
         rule_key = f"route_{idx}_{rule['source']}_{rule['destination']}"
-        last_id = memory.get(rule_key, 0)
         
         # Cleaned source and destination platforms from emoji decorators
         source_platform = clean_platform(rule['source'])
@@ -124,8 +123,12 @@ async def process_sync(config, memory):
         print(f"\n⚡ Processing Sync: {source_platform} ({len(source_ids)} sources) ➔ {dest_platform} ({len(dest_ids)} outputs)")
 
         for source_id in source_ids:
-            # --- A. TELEGRAM SOURCE AUTOMATION ---
+            # --- A. TELEGRAM SOURCE AUTOMATION (Uses sequential IDs) ---
             if source_platform == "Telegram" and tg_client:
+                last_id = memory.get(rule_key, 0)
+                if isinstance(last_id, list): # Safe fallback reset if it loaded a list
+                    last_id = 0
+                    
                 messages = await tg_client.get_messages(source_id, limit=30)
                 for msg in reversed(messages):
                     if msg.date < lookback_threshold:
@@ -174,24 +177,34 @@ async def process_sync(config, memory):
                             os.remove(video_path)
                     
                     last_id = max(last_id, msg.id)
+                memory[rule_key] = last_id
 
-            # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+            # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (Uses string URL tracking) ---
             elif source_platform == "Website":
                 feed = feedparser.parse(source_id)
+                
+                # Fetching memory list of processed URLs to prevent duplicate posts
+                processed_links = memory.get(rule_key, [])
+                if not isinstance(processed_links, list):
+                    processed_links = []
+                    
+                new_processed_links = list(processed_links)
+
                 for entry in reversed(feed.entries[:15]):
                     entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
                     if entry_time < lookback_threshold:
                         continue
 
-                    entry_id = hash(entry.link)
-                    if entry_id <= last_id:
+                    entry_link = entry.link
+                    # 100% accurate deduplication using exact URL matching
+                    if entry_link in processed_links:
                         continue
 
-                    # 1. Extract raw description/content
+                    # Extract raw description/content
                     raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
                     cleaned_description = strip_html(raw_description)
 
-                    # 2. Count words on the FULL post content (Title + Description Body)
+                    # Count words on the FULL post content (Title + Description Body)
                     full_content_for_counting = clean_text(entry.title + " " + cleaned_description)
                     word_count = len(full_content_for_counting.split())
 
@@ -200,7 +213,7 @@ async def process_sync(config, memory):
                         print(f"[-] Skipped Web Post: Word count ({word_count}) is less than required ({min_words}).")
                         continue
 
-                    # 3. Dynamic Image Extraction Logic from RSS Feed tags
+                    # Dynamic Image Extraction Logic from RSS Feed tags
                     img_url = None
                     if 'enclosures' in entry and len(entry.enclosures) > 0:
                         for enc in entry.enclosures:
@@ -230,16 +243,16 @@ async def process_sync(config, memory):
                     if img_url and rule.get('img', True):
                         try:
                             img_response = requests.get(img_url, timeout=10)
-                            # FIX STAMP: status_code is corrected from buggy status_color
                             if img_response.status_code == 200 or img_response.content:
-                                photo_path = f"temp_rss_img_{entry_id}.jpg"
+                                photo_path = f"temp_rss_img_{hash(entry_link)}.jpg"
                                 with open(photo_path, 'wb') as f:
                                     f.write(img_response.content)
                         except Exception as e:
                             print(f"[!] Warning: Failed to download RSS image: {e}")
                             photo_path = None
 
-                    # 4. Post Publishing on Destination
+                    # Post Publishing on Destination
+                    posted_successfully = False
                     if rule['txt']:
                         for dest_id in dest_ids:
                             if dest_platform == "Telegram" and tg_client:
@@ -247,25 +260,30 @@ async def process_sync(config, memory):
                                     await tg_client.send_file(dest_id, photo_path, caption=final_post_text)
                                 else:
                                     await tg_client.send_message(dest_id, final_post_text)
+                                posted_successfully = True
                                     
                             elif dest_platform == "Facebook":
                                 token = get_page_access_token(credentials['fb_user_token'], dest_id)
                                 if token:
                                     if photo_path:
                                         # Posts on Facebook as a Photo Post with text as caption
-                                        post_photo_to_facebook(dest_id, token, photo_path, final_post_text)
+                                        posted_successfully = post_photo_to_facebook(dest_id, token, photo_path, final_post_text)
                                     else:
                                         # Posts as a Text Post
-                                        post_text_to_facebook(dest_id, token, final_post_text)
+                                        posted_successfully = post_text_to_facebook(dest_id, token, final_post_text)
                                         
                     # Delete the downloaded temp image to keep workflow clean
                     if photo_path and os.path.exists(photo_path):
                         os.remove(photo_path)
                     
-                    last_id = entry_id
+                    # Store to memory if posted successfully
+                    if posted_successfully:
+                        new_processed_links.append(entry_link)
 
-        # Save checkpoint
-        memory[rule_key] = last_id
+                # Keep only the last 50 processed URLs to avoid memory bloating
+                if len(new_processed_links) > 50:
+                    new_processed_links = new_processed_links[-50:]
+                memory[rule_key] = new_processed_links
 
     if tg_client:
         await tg_client.disconnect()
