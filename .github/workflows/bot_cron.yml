@@ -2,11 +2,13 @@ name: Fixed 1-Hour OmniSync Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs exactly once every 1 hour (24/7)
-  workflow_dispatch:      # Manual run button
+    - cron: '0 * * * *'       # Runs automatically every 1 hour (subject to GitHub Actions delays)
+  workflow_dispatch:          # Allows manual trigger button in GitHub Actions tab
+  repository_dispatch:        # Allows instant external trigger from cron-job.org
+    types: [run-sync]
 
 permissions:
-  contents: write
+  contents: write             # Required to commit and push 'bot_memory.json' back to repo
 
 jobs:
   run-sync-job:
