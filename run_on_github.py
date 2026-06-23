@@ -13,6 +13,7 @@ from telethon.sessions import StringSession
 
 CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
+COOKIES_FILE = "cookies.txt"
 
 # Real Browser Headers to bypass Cloudflare / Security Blocks
 HEADERS = {
@@ -59,30 +60,53 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER (YT-DLP WITH ANDROID CLIENT BYPASS) ---
+# --- 2. YOUTUBE VIDEO DOWNLOADER (FIXED FORMAT & FALLBACK FOR SHORTS) ---
 def download_youtube_video(video_url, output_path):
-    """Downloads YouTube Video or Shorts safely in MP4 format using Android client bypass."""
+    """Downloads YouTube Video or Shorts safely avoiding strict format Limitations."""
+    
+    # ১ম চেষ্টা (First Attempt): Format specific না বলে 'best' রেখে কল করা
     ydl_opts = {
-        'format': 'best[ext=mp4]/best',
+        'format': 'best', # strict mp4 রিকোয়ারমেন্ট সরিয়ে ফেলা হয়েছে
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
-        # BYPASS YOUTUBE BOT DETECTOR: Force emulating official Android App Client
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web_creator']
+                'player_client': ['android', 'mweb']
             }
         }
     }
+
+    if os.path.exists(COOKIES_FILE):
+        ydl_opts['cookiefile'] = COOKIES_FILE
+        
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
-        return True
+            
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            return True
+        else:
+            return False
+            
     except Exception as e:
-        print(f"  [!] yt-dlp download exception: {e}")
-        return False
+        print(f"  [!] YouTube Format bypass retry inititated... ({e})")
+        # ২য় চেষ্টা (Second Fallback Attempt): যদি ভিডিওতে কোন বেস্ট ট্যাগ না থাকে, তবে বাইডিফল্ট যে ভিডিও ফরম্যাট আছে সেটাই ফোর্স ডাউনলোড করবে
+        ydl_opts_fallback = {
+            'format': 'b', 
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
+                ydl_fb.download([video_url])
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+        except Exception as fb_err:
+             print(f"  [!!!] Complete yt-dlp rejection from google: {fb_err}")
+             return False
 
-# --- 3. FACEBOOK ACCESS ENGINE WITH DETAILED ERROR LOGGING ---
+# --- 3. FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token:
         print("  [!] Error: Master User Access Token is empty!")
@@ -197,7 +221,7 @@ def post_to_wordpress(wp_url, username, app_password, title, content):
     r = requests.post(url, json=payload, headers=headers, auth=(username, app_password))
     return r.status_code == 201
 
-# --- 5. CORE PIPELINE CONTROLLER WITH MULTI-IMAGE ALBUMS ---
+# --- 5. CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -206,10 +230,8 @@ async def process_sync(config, memory):
         print("[!] No active routes configured. Exiting.")
         return memory
 
-    # Determine real platform names after clearing emojis from config string
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else "Website"))
 
-    # Safe Fallbacks for all dictionary credentials keys to prevent KeyErrors
     tg_session = credentials.get('tg_session', '')
     tg_api_id = credentials.get('tg_api_id', '')
     tg_api_hash = credentials.get('tg_api_hash', '')
@@ -217,7 +239,6 @@ async def process_sync(config, memory):
     wp_app_password = credentials.get('wp_app_password', '')
     fb_user_token = credentials.get('fb_user_token', credentials.get('fb_token', ''))
 
-    # Pre-authorize Telegram Client only if needed
     tg_client = None
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
         if tg_session and tg_api_id and tg_api_hash:
@@ -233,11 +254,9 @@ async def process_sync(config, memory):
     for idx, rule in enumerate(rules):
         rule_key = f"route_{idx}_{rule['source']}_{rule['destination']}"
         
-        # Cleaned source and destination platforms from emoji decorators
         source_platform = clean_platform(rule['source'])
         dest_platform = clean_platform(rule['destination'])
 
-        # Split multiple sources and destinations (comma-separated lists support)
         source_ids = [s.strip() for s in rule['source_id'].split(',') if s.strip()]
         dest_ids = [d.strip() for d in rule['dest_id'].split(',') if d.strip()]
         
@@ -266,12 +285,10 @@ async def process_sync(config, memory):
                         cleaned_text = clean_text(msg.text, keep_hashtags=keep_hashtags) if msg.text else ""
                         word_count = len(cleaned_text.split())
 
-                        # Skip if the copied text is shorter than words limit
                         if rule['txt'] and word_count < min_words:
                             print(f"[-] Skipped TG Post: Word count ({word_count}) is less than required ({min_words}).")
                             continue
 
-                        # Publish Texts
                         if rule['txt'] and cleaned_text:
                             for dest_id in dest_ids:
                                 if dest_platform == "Facebook":
@@ -281,7 +298,6 @@ async def process_sync(config, memory):
                                 elif dest_platform == "Website":
                                     post_to_wordpress(dest_id, wp_username, wp_app_password, "Telegram Update", cleaned_text)
 
-                        # Publish Images
                         if rule.get('img', True) and msg.photo:
                             photo_path = await msg.download_media()
                             for dest_id in dest_ids:
@@ -292,7 +308,6 @@ async def process_sync(config, memory):
                             if os.path.exists(photo_path):
                                 os.remove(photo_path)
 
-                        # Publish Videos
                         if rule['vid'] and msg.video:
                             video_path = await msg.download_media()
                             for dest_id in dest_ids:
@@ -306,7 +321,7 @@ async def process_sync(config, memory):
                         last_id = max(last_id, msg.id)
                     memory[rule_key] = last_id
 
-                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (UNCHANGED/PREVIOUS CODE) ---
                 elif source_platform == "Website":
                     feed = feedparser.parse(source_id)
                     
@@ -322,21 +337,16 @@ async def process_sync(config, memory):
                         else:
                             entry_time = current_time
 
-                        # --- DYNAMIC SAFE URL EXTRACTION WITH FALLBACKS ---
                         entry_link = entry.get('link', '').strip()
                         if not entry_link and 'links' in entry and len(entry.links) > 0:
                             entry_link = entry.links[0].get('href', '').strip()
                         if not entry_link:
                             entry_link = entry.get('id', entry.get('guid', '')).strip()
 
-                        # Safety gate: Skip if absolutely no valid URL can be parsed
                         if not entry_link or not entry_link.startswith(('http://', 'https://')):
-                            print(f"📝 Found post: {entry.title} (Published: {entry_time})")
-                            print(f"  [!] Skipped: Invalid or empty URL link.")
                             continue
                         
                         print(f"📝 Found post: {entry.title} (Published: {entry_time})")
-                        print(f"  [~] Article URL: {entry_link}")
 
                         if entry_time < lookback_threshold:
                             print(f"  [-] Skipped: Post is older than lookback limit ({lookback_hours} hours).")
@@ -346,77 +356,65 @@ async def process_sync(config, memory):
                             print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
                             continue
 
-                        # Extract description/summary
                         raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
                         cleaned_description = strip_html(raw_description)
 
-                        # Count words on full post content (Title + Body)
                         full_content_for_counting = clean_text(entry.title + " " + cleaned_description, keep_hashtags=keep_hashtags)
                         word_count = len(full_content_for_counting.split())
 
                         if rule['txt'] and word_count < min_words:
-                            print(f"  [-] Skipped: Word count ({word_count}) is less than required ({min_words}).")
                             continue
 
-                        # --- MULTI-IMAGE EXTRACTION FLOW ---
+                        # Image Grab Logic
                         img_urls = []
-                        # 1. Grab image from enclosure
                         if 'enclosures' in entry and len(entry.enclosures) > 0:
                             for enc in entry.enclosures:
                                 href = enc.get('href', '')
                                 if enc.get('type', '').startswith('image/') or href.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                                     img_urls.append(href)
-                        # 2. Grab from media tags
+                                    
                         if 'media_content' in entry and len(entry.media_content) > 0:
                             for m_content in entry.media_content:
                                 url = m_content.get('url')
                                 if url and url not in img_urls:
                                     img_urls.append(url)
+                                    
                         if 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
                             for m_thumb in entry.media_thumbnail:
                                 url = m_thumb.get('url')
                                 if url and url not in img_urls:
                                     img_urls.append(url)
-                        # 3. Grab from description HTML tags
+                                    
                         desc_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_description, re.IGNORECASE)
                         for url in desc_imgs:
                             if url and url not in img_urls:
                                 img_urls.append(url)
 
-                        # 4. ROBUST WEB SCRAPER FALLBACK (Scrapes actual website post for images with Chrome Headers)
                         try:
-                            print(f"  [~] Scraping website body for multiple images: {entry_link}")
                             web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
-                            print(f"  [~] Web scrape HTTP Response Status: {web_res.status_code}")
                             if web_res.status_code == 200:
-                                # Fetch og:image (featured image) first
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 if not og_match:
                                     og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
                                 
-                                # Temporary list to collect new scraped images
                                 scraped_imgs = []
                                 if og_match:
                                     page_img = og_match.group(1)
                                     scraped_imgs.append(page_img)
 
-                                # Scan article body context for more images
                                 body_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 for url in body_imgs:
-                                    # Filter out icons, UI elements
                                     if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
                                             continue
                                     if url not in scraped_imgs:
                                         scraped_imgs.append(url)
                                         
-                                # Merge scraped images with existing RSS images safely
                                 for img in scraped_imgs:
                                     if img not in img_urls:
                                         img_urls.append(img)
                         except Exception as e:
-                            print(f"  [!] Failed to scrape website for multi-images: {e}")
+                            pass
 
-                        # Clean relative URLs and limit total images to 9 (Facebook limit/safety)
                         cleaned_img_urls = []
                         for url in img_urls[:9]:
                             if not url.startswith(('http://', 'https://')):
@@ -424,10 +422,8 @@ async def process_sync(config, memory):
                             if url not in cleaned_img_urls:
                                 cleaned_img_urls.append(url)
 
-                        # Timing / Title Only Filter check
                         title_only_flag = rule.get('title_only', False)
                         
-                        # Format final published text
                         if title_only_flag:
                             final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags)
                         else:
@@ -437,12 +433,10 @@ async def process_sync(config, memory):
                             else:
                                 final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
 
-                        # Download all found images locally using Chrome Headers
                         photo_paths = []
                         if cleaned_img_urls and rule.get('img', True):
                             for idx, url in enumerate(cleaned_img_urls):
                                 try:
-                                    print(f"  [+] Downloading image {idx+1}/{len(cleaned_img_urls)}: {url}")
                                     img_response = requests.get(url, headers=HEADERS, timeout=10)
                                     if img_response.status_code == 200:
                                         path = f"temp_rss_img_{hash(entry_link)}_{idx}.jpg"
@@ -450,9 +444,8 @@ async def process_sync(config, memory):
                                             f.write(img_response.content)
                                         photo_paths.append(path)
                                 except Exception as e:
-                                    print(f"  [!] Warning: Failed to download RSS image {idx+1}: {e}")
+                                    pass
 
-                        # Post Publishing logic based on photo counts
                         posted_successfully = False
                         if rule['txt']:
                             for dest_id in dest_ids:
@@ -467,16 +460,12 @@ async def process_sync(config, memory):
                                     token = get_page_access_token(fb_user_token, dest_id)
                                     if token:
                                         if len(photo_paths) > 1:
-                                            # Publish as a multi-photo album post
                                             posted_successfully = post_multi_photo_to_facebook(dest_id, token, photo_paths, final_post_text)
                                         elif len(photo_paths) == 1:
-                                            # Publish as a single photo post
                                             posted_successfully = post_photo_to_facebook(dest_id, token, photo_paths[0], final_post_text)
                                         else:
-                                            # Publish as a text-only status post
                                             posted_successfully = post_text_to_facebook(dest_id, token, final_post_text)
                                             
-                        # Delete all temporary files to clean workspace
                         for path in photo_paths:
                             if os.path.exists(path):
                                 os.remove(path)
@@ -491,7 +480,7 @@ async def process_sync(config, memory):
                         new_processed_links = new_processed_links[-50:]
                     memory[rule_key] = new_processed_links
 
-                # --- C. YOUTUBE SOURCE AUTOMATION (Uses native RSS XML under the hood with Android client bypass) ---
+                # --- C. YOUTUBE SOURCE AUTOMATION ---
                 elif source_platform == "YouTube":
                     processed_links = memory.get(rule_key, [])
                     if not isinstance(processed_links, list):
@@ -501,36 +490,33 @@ async def process_sync(config, memory):
                     rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}"
                     feed = feedparser.parse(rss_url)
 
-                    for entry in reversed(feed.entries[:5]): # Scan latest 5 videos to prevent timeout limits
+                    for entry in reversed(feed.entries[:5]):
                         if 'published_parsed' in entry and entry.published_parsed:
                             entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
                         else:
                             entry_time = current_time
 
                         entry_link = entry.link
-                        print(f"📝 Found YouTube Video: {entry.title} (Published: {entry_time})")
+                        print(f"📝 Found YouTube Video: {entry.title}")
 
                         if entry_time < lookback_threshold:
-                            print(f"  [-] Skipped: Video is older than lookback limit ({lookback_hours} hours).")
+                            print(f"  [-] Skipped: Video is older than lookback limit.")
                             continue
 
                         if entry_link in processed_links:
-                            print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
+                            print(f"  [-] Skipped: Already processed previously.")
                             continue
 
-                        # Clean title for captioning
                         caption_text = clean_text(entry.title, keep_hashtags=keep_hashtags)
 
-                        # Download YouTube Video if Video Sync is enabled in UI
                         video_path = f"temp_yt_video_{hash(entry_link)}.mp4"
                         download_success = False
                         
                         if rule.get('vid', True):
-                            print(f"  [~] Downloading YouTube video via yt-dlp: {entry_link}")
                             download_success = download_youtube_video(entry_link, video_path)
                         
                         if not download_success:
-                            print("  [!] Failed to download video, falling back to link post.")
+                            print("  [!] Failed to download video natively, falling back to URL Link structure post...")
                             video_path = None
 
                         posted_successfully = False
@@ -550,22 +536,19 @@ async def process_sync(config, memory):
                                     else:
                                         posted_successfully = post_text_to_facebook(dest_id, token, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
                                         
-                        # Clean up temporary video file
                         if video_path and os.path.exists(video_path):
                             os.remove(video_path)
                             
                         if posted_successfully:
-                            print(f"  [+] Success: Successfully posted '{entry.title}' to destination!")
+                            print(f"  [+] Success: Successfully Sent data out of local loop node.")
                             new_processed_links.append(entry_link)
-                        else:
-                            print(f"  [!] Fail: Skipping memory logging because post failed.")
-
+                            
                     if len(new_processed_links) > 50:
                         new_processed_links = new_processed_links[-50:]
                     memory[rule_key] = new_processed_links
                     
             except Exception as e:
-                print(f"  [!] FATAL PIPELINE EXCEPTION during source {source_id}: {e}")
+                print(f"  [!] FATAL PIPELINE EXCEPTION: {e}")
 
     if tg_client:
         await tg_client.disconnect()
@@ -578,7 +561,7 @@ async def main():
     
     updated_memory = await process_sync(config, memory)
     save_json(MEMORY_FILE, updated_memory)
-    print("\n🎉 OmniSync Master Process Completed!")
+    print("\n🎉 OmniSync System Engine Halted!")
 
 if __name__ == "__main__":
     asyncio.run(main())
