@@ -163,7 +163,6 @@ async def process_sync(config, memory):
                         print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
                         continue
 
-                    # Group messages by Album (grouped_id) 
                     grouped_msgs = {}
                     for msg in reversed(messages):
                         if msg.date < lookback_threshold or msg.id <= last_id: continue
@@ -301,8 +300,17 @@ async def process_sync(config, memory):
                                 # DYNAMIC FULL ARTICLE EXTRACTION FOR PROTHOM ALO (BeautifulSoup Scraper Bypass)
                                 if is_prothom_alo:
                                     soup = BeautifulSoup(web_res.text, 'html.parser')
-                                    # Select all div.story-element.story-element-text blocks (the main text story elements)
+                                    # Primary Selector: Prothom Alo text story elements
                                     story_blocks = soup.select('div.story-element.story-element-text')
+                                    
+                                    # Fallback 1: Video Description / alternate story text wrappers (Guarantees Full Text for Videos/Opinions)
+                                    if not story_blocks:
+                                        story_blocks = soup.select('div.story-element-text, div.video-description, p.story-element-text')
+                                        
+                                    # Fallback 2: Any standard paragraphs in the main article body container
+                                    if not story_blocks:
+                                        story_blocks = soup.select('article p, div.story-text p')
+                                        
                                     if story_blocks:
                                         paragraphs = [b.get_text().strip() for b in story_blocks if b.get_text().strip()]
                                         if paragraphs:
@@ -318,10 +326,30 @@ async def process_sync(config, memory):
                         except Exception as e:
                             print(f"  [!] Failed full-text extraction: {e}")
 
-                        cleaned_img_urls = [url if url.startswith(('http://', 'https://')) else urljoin(entry_link, url) for url in img_urls[:9]]
-                        cleaned_img_urls = list(dict.fromkeys(cleaned_img_urls)) 
+                        # Clean relative URLs, strip CDN query parameters, and filter out duplicates
+                        cleaned_img_urls = []
+                        seen_base_urls = set()
+                        for url in img_urls[:9]:
+                            if not url.startswith(('http://', 'https://')):
+                                url = urljoin(entry_link, url)
+                            
+                            # Normalise URL to strip CDN variations (e.g. rect/sizing/compress parameters) of the same image
+                            base_url = url.split('?')[0].split('#')[0]
+                            if base_url not in seen_base_urls:
+                                seen_base_urls.add(base_url)
+                                cleaned_img_urls.append(url) # Keeps the clean original url format but exactly once
+
+                        title_only_flag = rule.get('title_only', False)
                         
-                        final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags) if rule.get('title_only', False) else clean_text(f"📝 {entry.title}\n\n{cleaned_description}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
+                        # Layout fix: Only append link if we have NO scraped full text description. 
+                        # This avoids redundant links being populated at the bottom of the complete stories.
+                        if title_only_flag:
+                            final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags)
+                        else:
+                            if cleaned_description:
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags)
+                            else:
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags)
 
                         photo_paths = []
                         if cleaned_img_urls and rule.get('img', True):
