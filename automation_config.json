@@ -73,19 +73,6 @@
             "lookback_hours": 24.0
         },
         {
-            "source": "\ud83c\udf10 Website",
-            "source_id": "https://morss.it/https://www.prothomalo.com/sports",
-            "destination": "\ud83d\udc65 Facebook",
-            "dest_id": "1245958895257137",
-            "txt": true,
-            "img": true,
-            "vid": false,
-            "title_only": false,
-            "keep_hashtags": false,
-            "min_words": 2,
-            "lookback_hours": 24.0
-        },
-        {
             "source": "\ud83d\udce2 Telegram",
             "source_id": "https://t.me/basherkella1, https://t.me/BadrulBSL",
             "destination": "\ud83d\udc65 Facebook",
