@@ -11,6 +11,16 @@ from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+# Dynamically install bs4 if missing in the Github Actions runner environment
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    import subprocess
+    import sys
+    print("  [~] Auto-installing beautifulsoup4 for HTML processing...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
+    from bs4 import BeautifulSoup
+
 CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
@@ -42,7 +52,7 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n\s*\n+', '\n\n', text).strip()
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER ---
+# --- 2. YOUTUBE VIDEO DOWNLOADER (Safest Bulletproof Format Mechanism) ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
     ydl_opts_primary = {
@@ -102,6 +112,7 @@ def post_to_wordpress(wp_url, username, app_password, title, content):
     try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
 
+# --- 5. CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -152,6 +163,7 @@ async def process_sync(config, memory):
                         print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
                         continue
 
+                    # Group messages by Album (grouped_id) 
                     grouped_msgs = {}
                     for msg in reversed(messages):
                         if msg.date < lookback_threshold or msg.id <= last_id: continue
@@ -230,13 +242,11 @@ async def process_sync(config, memory):
 
                 # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (WITH PROTHOM ALO BYPASS) ---
                 elif source_platform == "Website":
-                    # Check if the target website is Prothom Alo
                     is_prothom_alo = "prothomalo.com" in source_id
                     
                     if is_prothom_alo:
                         print(f"  [~] Prothom Alo feed override engaged. Redirecting to official global RSS feed securely...")
                         try:
-                            # Pulling the official raw feed via Requests Client with Browser Headers to safely bypass Cloudflare blocks
                             resp = requests.get("https://www.prothomalo.com/feed/", headers=HEADERS, timeout=15)
                             if resp.status_code == 200:
                                 feed = feedparser.parse(resp.content)
@@ -246,7 +256,6 @@ async def process_sync(config, memory):
                             print(f"  [!] Fallback to standard feedparser: {e}")
                             feed = feedparser.parse("https://www.prothomalo.com/feed/")
                             
-                        # Extract the target category path from original source_id (e.g. '/sports/football')
                         clean_path = ""
                         match = re.search(r'prothomalo\.com(/[a-zA-Z0-9_\-/]+)', source_id)
                         if match:
@@ -289,16 +298,30 @@ async def process_sync(config, memory):
                         try:
                             web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
                             if web_res.status_code == 200:
+                                # DYNAMIC FULL ARTICLE EXTRACTION FOR PROTHOM ALO (BeautifulSoup Scraper Bypass)
+                                if is_prothom_alo:
+                                    soup = BeautifulSoup(web_res.text, 'html.parser')
+                                    # Select all div.story-element.story-element-text blocks (the main text story elements)
+                                    story_blocks = soup.select('div.story-element.story-element-text')
+                                    if story_blocks:
+                                        paragraphs = [b.get_text().strip() for b in story_blocks if b.get_text().strip()]
+                                        if paragraphs:
+                                            # Merge the paragraphs to restore the entire, full story text!
+                                            scraped_full_text = "\n\n".join(paragraphs)
+                                            cleaned_description = scraped_full_text
+                                            print(f"  [+] Full-Text Scraped Successful! ({len(cleaned_description)} chars extracted)")
+                                
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) or re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
                                 scraped_imgs = [og_match.group(1)] if og_match else []
                                 scraped_imgs.extend([url for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) if url not in scraped_imgs and not any(l in url.lower() for l in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header'])])
                                 img_urls.extend([i for i in scraped_imgs if i not in img_urls])
-                        except Exception: pass
+                        except Exception as e:
+                            print(f"  [!] Failed full-text extraction: {e}")
 
                         cleaned_img_urls = [url if url.startswith(('http://', 'https://')) else urljoin(entry_link, url) for url in img_urls[:9]]
                         cleaned_img_urls = list(dict.fromkeys(cleaned_img_urls)) 
                         
-                        final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags) if rule.get('title_only', False) else clean_text(f"📝 {entry.title}\n\n{cleaned_description[:350]+'...' if len(cleaned_description)>350 else cleaned_description}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
+                        final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags) if rule.get('title_only', False) else clean_text(f"📝 {entry.title}\n\n{cleaned_description}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
 
                         photo_paths = []
                         if cleaned_img_urls and rule.get('img', True):
