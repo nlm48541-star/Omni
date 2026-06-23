@@ -4,6 +4,7 @@ import json
 import asyncio
 import requests
 import feedparser
+import yt_dlp
 from time import mktime
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
@@ -41,24 +42,33 @@ def strip_html(text):
     return re.sub(clean_re, '', text)
 
 def clean_text(text, keep_hashtags=False):
-    """
-    Cleans text content based on rules. Mentions (@word) are ALWAYS deleted.
-    Hashtags (#word) are conditionally deleted based on the keep_hashtags flag.
-    """
     if not text:
         return ""
-    # Always remove @mentions
     text = re.sub(r'@\w+', '', text)
-    
-    # Conditionally remove hashtags and keywords attached to them
     if not keep_hashtags:
         text = re.sub(r'#\w+', '', text)
-        
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
 
-# --- 2. FACEBOOK ACCESS ENGINE WITH DETAILED ERROR LOGGING ---
+# --- 2. YOUTUBE VIDEO DOWNLOADER (YT-DLP) ---
+def download_youtube_video(video_url, output_path):
+    """Downloads YouTube Video or Shorts safely in MP4 format (best up to 720p)."""
+    ydl_opts = {
+        'format': 'best[ext=mp4]/best',
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+        return True
+    except Exception as e:
+        print(f"  [!] yt-dlp download exception: {e}")
+        return False
+
+# --- 3. FACEBOOK ACCESS ENGINE WITH DETAILED ERROR LOGGING ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token:
         print("  [!] Error: Master User Access Token is empty!")
@@ -161,7 +171,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         print(f"  [!] Facebook Request Exception (Video): {e}")
         return False
 
-# --- 3. WEBSITE (WORDPRESS REST API) ENGINE ---
+# --- 4. WEBSITE (WORDPRESS REST API) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
     url = f"{wp_url}/wp-json/wp/v2/posts"
     headers = {'Content-Type': 'application/json'}
@@ -173,7 +183,7 @@ def post_to_wordpress(wp_url, username, app_password, title, content):
     r = requests.post(url, json=payload, headers=headers, auth=(username, app_password))
     return r.status_code == 201
 
-# --- 4. CORE PIPELINE CONTROLLER WITH MULTI-IMAGE ALBUMS ---
+# --- 5. CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -182,8 +192,8 @@ async def process_sync(config, memory):
         print("[!] No active routes configured. Exiting.")
         return memory
 
-    # Determine real platform names after clearing emojis from config string
-    clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else "Website")
+    # Fixed clean_platform with 'YouTube' added properly
+    clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else "Website"))
 
     # Safe Fallbacks for all dictionary credentials keys to prevent KeyErrors
     tg_session = credentials.get('tg_session', '')
@@ -220,7 +230,7 @@ async def process_sync(config, memory):
         min_words = rule.get("min_words", 60)
         lookback_hours = rule.get("lookback_hours", 1.0)
         lookback_threshold = current_time - timedelta(hours=lookback_hours)
-        keep_hashtags = rule.get("keep_hashtags", False) # Hashtag permission extractor
+        keep_hashtags = rule.get("keep_hashtags", False)
 
         print(f"\n⚡ Processing Sync: {source_platform} ({len(source_ids)} sources) ➔ {dest_platform} ({len(dest_ids)} outputs)")
 
@@ -419,7 +429,7 @@ async def process_sync(config, memory):
                             for idx, url in enumerate(cleaned_img_urls):
                                 try:
                                     print(f"  [+] Downloading image {idx+1}/{len(cleaned_img_urls)}: {url}")
-                                    img_response = requests.get(url, headers=HEADERS, timeout=10)
+                                    img_response = requests.get(url, timeout=10)
                                     if img_response.status_code == 200:
                                         path = f"temp_rss_img_{hash(entry_link)}_{idx}.jpg"
                                         with open(path, 'wb') as f:
@@ -466,6 +476,79 @@ async def process_sync(config, memory):
                     if len(new_processed_links) > 50:
                         new_processed_links = new_processed_links[-50:]
                     memory[rule_key] = new_processed_links
+
+            # --- C. YOUTUBE SOURCE AUTOMATION (Uses native RSS XML under the hood) ---
+            elif source_platform == "YouTube":
+                processed_links = memory.get(rule_key, [])
+                if not isinstance(processed_links, list):
+                    processed_links = []
+                new_processed_links = list(processed_links)
+
+                rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}"
+                feed = feedparser.parse(rss_url)
+
+                for entry in reversed(feed.entries[:5]): # Scan latest 5 videos to prevent timeout limits
+                    if 'published_parsed' in entry and entry.published_parsed:
+                        entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
+                    else:
+                        entry_time = current_time
+
+                    entry_link = entry.link
+                    print(f"📝 Found YouTube Video: {entry.title} (Published: {entry_time})")
+
+                    if entry_time < lookback_threshold:
+                        print(f"  [-] Skipped: Video is older than lookback limit ({lookback_hours} hours).")
+                        continue
+
+                    if entry_link in processed_links:
+                        print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
+                        continue
+
+                    # Clean title for captioning
+                    caption_text = clean_text(entry.title, keep_hashtags=keep_hashtags)
+
+                    # Download YouTube Video if Video Sync is enabled in UI
+                    video_path = f"temp_yt_video_{hash(entry_link)}.mp4"
+                    download_success = False
+                    
+                    if rule.get('vid', True):
+                        print(f"  [~] Downloading YouTube video via yt-dlp: {entry_link}")
+                        download_success = download_youtube_video(entry_link, video_path)
+                    
+                    if not download_success:
+                        print("  [!] Failed to download video, falling back to link post.")
+                        video_path = None
+
+                    posted_successfully = False
+                    for dest_id in dest_ids:
+                        if dest_platform == "Telegram" and tg_client:
+                            if video_path and os.path.exists(video_path):
+                                await tg_client.send_file(dest_id, video_path, caption=caption_text)
+                            else:
+                                await tg_client.send_message(dest_id, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
+                            posted_successfully = True
+                                
+                        elif dest_platform == "Facebook":
+                            token = get_page_access_token(fb_user_token, dest_id)
+                            if token:
+                                if video_path and os.path.exists(video_path):
+                                    posted_successfully = post_video_to_facebook(dest_id, token, video_path, caption_text)
+                                else:
+                                    posted_successfully = post_text_to_facebook(dest_id, token, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
+                                    
+                    # Clean up temporary video file
+                    if video_path and os.path.exists(video_path):
+                        os.remove(video_path)
+                        
+                    if posted_successfully:
+                        print(f"  [+] Success: Successfully posted '{entry.title}' to destination!")
+                        new_processed_links.append(entry_link)
+                    else:
+                        print(f"  [!] Fail: Skipping memory logging because post failed.")
+
+                if len(new_processed_links) > 50:
+                    new_processed_links = new_processed_links[-50:]
+                memory[rule_key] = new_processed_links
                     
             except Exception as e:
                 print(f"  [!] FATAL PIPELINE EXCEPTION: {e}")
