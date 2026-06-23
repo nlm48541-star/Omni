@@ -22,7 +22,7 @@
         },
         {
             "source": "\ud83c\udfa5 YouTube",
-            "source_id": "UC8ZFAJTyZ5eq2AcDZXPqD-w",
+            "source_id": "UC8ZFAJTyZ5eq2AcDZXPqD-w, UCMDamaVYG-EpZoZEnF5kjDw, UCZEES5ndQVmRR-JsrGJ7j3w, UCMWR0ZNFv79-HwjcRUrKnGw",
             "destination": "\ud83d\udc65 Facebook",
             "dest_id": "1235216436331436",
             "txt": true,
@@ -30,6 +30,32 @@
             "vid": true,
             "title_only": true,
             "keep_hashtags": true,
+            "min_words": 1,
+            "lookback_hours": 24.0
+        },
+        {
+            "source": "\ud83c\udf10 Website",
+            "source_id": "https://morss.it/:nolink:noref/https://bdgovtnotice.com/",
+            "destination": "\ud83d\udc65 Facebook",
+            "dest_id": "1149794398220583",
+            "txt": true,
+            "img": true,
+            "vid": false,
+            "title_only": true,
+            "keep_hashtags": false,
+            "min_words": 1,
+            "lookback_hours": 24.0
+        },
+        {
+            "source": "\ud83c\udf10 Website",
+            "source_id": "https://morss.it/:nolink:noref/https://projobsbd.com/",
+            "destination": "\ud83d\udc65 Facebook",
+            "dest_id": "1182772684915896",
+            "txt": true,
+            "img": true,
+            "vid": false,
+            "title_only": true,
+            "keep_hashtags": false,
             "min_words": 1,
             "lookback_hours": 24.0
         }
