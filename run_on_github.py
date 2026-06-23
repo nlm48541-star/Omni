@@ -15,6 +15,7 @@ CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
 
+# Real Browser Headers to bypass Cloudflare / Security Blocks
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -41,6 +42,7 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n\s*\n+', '\n\n', text).strip()
 
+# --- 2. YOUTUBE VIDEO DOWNLOADER ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
     ydl_opts_primary = {
@@ -63,6 +65,7 @@ def download_youtube_video(video_url, output_path):
         print(f"  [!] Extraction Failed! Mostly expired cookies or restriction: {e}")
         return False
 
+# --- 3. FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
@@ -149,7 +152,6 @@ async def process_sync(config, memory):
                         print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
                         continue
 
-                    # Group messages by Album (grouped_id) 
                     grouped_msgs = {}
                     for msg in reversed(messages):
                         if msg.date < lookback_threshold or msg.id <= last_id: continue
@@ -159,7 +161,6 @@ async def process_sync(config, memory):
                         else:
                             grouped_msgs[f"single_{msg.id}"] = [msg]
 
-                    # Loop logic to Process Albums / Posts as complete packages
                     for group_key, msg_list in grouped_msgs.items():
                         temp_last_id = max(m.id for m in msg_list)
                         
@@ -227,9 +228,40 @@ async def process_sync(config, memory):
                             
                     memory[rule_key] = last_id
 
-                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (WITH PROTHOM ALO BYPASS) ---
                 elif source_platform == "Website":
-                    feed = feedparser.parse(source_id)
+                    # Check if the target website is Prothom Alo
+                    is_prothom_alo = "prothomalo.com" in source_id
+                    
+                    if is_prothom_alo:
+                        print(f"  [~] Prothom Alo feed override engaged. Redirecting to official global RSS feed securely...")
+                        try:
+                            # Pulling the official raw feed via Requests Client with Browser Headers to safely bypass Cloudflare blocks
+                            resp = requests.get("https://www.prothomalo.com/feed/", headers=HEADERS, timeout=15)
+                            if resp.status_code == 200:
+                                feed = feedparser.parse(resp.content)
+                            else:
+                                feed = feedparser.parse("https://www.prothomalo.com/feed/")
+                        except Exception as e:
+                            print(f"  [!] Fallback to standard feedparser: {e}")
+                            feed = feedparser.parse("https://www.prothomalo.com/feed/")
+                            
+                        # Extract the target category path from original source_id (e.g. '/sports/football')
+                        clean_path = ""
+                        match = re.search(r'prothomalo\.com(/[a-zA-Z0-9_\-/]+)', source_id)
+                        if match:
+                            clean_path = match.group(1)
+                            
+                        if clean_path:
+                            print(f"  [~] Filtering global feed items for category path containing: '{clean_path}'")
+                            filtered = [entry for entry in feed.entries if clean_path in entry.get('link', '')]
+                            feed.entries = filtered
+                            print(f"  [+] Filtered and retained {len(feed.entries)} matching category articles.")
+                        else:
+                            print("  [!] Could not parse category path. Defaulting to full global feed.")
+                    else:
+                        feed = feedparser.parse(source_id)
+
                     processed_links = memory.get(rule_key, [])
                     if not isinstance(processed_links, list): processed_links = []
                     new_processed_links = list(processed_links)
