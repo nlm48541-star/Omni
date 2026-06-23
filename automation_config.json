@@ -61,7 +61,7 @@
         },
         {
             "source": "\ud83d\udce2 Telegram",
-            "source_id": "https://t.me/antiquotadu",
+            "source_id": "https://t.me/antiquotadu, https://t.me/basherkella",
             "destination": "\ud83d\udc65 Facebook",
             "dest_id": "1125991670605641",
             "txt": true,
