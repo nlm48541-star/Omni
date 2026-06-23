@@ -45,16 +45,15 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
 
-# --- YOUTUBE DOWNLOADER (DUAL-STRATEGY NATIVE + PROXY) ---
+# --- YOUTUBE DOWNLOADER (HIGH SECURITY BROWSER SPOOFING PROXY) ---
 def download_youtube_video(video_url, output_path):
     print("  [~] Executing Strategy 1 (Native Engine Bypass)...")
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
-        'source_address': '0.0.0.0', 
-        'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'web_safari']}}
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -63,34 +62,41 @@ def download_youtube_video(video_url, output_path):
             print("  [+] Strategy 1 SUCCESS! Video Fetched Natively.")
             return True
     except Exception as e:
-        print(f"  [!] Native Alert: YouTube Block Detected.")
+        print(f"  [!] Native Alert: YouTube IP Block Detected.")
 
-    # Strategy 2
-    print("  [~] Executing Strategy 2 (Public Proxy Network)...")
+    # Strategy 2: Ultra Browser Spoofing Headers
+    print("  [~] Executing Strategy 2 (Secured Header Proxies)...")
     public_nodes = [
-        "https://api.cobalt.tools", "https://co.eepy.ing",
-        "https://cobalt.catterall.us", "https://cobalt.api.zluo.xyz"
+        "https://api.cobalt.tools", 
+        "https://co.eepy.ing",
+        "https://cobalt.catterall.us",
+        "https://cobalt.api.zluo.xyz"
     ]
-    try:
-        wiki_req = requests.get("https://instances.cobalt.wiki/instances.json", timeout=8).json()
-        dynamic_nodes = [n['api'] for n in wiki_req if isinstance(n, dict) and 'api' in n]
-        for dn in dynamic_nodes:
-            if dn not in public_nodes: public_nodes.append(dn)
-    except Exception:
-        pass
+    
+    # We must fake our origins strictly so servers give access.
+    custom_headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Origin": "https://cobalt.tools",
+        "Referer": "https://cobalt.tools/"
+    }
 
-    custom_h = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-    for api_url in public_nodes[:10]:
+    payload = {"url": video_url}
+
+    for api_url in public_nodes:
         try:
             node_ep = api_url.rstrip('/')
-            print(f"      -> Contacting node: {node_ep}")
-            payload = {"url": video_url, "vQuality": "720", "videoQuality": "720"}
+            print(f"      -> Attempting request on {node_ep}")
             
-            req = requests.post(node_ep, headers=custom_h, json=payload, timeout=12)
-            if req.status_code in [404, 400]:
-                req = requests.post(f"{node_ep}/api/json", headers=custom_h, json=payload, timeout=12)
+            try:
+                # Newer endpoints format
+                req = requests.post(node_ep, headers=custom_headers, json=payload, timeout=12)
+            except:
+                # Fallback API endpoint
+                req = requests.post(f"{node_ep}/api/json", headers=custom_headers, json=payload, timeout=12)
                 
-            if req.status_code == 200:
+            if req.status_code in [200, 201]:
                 resp = req.json()
                 if resp.get("url"):
                     vid_req = requests.get(resp["url"], stream=True, timeout=60)
@@ -98,13 +104,16 @@ def download_youtube_video(video_url, output_path):
                         with open(output_path, 'wb') as f:
                             for chunk in vid_req.iter_content(chunk_size=1024*1024):
                                 if chunk: f.write(chunk)
+                        
                         if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-                            print("  [+] Strategy 2 SUCCESS! Proxy bypassed firewall.")
+                            print("  [+] Strategy 2 SUCCESS! Proxy Firewall completely bypassed!")
                             return True
+            else:
+                print(f"         [-] Target responded {req.status_code}, jumping node...")
         except Exception:
             pass
             
-    print("  [!!!] Critical: All global strategies exhausted!")
+    print("  [!!!] Critical: Global blockers have disabled fetching temporarily.")
     return False
 
 # --- FACEBOOK API HELPERS ---
@@ -153,7 +162,7 @@ def post_to_wordpress(wp_url, username, app_password, title, content):
     return r.status_code == 201
 
 
-# --- THE MAIN BRAIN ---
+# --- THE MAIN PROCESS ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -258,7 +267,6 @@ async def process_sync(config, memory):
                         full_content = clean_text(entry.title + " " + strip_html(r_desc), keep_hashtags)
                         if rule['txt'] and len(full_content.split()) < min_words: continue
 
-                        # Smart scraper
                         img_urls = [enc.get('href') for enc in entry.get('enclosures', []) if enc.get('href', '').endswith(('.jpg','.png'))]
                         img_urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', r_desc, re.IGNORECASE))
                         try:
@@ -305,7 +313,7 @@ async def process_sync(config, memory):
                     memory[rule_key] = new_links[-50:]
                 except Exception as e: print(f"  [!] Fail in Website loop: {e}")
 
-                # --- C. YOUTUBE VIDEO DOWNLOADER (THE MONSTER SCRIPT) ---
+            # --- C. YOUTUBE VIDEO DOWNLOADER (THE MONSTER SCRIPT) ---
             elif source_platform == "YouTube":
                 try:
                     plinks = memory.get(rule_key, [])
@@ -335,7 +343,9 @@ async def process_sync(config, memory):
                                     if dl_ok and os.path.exists(v_path):
                                         print("  [>] Transmitting raw payload via Meta servers...")
                                         posted = post_video_to_facebook(did, token, v_path, c_text)
-                                    else: posted = post_text_to_facebook(did, token, f"🎥 {entry.title}\n\n🔗 Video Source: {e_link}")
+                                    else: 
+                                        # BACKUP FAILSAFE: Post only the text Link
+                                        posted = post_text_to_facebook(did, token, f"🎥 {entry.title}\n\n🔗 Video Source: {e_link}")
                             
                             elif dest_platform == "Telegram" and tg_client:
                                 if dl_ok and os.path.exists(v_path): await tg_client.send_file(did, v_path, caption=c_text)
