@@ -2,13 +2,13 @@ name: Fixed 1-Hour OmniSync Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'       # Runs automatically every 1 hour (subject to GitHub Actions delays)
-  workflow_dispatch:          # Allows manual trigger button in GitHub Actions tab
+    - cron: '0 * * * *'       # Runs automatically every 1 hour (24/7)
+  workflow_dispatch:          # Allows manual trigger button
   repository_dispatch:        # Allows instant external trigger from cron-job.org
     types: [run-sync]
 
 permissions:
-  contents: write             # Required to commit and push 'bot_memory.json' back to repo
+  contents: write
 
 jobs:
   run-sync-job:
@@ -25,7 +25,7 @@ jobs:
 
       - name: Install Requirements
         run: |
-          pip install telethon requests feedparser
+          pip install telethon requests feedparser yt-dlp
 
       - name: Execute OmniSync Master Engine
         run: python run_on_github.py
