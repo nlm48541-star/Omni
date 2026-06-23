@@ -15,7 +15,6 @@ CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
 
-# Real Browser Headers to bypass Cloudflare / Security Blocks
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -42,7 +41,6 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n\s*\n+', '\n\n', text).strip()
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
     ydl_opts_primary = {
@@ -56,18 +54,15 @@ def download_youtube_video(video_url, output_path):
         }
     }
     
-    if os.path.exists(COOKIES_FILE):
-        ydl_opts_primary['cookiefile'] = COOKIES_FILE
+    if os.path.exists(COOKIES_FILE): ydl_opts_primary['cookiefile'] = COOKIES_FILE
         
     try:
-        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl:
-            ydl.download([video_url])
+        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl: ydl.download([video_url])
         return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
     except Exception as e:
-        print(f"  [!] JS Strategy / Extraction Failed! {e}")
+        print(f"  [!] Extraction Failed! Mostly expired cookies or restriction: {e}")
         return False
 
-# --- 3. FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
@@ -100,12 +95,10 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
     except Exception: return False
 
-# --- 4. WEBSITE (WORDPRESS) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
     try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
 
-# --- 5. CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -120,16 +113,12 @@ async def process_sync(config, memory):
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
         if tg_session and tg_api_id and tg_api_hash:
             try:
-                print("  [~] Initializing & Authenticating Telegram Telethon Client...")
-                clean_session_string = str(tg_session).strip() # Prevent hidden break line failures
-                tg_client = TelegramClient(StringSession(clean_session_string), int(tg_api_id), str(tg_api_hash))
+                print("  [~] Authenticating Telegram Telethon Client...")
+                tg_client = TelegramClient(StringSession(str(tg_session).strip()), int(tg_api_id), str(tg_api_hash))
                 await tg_client.start()
-                print("  [+] Telegram Connection Established Perfectly!")
             except Exception as e:
-                print(f"  [!!!] FATAL Telegram Session Connection Failed (Invalid API Key/Hash or string)! Details: {e}")
+                print(f"  [!!!] Telegram Session failed! Details: {e}")
                 tg_client = None
-        else:
-            print("  [!] Telegram Connection failed: Session strings are empty in the config.")
 
     current_time = datetime.now(timezone.utc)
 
@@ -147,72 +136,98 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- A. TELEGRAM SOURCE ---
+                # --- A. TELEGRAM AUTOMATION (WITH ALBUM MULTI-PICTURE SUPPORT) ---
                 if source_platform == "Telegram" and tg_client:
-                    # Smart format fix (supports full t.me links or direct username strings)
                     clean_tg_source_id = source_id.split('/')[-1] if 't.me' in source_id else source_id
-                    print(f"  [~] Searching for New Posts on TG Channel: {clean_tg_source_id}...")
                     
                     last_id = memory.get(rule_key, 0)
                     if isinstance(last_id, list): last_id = 0
                     
                     try:
-                        messages = await tg_client.get_messages(clean_tg_source_id, limit=20)
+                        messages = await tg_client.get_messages(clean_tg_source_id, limit=30)
                     except Exception as access_err:
-                        print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}': Is it Private or User string bad? Errr: {access_err}")
+                        print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
                         continue
-                        
-                    for msg in reversed(messages):
-                        if msg.date < lookback_threshold or msg.id <= last_id: 
-                            continue
-                            
-                        # Force id tracker instantly avoiding bad logic drop logic bugs later 
-                        temp_last_id = msg.id
 
-                        cleaned_text = clean_text(msg.text, keep_hashtags=keep_hashtags) if msg.text else ""
-                        word_count = len(cleaned_text.split())
-                        has_media = bool(msg.photo or msg.video)
+                    # Group messages by Album (grouped_id) 
+                    grouped_msgs = {}
+                    for msg in reversed(messages):
+                        if msg.date < lookback_threshold or msg.id <= last_id: continue
+                        if msg.grouped_id:
+                            if msg.grouped_id not in grouped_msgs: grouped_msgs[msg.grouped_id] = []
+                            grouped_msgs[msg.grouped_id].append(msg)
+                        else:
+                            grouped_msgs[f"single_{msg.id}"] = [msg]
+
+                    # Loop logic to Process Albums / Posts as complete packages
+                    for group_key, msg_list in grouped_msgs.items():
+                        temp_last_id = max(m.id for m in msg_list)
                         
-                        # Corrected Logic Bug: Allow pure text under length bounds if desired OR media files regardless of string count boundaries.
+                        raw_text = ""
+                        for m in msg_list:
+                            if m.text: 
+                                raw_text = m.text
+                                break
+                                
+                        cleaned_text = clean_text(raw_text, keep_hashtags=keep_hashtags)
+                        word_count = len(cleaned_text.split())
+                        has_media = any(bool(m.photo or m.video) for m in msg_list)
+                        
                         if not has_media and rule['txt']:
                             if word_count < min_words:
-                                print(f"  [-] TG Post ID {msg.id} Dropped: It was pure text, words({word_count}) below limit.")
+                                print(f"  [-] TG Post ID {temp_last_id} Dropped: It was pure text, words({word_count}) below limit.")
                                 last_id = max(last_id, temp_last_id)
                                 continue
 
-                        print(f"  [+] Found Fresh TG Processable Target > Msg_ID {msg.id}")
+                        photo_paths = []
+                        video_paths = []
+                        for m in msg_list:
+                            if rule.get('img', True) and m.photo:
+                                photo_paths.append(await m.download_media())
+                            elif rule.get('vid', True) and m.video:
+                                video_paths.append(await m.download_media())
+
+                        photo_paths = [p for p in photo_paths if p and os.path.exists(p)]
+                        video_paths = [p for p in video_paths if p and os.path.exists(p)]
 
                         post_successful = False
                         for dest_id in dest_ids:
                             if dest_platform == "Facebook":
                                 token = get_page_access_token(fb_user_token, dest_id)
                                 if token: 
-                                    if rule['vid'] and msg.video:
-                                        video_path = await msg.download_media()
-                                        print(f"  [>] Processing Video media TG Sync..")
-                                        if video_path and post_video_to_facebook(dest_id, token, video_path, cleaned_text):
+                                    if len(photo_paths) > 1:
+                                        print(f"  [>] Processing Album! ({len(photo_paths)} Photos) Facebook Sync..")
+                                        if post_multi_photo_to_facebook(dest_id, token, photo_paths, cleaned_text):
                                             post_successful = True
-                                        if video_path and os.path.exists(video_path): os.remove(video_path)
-                                        
-                                    elif rule.get('img', True) and msg.photo:
-                                        photo_path = await msg.download_media()
-                                        print(f"  [>] Processing Picture media TG Sync..")
-                                        if photo_path and post_photo_to_facebook(dest_id, token, photo_path, cleaned_text):
+                                    elif len(photo_paths) == 1:
+                                        print(f"  [>] Processing Single Picture Facebook Sync..")
+                                        if post_photo_to_facebook(dest_id, token, photo_paths[0], cleaned_text):
                                             post_successful = True
-                                        if photo_path and os.path.exists(photo_path): os.remove(photo_path)
-                                            
+                                    elif len(video_paths) >= 1:
+                                        print(f"  [>] Processing Video Facebook Sync..")
+                                        if post_video_to_facebook(dest_id, token, video_paths[0], cleaned_text):
+                                            post_successful = True
                                     elif rule['txt'] and cleaned_text:
-                                        print(f"  [>] Processing Only Plain-text Media TG Sync..")
+                                        print(f"  [>] Processing Plain-text Facebook Sync..")
                                         if post_text_to_facebook(dest_id, token, cleaned_text):
                                             post_successful = True
+                                            
+                            elif dest_platform == "Website":
+                                if cleaned_text:
+                                    post_to_wordpress(dest_id, credentials.get('wp_username',''), credentials.get('wp_app_password',''), "Telegram Update", cleaned_text)
+                                    post_successful = True
+
+                        for p in photo_paths + video_paths:
+                            if os.path.exists(p): os.remove(p)
 
                         if post_successful:
-                            print(f"  [$$$] Successfully Cloned Telegram data -> Platform!")
-                            last_id = max(last_id, temp_last_id)
+                            print(f"  [$$$] Successfully Pushed Telegram Post/Album to Facebook -> ID: {temp_last_id}")
+                            
+                        last_id = max(last_id, temp_last_id)
                             
                     memory[rule_key] = last_id
 
-                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (Original flawless Code) ---
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 elif source_platform == "Website":
                     feed = feedparser.parse(source_id)
                     processed_links = memory.get(rule_key, [])
