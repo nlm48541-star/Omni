@@ -71,6 +71,19 @@
             "keep_hashtags": false,
             "min_words": 1,
             "lookback_hours": 24.0
+        },
+        {
+            "source": "\ud83c\udf10 Website",
+            "source_id": "https://morss.it/:items=%7C%7C*[class=menu-item]%7C%7Cdiv%7Ca/https://www.prothomalo.com/sports/football",
+            "destination": "\ud83d\udc65 Facebook",
+            "dest_id": "1245958895257137",
+            "txt": true,
+            "img": true,
+            "vid": false,
+            "title_only": false,
+            "keep_hashtags": false,
+            "min_words": 2,
+            "lookback_hours": 24.0
         }
     ]
 }
