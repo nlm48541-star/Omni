@@ -11,15 +11,11 @@ from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-# Dynamically install bs4 if missing in the Github Actions runner environment
+# Dynamically import BeautifulSoup (bs4) safely
 try:
     from bs4 import BeautifulSoup
 except ImportError:
-    import subprocess
-    import sys
-    print("  [~] Auto-installing beautifulsoup4 for HTML processing...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
-    from bs4 import BeautifulSoup
+    BeautifulSoup = None
 
 CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
@@ -52,28 +48,56 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n\s*\n+', '\n\n', text).strip()
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER (Safest Bulletproof Format Mechanism) ---
+# --- 2. YOUTUBE VIDEO DOWNLOADER (ULTIMATE GITHUB-COPY VERSION WITH FFMPEG MERGE) ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
+    
+    # Copied format sequence 'bestvideo+bestaudio/best' allowing multiplexed high-quality merge
     ydl_opts_primary = {
-        'format': 'b', 
+        'format': 'bestvideo+bestaudio/best',
+        'merge_output_format': 'mp4',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'extractor_args': {
-            'youtube': {'player_client': ['tv', 'mweb', 'android']}
-        }
     }
     
-    if os.path.exists(COOKIES_FILE): ydl_opts_primary['cookiefile'] = COOKIES_FILE
+    if os.path.exists(COOKIES_FILE):
+        ydl_opts_primary['cookiefile'] = COOKIES_FILE
         
     try:
-        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl: ydl.download([video_url])
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl:
+            ydl.download([video_url])
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            print("  [+] Video successfully downloaded and merged!")
+            return True
     except Exception as e:
-        print(f"  [!] Extraction Failed! Mostly expired cookies or restriction: {e}")
-        return False
+        print(f"  [!] Primary high-quality download failed ({e}). Trying fallback to single file 'b' format...")
+        
+        if os.path.exists(output_path):
+            os.remove(output_path)
+            
+        ydl_opts_fallback = {
+            'format': 'b', 
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'extractor_args': {
+                'youtube': {'player_client': ['tv', 'mweb', 'android']}
+            }
+        }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts_fallback['cookiefile'] = COOKIES_FILE
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
+                ydl_fb.download([video_url])
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+        except Exception as fb_err:
+             print(f"  [!!!] Critical: YouTube stream parsing failed entirely: {fb_err}")
+             return False
+    return False
 
 # --- 3. FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
@@ -108,6 +132,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
     except Exception: return False
 
+# --- 4. WEBSITE (WORDPRESS) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
     try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
@@ -163,6 +188,7 @@ async def process_sync(config, memory):
                         print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
                         continue
 
+                    # Group messages by Album (grouped_id) 
                     grouped_msgs = {}
                     for msg in reversed(messages):
                         if msg.date < lookback_threshold or msg.id <= last_id: continue
@@ -298,16 +324,13 @@ async def process_sync(config, memory):
                             web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
                             if web_res.status_code == 200:
                                 # DYNAMIC FULL ARTICLE EXTRACTION FOR PROTHOM ALO (BeautifulSoup Scraper Bypass)
-                                if is_prothom_alo:
+                                if is_prothom_alo and BeautifulSoup:
                                     soup = BeautifulSoup(web_res.text, 'html.parser')
-                                    # Primary Selector: Prothom Alo text story elements
                                     story_blocks = soup.select('div.story-element.story-element-text')
                                     
-                                    # Fallback 1: Video Description / alternate story text wrappers (Guarantees Full Text for Videos/Opinions)
                                     if not story_blocks:
                                         story_blocks = soup.select('div.story-element-text, div.video-description, p.story-element-text')
                                         
-                                    # Fallback 2: Any standard paragraphs in the main article body container
                                     if not story_blocks:
                                         story_blocks = soup.select('article p, div.story-text p')
                                         
@@ -319,30 +342,26 @@ async def process_sync(config, memory):
                                             cleaned_description = scraped_full_text
                                             print(f"  [+] Full-Text Scraped Successful! ({len(cleaned_description)} chars extracted)")
                                 
-                                og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) or re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
+                                og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) or re.search(r'<meta[^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 scraped_imgs = [og_match.group(1)] if og_match else []
                                 scraped_imgs.extend([url for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) if url not in scraped_imgs and not any(l in url.lower() for l in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header'])])
                                 img_urls.extend([i for i in scraped_imgs if i not in img_urls])
                         except Exception as e:
                             print(f"  [!] Failed full-text extraction: {e}")
 
-                        # Clean relative URLs, strip CDN query parameters, and filter out duplicates
+                        # Deduplicate images based on clean base URL (Strips size query params to prevent duplication)
                         cleaned_img_urls = []
                         seen_base_urls = set()
                         for url in img_urls[:9]:
                             if not url.startswith(('http://', 'https://')):
                                 url = urljoin(entry_link, url)
-                            
-                            # Normalise URL to strip CDN variations (e.g. rect/sizing/compress parameters) of the same image
                             base_url = url.split('?')[0].split('#')[0]
                             if base_url not in seen_base_urls:
                                 seen_base_urls.add(base_url)
-                                cleaned_img_urls.append(url) # Keeps the clean original url format but exactly once
+                                cleaned_img_urls.append(url)
 
                         title_only_flag = rule.get('title_only', False)
                         
-                        # Layout fix: Only append link if we have NO scraped full text description. 
-                        # This avoids redundant links being populated at the bottom of the complete stories.
                         if title_only_flag:
                             final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags)
                         else:

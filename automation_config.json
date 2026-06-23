@@ -97,6 +97,19 @@
             "keep_hashtags": false,
             "min_words": 2,
             "lookback_hours": 24.0
+        },
+        {
+            "source": "\ud83c\udfa5 YouTube",
+            "source_id": "UCMDamaVYG-EpZoZEnF5kjDw, UCZEES5ndQVmRR-JsrGJ7j3w, UCMWR0ZNFv79-HwjcRUrKnGw",
+            "destination": "\ud83d\udc65 Facebook",
+            "dest_id": "1235216436331436",
+            "txt": true,
+            "img": false,
+            "vid": true,
+            "title_only": false,
+            "keep_hashtags": true,
+            "min_words": 1,
+            "lookback_hours": 48.0
         }
     ]
 }
