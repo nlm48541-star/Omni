@@ -185,7 +185,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         print(f"  [!] Facebook Request Exception (Video): {e}")
         return False
 
-# --- 4. WEBSITE (WORDPRESS REST API) ENGINE ---
+# --- 3. WEBSITE (WORDPRESS REST API) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
     url = f"{wp_url}/wp-json/wp/v2/posts"
     headers = {'Content-Type': 'application/json'}
@@ -250,7 +250,6 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- SINGLE UNIFIED TRY-EXCEPT BLOCK FOR ALL PLATFORMS ---
                 # --- A. TELEGRAM SOURCE AUTOMATION ---
                 if source_platform == "Telegram" and tg_client:
                     last_id = memory.get(rule_key, 0)
@@ -396,7 +395,7 @@ async def process_sync(config, memory):
                                     og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
                                 
                                 # Temporary list to collect new scraped images
-                                scraped_imgs = []
+                                temp_scraped_list = []
                                 if og_match:
                                     page_img = og_match.group(1)
                                     scraped_imgs.append(page_img)
@@ -407,11 +406,11 @@ async def process_sync(config, memory):
                                     # Filter out icons, UI elements
                                     if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
                                             continue
-                                    if url not in scraped_imgs:
-                                        scraped_imgs.append(url)
+                                    if url not in temp_scraped_list:
+                                        temp_scraped_list.append(url)
                                         
                                 # Merge scraped images with existing RSS images safely
-                                for img in scraped_imgs:
+                                for img in temp_scraped_list:
                                     if img not in img_urls:
                                         img_urls.append(img)
                         except Exception as e:
