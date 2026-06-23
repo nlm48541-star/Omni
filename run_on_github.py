@@ -185,7 +185,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         print(f"  [!] Facebook Request Exception (Video): {e}")
         return False
 
-# --- 3. WEBSITE (WORDPRESS REST API) ENGINE ---
+# --- 4. WEBSITE (WORDPRESS REST API) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
     url = f"{wp_url}/wp-json/wp/v2/posts"
     headers = {'Content-Type': 'application/json'}
@@ -392,10 +392,10 @@ async def process_sync(config, memory):
                                 # Fetch og:image (featured image) first
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 if not og_match:
-                                    og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
+                                    og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 
                                 # Temporary list to collect new scraped images
-                                temp_scraped_list = []
+                                scraped_imgs = []
                                 if og_match:
                                     page_img = og_match.group(1)
                                     scraped_imgs.append(page_img)
@@ -406,11 +406,11 @@ async def process_sync(config, memory):
                                     # Filter out icons, UI elements
                                     if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
                                             continue
-                                    if url not in temp_scraped_list:
-                                        temp_scraped_list.append(url)
+                                    if url not in scraped_imgs:
+                                        scraped_imgs.append(url)
                                         
                                 # Merge scraped images with existing RSS images safely
-                                for img in temp_scraped_list:
+                                for img in scraped_imgs:
                                     if img not in img_urls:
                                         img_urls.append(img)
                         except Exception as e:
@@ -491,81 +491,81 @@ async def process_sync(config, memory):
                         new_processed_links = new_processed_links[-50:]
                     memory[rule_key] = new_processed_links
 
-            # --- C. YOUTUBE SOURCE AUTOMATION (Uses native RSS XML under the hood with Safari client bypass) ---
-            elif source_platform == "YouTube":
-                processed_links = memory.get(rule_key, [])
-                if not isinstance(processed_links, list):
-                    processed_links = []
-                new_processed_links = list(processed_links)
+                # --- C. YOUTUBE SOURCE AUTOMATION (Uses native RSS XML under the hood with Safari client bypass) ---
+                elif source_platform == "YouTube":
+                    processed_links = memory.get(rule_key, [])
+                    if not isinstance(processed_links, list):
+                        processed_links = []
+                    new_processed_links = list(processed_links)
 
-                rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}"
-                feed = feedparser.parse(rss_url)
+                    rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}"
+                    feed = feedparser.parse(rss_url)
 
-                for entry in reversed(feed.entries[:5]): # Scan latest 5 videos to prevent timeout limits
-                    if 'published_parsed' in entry and entry.published_parsed:
-                        entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
-                    else:
-                        entry_time = current_time
+                    for entry in reversed(feed.entries[:5]): # Scan latest 5 videos to prevent timeout limits
+                        if 'published_parsed' in entry and entry.published_parsed:
+                            entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
+                        else:
+                            entry_time = current_time
 
-                    entry_link = entry.link
-                    print(f"📝 Found YouTube Video: {entry.title} (Published: {entry_time})")
+                        entry_link = entry.link
+                        print(f"📝 Found YouTube Video: {entry.title} (Published: {entry_time})")
 
-                    if entry_time < lookback_threshold:
-                        print(f"  [-] Skipped: Video is older than lookback limit ({lookback_hours} hours).")
-                        continue
+                        if entry_time < lookback_threshold:
+                            print(f"  [-] Skipped: Video is older than lookback limit ({lookback_hours} hours).")
+                            continue
 
-                    if entry_link in processed_links:
-                        print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
-                        continue
+                        if entry_link in processed_links:
+                            print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
+                            continue
 
-                    # Clean title for captioning
-                    caption_text = clean_text(entry.title, keep_hashtags=keep_hashtags)
+                        # Clean title for captioning
+                        caption_text = clean_text(entry.title, keep_hashtags=keep_hashtags)
 
-                    # Download YouTube Video if Video Sync is enabled in UI
-                    video_path = f"temp_yt_video_{hash(entry_link)}.mp4"
-                    download_success = False
-                    
-                    if rule.get('vid', True):
-                        print(f"  [~] Downloading YouTube video via yt-dlp: {entry_link}")
-                        download_success = download_youtube_video(entry_link, video_path)
-                    
-                    if not download_success:
-                        print("  [!] Failed to download video, falling back to link post.")
-                        video_path = None
-
-                    posted_successfully = False
-                    for dest_id in dest_ids:
-                        if dest_platform == "Telegram" and tg_client:
-                            if video_path and os.path.exists(video_path):
-                                await tg_client.send_file(dest_id, video_path, caption=caption_text)
-                            else:
-                                await tg_client.send_message(dest_id, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
-                            posted_successfully = True
-                                
-                        elif dest_platform == "Facebook":
-                            token = get_page_access_token(fb_user_token, dest_id)
-                            if token:
-                                if video_path and os.path.exists(video_path):
-                                    posted_successfully = post_video_to_facebook(dest_id, token, video_path, caption_text)
-                                else:
-                                    posted_successfully = post_text_to_facebook(dest_id, token, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
-                                    
-                    # Clean up temporary video file
-                    if video_path and os.path.exists(video_path):
-                        os.remove(video_path)
+                        # Download YouTube Video if Video Sync is enabled in UI
+                        video_path = f"temp_yt_video_{hash(entry_link)}.mp4"
+                        download_success = False
                         
-                    if posted_successfully:
-                        print(f"  [+] Success: Successfully posted '{entry.title}' to destination!")
-                        new_processed_links.append(entry_link)
-                    else:
-                        print(f"  [!] Fail: Skipping memory logging because post failed.")
+                        if rule.get('vid', True):
+                            print(f"  [~] Downloading YouTube video via yt-dlp: {entry_link}")
+                            download_success = download_youtube_video(entry_link, video_path)
+                        
+                        if not download_success:
+                            print("  [!] Failed to download video, falling back to link post.")
+                            video_path = None
 
-                if len(new_processed_links) > 50:
-                    new_processed_links = new_processed_links[-50:]
-                memory[rule_key] = new_processed_links
-                
-        except Exception as e:
-            print(f"  [!] FATAL PIPELINE EXCEPTION during source {source_id}: {e}")
+                        posted_successfully = False
+                        for dest_id in dest_ids:
+                            if dest_platform == "Telegram" and tg_client:
+                                if video_path and os.path.exists(video_path):
+                                    await tg_client.send_file(dest_id, video_path, caption=caption_text)
+                                else:
+                                    await tg_client.send_message(dest_id, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
+                                posted_successfully = True
+                                    
+                            elif dest_platform == "Facebook":
+                                token = get_page_access_token(fb_user_token, dest_id)
+                                if token:
+                                    if video_path and os.path.exists(video_path):
+                                        posted_successfully = post_video_to_facebook(dest_id, token, video_path, caption_text)
+                                    else:
+                                        posted_successfully = post_text_to_facebook(dest_id, token, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
+                                        
+                        # Clean up temporary video file
+                        if video_path and os.path.exists(video_path):
+                            os.remove(video_path)
+                            
+                        if posted_successfully:
+                            print(f"  [+] Success: Successfully posted '{entry.title}' to destination!")
+                            new_processed_links.append(entry_link)
+                        else:
+                            print(f"  [!] Fail: Skipping memory logging because post failed.")
+
+                    if len(new_processed_links) > 50:
+                        new_processed_links = new_processed_links[-50:]
+                    memory[rule_key] = new_processed_links
+                    
+            except Exception as e:
+                print(f"  [!] FATAL PIPELINE EXCEPTION during source {source_id}: {e}")
 
     if tg_client:
         await tg_client.disconnect()
