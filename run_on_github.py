@@ -13,16 +13,16 @@ from telethon.sessions import StringSession
 
 CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
-# The deadly weapon added here
-COOKIES_FILE = "cookies.txt"
 
+# Real Browser Headers to bypass Cloudflare / Security Blocks
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.5',
     'Connection': 'keep-alive'
 }
 
+# Helper functions to handle config and memory checkpoints
 def load_json(filepath, default_val):
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
@@ -33,274 +33,552 @@ def save_json(filepath, data):
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=4)
 
+# --- 1. CONTENT CLEANER REGEX & HTML STRIPPER ---
 def strip_html(text):
-    if not text: return ""
+    """Removes HTML tags from the website content description."""
+    if not text:
+        return ""
     clean_re = re.compile('<.*?>')
     return re.sub(clean_re, '', text)
 
 def clean_text(text, keep_hashtags=False):
-    if not text: return ""
+    """
+    Cleans text content based on rules. Mentions (@word) are ALWAYS deleted.
+    Hashtags (#word) are conditionally deleted based on the keep_hashtags flag.
+    """
+    if not text:
+        return ""
+    # Always remove @mentions
     text = re.sub(r'@\w+', '', text)
-    if not keep_hashtags: text = re.sub(r'#\w+', '', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    return re.sub(r'\n\s*\n+', '\n\n', text).strip()
-
-# --- ADVANCED YOUTUBE (COOKIE & ANTI-BAN BYPASS) ENGINE ---
-def download_youtube_video(video_url, output_path):
-    print("  [~] System attempting high-end Google Bot-Bypass Mechanism...")
     
+    # Conditionally remove hashtags and keywords attached to them
+    if not keep_hashtags:
+        text = re.sub(r'#\w+', '', text)
+        
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n\s*\n+', '\n\n', text)
+    return text.strip()
+
+# --- 2. YOUTUBE VIDEO DOWNLOADER (YT-DLP WITH ANDROID CLIENT BYPASS) ---
+def download_youtube_video(video_url, output_path):
+    """Downloads YouTube Video or Shorts safely in MP4 format using Android client bypass."""
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
-        # Making Youtube believe request comes from standard ios or Android phone to skip blocking
-        'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'web']}},
-        'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None
+        # BYPASS YOUTUBE BOT DETECTOR: Force emulating official Android App Client
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web_creator']
+            }
+        }
     }
-    
     try:
-        if not os.path.exists(COOKIES_FILE):
-            print("  [!] System Alert: No cookies.txt found. Action may still trigger IP blockage. Retrying directly...")
-            
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
-            
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            print("  [+] Video Bypassed & Harvested Complete! HD Chunk File generated.")
-            return True
-        else: 
-            return False
+        return True
     except Exception as e:
-        print(f"  [!!!] Critical Data center lock from Google detected: {e}")
+        print(f"  [!] yt-dlp download exception: {e}")
         return False
 
-# --- FACEBOOK API TIMEOUT INCREASED (FOR LARGE MEDIA FILES) ---
+# --- 3. FACEBOOK ACCESS ENGINE WITH DETAILED ERROR LOGGING ---
 def get_page_access_token(master_user_token, page_id):
-    if not master_user_token: return None
+    if not master_user_token:
+        print("  [!] Error: Master User Access Token is empty!")
+        return None
+    url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}"
     try:
-        r = requests.get(f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}", timeout=30).json()
-        for p in r.get('data', []):
-            if p['id'] == page_id: return p['access_token']
-    except Exception: pass
+        r = requests.get(url)
+        response_data = r.json()
+        if r.status_code == 200:
+            pages = response_data.get('data', [])
+            for page in pages:
+                if page['id'] == page_id:
+                    return page['access_token']
+            print(f"  [!] Error: Page ID {page_id} not found in your Master Token accounts list.")
+        else:
+            print(f"  [!] Facebook Token Fetch Error: {r.status_code} - {r.text}")
+    except Exception as e:
+        print(f"  [!] Facebook Token Request Exception: {e}")
     return None
 
 def post_text_to_facebook(page_id, page_token, text):
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': text, 'access_token': page_token}, timeout=45).status_code == 200
-    except: return False
+    url = f"https://graph.facebook.com/v20.0/{page_id}/feed"
+    payload = {'message': text, 'access_token': page_token}
+    try:
+        r = requests.post(url, data=payload)
+        if r.status_code == 200:
+            return True
+        else:
+            print(f"  [!] Facebook API Error (Text Post Reject): {r.status_code} - {r.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Facebook Request Exception (Text): {e}")
+        return False
 
 def post_photo_to_facebook(page_id, page_token, photo_path, caption):
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'caption': caption, 'access_token': page_token}, files={'source': open(photo_path, 'rb')}, timeout=120).status_code == 200
-    except: return False
+    url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
+    payload = {'caption': caption, 'access_token': page_token}
+    try:
+        files = {'source': open(photo_path, 'rb')}
+        r = requests.post(url, data=payload, files=files)
+        if r.status_code == 200:
+            return True
+        else:
+            print(f"  [!] Facebook API Error (Photo Post Reject): {r.status_code} - {r.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Facebook Request Exception (Photo): {e}")
+        return False
 
 def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
     try:
-        att = []
-        for path in photo_paths:
-            r = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'published': 'false', 'access_token': page_token}, files={'source': open(path, 'rb')}, timeout=120)
-            if r.status_code == 200: att.append({"media_fbid": r.json().get('id')})
-        if not att: return False
-        r_f = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}, timeout=60)
-        return r_f.status_code == 200
-    except: return False
+        attached_media = []
+        for idx, path in enumerate(photo_paths):
+            url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
+            payload = {
+                'published': 'false',
+                'access_token': page_token
+            }
+            files = {'source': open(path, 'rb')}
+            r = requests.post(url, data=payload, files=files)
+            if r.status_code == 200:
+                photo_id = r.json().get('id')
+                attached_media.append({"media_fbid": photo_id})
+                print(f"  [+] Uploaded unpublished photo {idx+1}/{len(photo_paths)}: ID {photo_id}")
+            else:
+                print(f"  [!] Error uploading photo {idx+1}: {r.status_code} - {r.text}")
+
+        if not attached_media:
+            print("  [!] Error: No photos could be uploaded to Facebook.")
+            return False
+
+        feed_url = f"https://graph.facebook.com/v20.0/{page_id}/feed"
+        feed_payload = {
+            'message': caption,
+            'attached_media': json.dumps(attached_media),
+            'access_token': page_token
+        }
+        r_feed = requests.post(feed_url, data=feed_payload)
+        if r_feed.status_code == 200:
+            return True
+        else:
+            print(f"  [!] Error publishing Album Feed Post: {r_feed.status_code} - {r_feed.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Facebook Multi-Photo Exception: {e}")
+        return False
 
 def post_video_to_facebook(page_id, page_token, video_path, caption):
-    # Added max timeout (3 mins) for Facebook processing chunk sized uploads slowly to stop random skipping error
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=180).status_code == 200
-    except: return False
+    url = f"https://graph.facebook.com/v20.0/{page_id}/videos"
+    payload = {'description': caption, 'access_token': page_token}
+    try:
+        files = {'file': open(video_path, 'rb')}
+        r = requests.post(url, data=payload, files=files)
+        if r.status_code == 200:
+            return True
+        else:
+            print(f"  [!] Facebook API Error (Video Post Reject): {r.status_code} - {r.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Facebook Request Exception (Video): {e}")
+        return False
 
+# --- 4. WEBSITE (WORDPRESS REST API) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
-    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=60).status_code == 201
-    except: return False
+    url = f"{wp_url}/wp-json/wp/v2/posts"
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        'title': title,
+        'content': content,
+        'status': 'publish'
+    }
+    r = requests.post(url, json=payload, headers=headers, auth=(username, app_password))
+    return r.status_code == 201
 
-# --- THE MAIN SYSTEM ENGINE LOOP ---
+# --- 5. CORE PIPELINE CONTROLLER WITH MULTI-IMAGE ALBUMS ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
-    if not rules: return memory
+    
+    if not rules:
+        print("[!] No active routes configured. Exiting.")
+        return memory
 
+    # Determine real platform names after clearing emojis from config string
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else "Website"))
 
+    # Safe Fallbacks for all dictionary credentials keys to prevent KeyErrors
     tg_session = credentials.get('tg_session', '')
-    tg_api_id, tg_api_hash = credentials.get('tg_api_id', ''), credentials.get('tg_api_hash', '')
+    tg_api_id = credentials.get('tg_api_id', '')
+    tg_api_hash = credentials.get('tg_api_hash', '')
+    wp_username = credentials.get('wp_username', '')
+    wp_app_password = credentials.get('wp_app_password', '')
     fb_user_token = credentials.get('fb_user_token', credentials.get('fb_token', ''))
 
+    # Pre-authorize Telegram Client only if needed
     tg_client = None
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
-        if tg_session and tg_api_id:
+        if tg_session and tg_api_id and tg_api_hash:
             try:
                 tg_client = TelegramClient(StringSession(tg_session), int(tg_api_id), tg_api_hash)
                 await tg_client.start()
-            except Exception: tg_client = None
+            except Exception as e:
+                print(f"[!] Error initializing Telegram Client: {e}")
+                tg_client = None
 
-    curr_t = datetime.now(timezone.utc)
+    current_time = datetime.now(timezone.utc)
 
     for idx, rule in enumerate(rules):
         rule_key = f"route_{idx}_{rule['source']}_{rule['destination']}"
-        s_plat, d_plat = clean_platform(rule['source']), clean_platform(rule['destination'])
-        s_ids, d_ids = [s.strip() for s in rule['source_id'].split(',') if s.strip()], [d.strip() for d in rule['dest_id'].split(',') if d.strip()]
         
-        min_words, l_thres, kh_f = rule.get("min_words", 60), curr_t - timedelta(hours=rule.get("lookback_hours", 24.0)), rule.get("keep_hashtags", False)
+        # Cleaned source and destination platforms from emoji decorators
+        source_platform = clean_platform(rule['source'])
+        dest_platform = clean_platform(rule['destination'])
 
-        print(f"\n⚡ Processing Main Operation Matrix: {s_plat} ➔ {d_plat}")
+        # Split multiple sources and destinations (comma-separated lists support)
+        source_ids = [s.strip() for s in rule['source_id'].split(',') if s.strip()]
+        dest_ids = [d.strip() for d in rule['dest_id'].split(',') if d.strip()]
+        
+        min_words = rule.get("min_words", 60)
+        lookback_hours = rule.get("lookback_hours", 1.0)
+        lookback_threshold = current_time - timedelta(hours=lookback_hours)
+        keep_hashtags = rule.get("keep_hashtags", False)
 
-        for s_id in s_ids:
-            # A. T_GRAM
-            if s_plat == "Telegram" and tg_client:
-                last_id = memory.get(rule_key, 0)
-                if isinstance(last_id, list): last_id = 0
+        print(f"\n⚡ Processing Sync: {source_platform} ({len(source_ids)} sources) ➔ {dest_platform} ({len(dest_ids)} outputs)")
+
+        for source_id in source_ids:
+            try:
+                # --- A. TELEGRAM SOURCE AUTOMATION ---
+                if source_platform == "Telegram" and tg_client:
+                    last_id = memory.get(rule_key, 0)
+                    if isinstance(last_id, list): 
+                        last_id = 0
+                        
+                    messages = await tg_client.get_messages(source_id, limit=30)
+                    for msg in reversed(messages):
+                        if msg.date < lookback_threshold:
+                            continue
+                        if msg.id <= last_id:
+                            continue
+
+                        cleaned_text = clean_text(msg.text, keep_hashtags=keep_hashtags) if msg.text else ""
+                        word_count = len(cleaned_text.split())
+
+                        # Skip if the copied text is shorter than words limit
+                        if rule['txt'] and word_count < min_words:
+                            print(f"[-] Skipped TG Post: Word count ({word_count}) is less than required ({min_words}).")
+                            continue
+
+                        # Publish Texts
+                        if rule['txt'] and cleaned_text:
+                            for dest_id in dest_ids:
+                                if dest_platform == "Facebook":
+                                    token = get_page_access_token(fb_user_token, dest_id)
+                                    if token:
+                                        post_text_to_facebook(dest_id, token, cleaned_text)
+                                elif dest_platform == "Website":
+                                    post_to_wordpress(dest_id, wp_username, wp_app_password, "Telegram Update", cleaned_text)
+
+                        # Publish Images
+                        if rule.get('img', True) and msg.photo:
+                            photo_path = await msg.download_media()
+                            for dest_id in dest_ids:
+                                if dest_platform == "Facebook":
+                                    token = get_page_access_token(fb_user_token, dest_id)
+                                    if token:
+                                        post_photo_to_facebook(dest_id, token, photo_path, cleaned_text)
+                            if os.path.exists(photo_path):
+                                os.remove(photo_path)
+
+                        # Publish Videos
+                        if rule['vid'] and msg.video:
+                            video_path = await msg.download_media()
+                            for dest_id in dest_ids:
+                                if dest_platform == "Facebook":
+                                    token = get_page_access_token(fb_user_token, dest_id)
+                                    if token:
+                                        post_video_to_facebook(dest_id, token, video_path, cleaned_text)
+                            if os.path.exists(video_path):
+                                os.remove(video_path)
+                        
+                        last_id = max(last_id, msg.id)
+                    memory[rule_key] = last_id
+
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                elif source_platform == "Website":
+                    feed = feedparser.parse(source_id)
                     
-                for msg in reversed(await tg_client.get_messages(s_id, limit=30)):
-                    if msg.date < l_thres or msg.id <= last_id: continue
-                    c_txt = clean_text(msg.text, kh_f) if msg.text else ""
-                    if rule['txt'] and len(c_txt.split()) < min_words: continue
-
-                    if rule['txt'] and c_txt:
-                        for d_id in d_ids:
-                            if d_plat == "Facebook":
-                                t = get_page_access_token(fb_user_token, d_id)
-                                if t: post_text_to_facebook(d_id, t, c_txt)
-                            elif d_plat == "Website": post_to_wordpress(d_id, credentials.get('wp_username'), credentials.get('wp_app_password'), "TG Update", c_txt)
-
-                    if rule.get('img', True) and msg.photo:
-                        p_path = await msg.download_media()
-                        for d_id in d_ids:
-                            if d_plat == "Facebook":
-                                t = get_page_access_token(fb_user_token, d_id)
-                                if t: post_photo_to_facebook(d_id, t, p_path, c_txt)
-                        if os.path.exists(p_path): os.remove(p_path)
-
-                    if rule['vid'] and msg.video:
-                        v_path = await msg.download_media()
-                        for d_id in d_ids:
-                            if d_plat == "Facebook":
-                                t = get_page_access_token(fb_user_token, d_id)
-                                if t: post_video_to_facebook(d_id, t, v_path, c_txt)
-                        if os.path.exists(v_path): os.remove(v_path)
-                    last_id = max(last_id, msg.id)
-                memory[rule_key] = last_id
-
-            # B. WEB RSS (Fixed for server timeout fails when website gives blank connection delays)
-            elif s_plat == "Website":
-                try:
-                    feed, p_links = feedparser.parse(s_id), memory.get(rule_key, [])
-                    if not isinstance(p_links, list): p_links = []
-                    new_links = list(p_links)
-
-                    for e in reversed(feed.entries[:15]):
-                        e_time = datetime.fromtimestamp(mktime(e.published_parsed), timezone.utc) if 'published_parsed' in e else curr_t
-                        e_lnk = e.get('link', e.get('id', '')).strip()
+                    processed_links = memory.get(rule_key, [])
+                    if not isinstance(processed_links, list):
+                        processed_links = []
                         
-                        if not e_lnk.startswith('http') or e_time < l_thres or e_lnk in p_links: continue
+                    new_processed_links = list(processed_links)
 
-                        r_d = e.summary if 'summary' in e else e.description if 'description' in e else ""
-                        c_desc, f_cnt = strip_html(r_d), clean_text(e.title + " " + strip_html(r_d), kh_f)
-                        if rule['txt'] and len(f_cnt.split()) < min_words: continue
+                    for entry in reversed(feed.entries[:15]):
+                        if 'published_parsed' in entry and entry.published_parsed:
+                            entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
+                        else:
+                            entry_time = current_time
 
-                        img_urls = [enc.get('href') for enc in e.get('enclosures', []) if enc.get('href', '').endswith(('.jpg', '.png'))]
-                        img_urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', r_d, re.IGNORECASE))
+                        # --- DYNAMIC SAFE URL EXTRACTION WITH FALLBACKS ---
+                        entry_link = entry.get('link', '').strip()
+                        if not entry_link and 'links' in entry and len(entry.links) > 0:
+                            entry_link = entry.links[0].get('href', '').strip()
+                        if not entry_link:
+                            entry_link = entry.get('id', entry.get('guid', '')).strip()
+
+                        # Safety gate: Skip if absolutely no valid URL can be parsed
+                        if not entry_link or not entry_link.startswith(('http://', 'https://')):
+                            print(f"📝 Found post: {entry.title} (Published: {entry_time})")
+                            print(f"  [!] Skipped: Invalid or empty URL link.")
+                            continue
+                        
+                        print(f"📝 Found post: {entry.title} (Published: {entry_time})")
+                        print(f"  [~] Article URL: {entry_link}")
+
+                        if entry_time < lookback_threshold:
+                            print(f"  [-] Skipped: Post is older than lookback limit ({lookback_hours} hours).")
+                            continue
+
+                        if entry_link in processed_links:
+                            print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
+                            continue
+
+                        # Extract description/summary
+                        raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
+                        cleaned_description = strip_html(raw_description)
+
+                        # Count words on full post content (Title + Body)
+                        full_content_for_counting = clean_text(entry.title + " " + cleaned_description, keep_hashtags=keep_hashtags)
+                        word_count = len(full_content_for_counting.split())
+
+                        if rule['txt'] and word_count < min_words:
+                            print(f"  [-] Skipped: Word count ({word_count}) is less than required ({min_words}).")
+                            continue
+
+                        # --- MULTI-IMAGE EXTRACTION FLOW ---
+                        img_urls = []
+                        # 1. Grab image from enclosure
+                        if 'enclosures' in entry and len(entry.enclosures) > 0:
+                            for enc in entry.enclosures:
+                                href = enc.get('href', '')
+                                if enc.get('type', '').startswith('image/') or href.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                                    img_urls.append(href)
+                        # 2. Grab from media tags
+                        if 'media_content' in entry and len(entry.media_content) > 0:
+                            for m_content in entry.media_content:
+                                url = m_content.get('url')
+                                if url and url not in img_urls:
+                                    img_urls.append(url)
+                        if 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
+                            for m_thumb in entry.media_thumbnail:
+                                url = m_thumb.get('url')
+                                if url and url not in img_urls:
+                                    img_urls.append(url)
+                        # 3. Grab from description HTML tags
+                        desc_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_description, re.IGNORECASE)
+                        for url in desc_imgs:
+                            if url and url not in img_urls:
+                                img_urls.append(url)
+
+                        # 4. ROBUST WEB SCRAPER FALLBACK (Scrapes actual website post for images with Chrome Headers)
                         try:
-                            # 15s delay proxy server bypass request block error fix.
-                            web_res = requests.get(e_lnk, headers=HEADERS, timeout=15)
+                            print(f"  [~] Scraping website body for multiple images: {entry_link}")
+                            web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
+                            print(f"  [~] Web scrape HTTP Response Status: {web_res.status_code}")
                             if web_res.status_code == 200:
-                                o_m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
-                                if o_m and o_m.group(1) not in img_urls: img_urls.insert(0, o_m.group(1))
-                        except Exception: pass
+                                # Fetch og:image (featured image) first
+                                og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
+                                if not og_match:
+                                    og_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', web_res.text, re.IGNORECASE)
+                                
+                                # Temporary list to collect new scraped images
+                                scraped_imgs = []
+                                if og_match:
+                                    page_img = og_match.group(1)
+                                    scraped_imgs.append(page_img)
 
-                        cln_img_urls = [u if u.startswith('http') else urljoin(e_lnk, u) for u in img_urls[:9]]
-                        c_ti = clean_text(f"📝 {e.title}", kh_f)
-                        final_tx = c_ti if rule.get('title_only', False) else f"{c_ti}\n\n{c_desc[:350]}...\n\n🔗 {e_lnk}"
+                                # Scan article body context for more images
+                                body_imgs = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
+                                for url in body_imgs:
+                                    # Filter out icons, UI elements
+                                    if any(logo in url.lower() for logo in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header']):
+                                            continue
+                                    if url not in scraped_imgs:
+                                        scraped_imgs.append(url)
+                                        
+                                # Merge scraped images with existing RSS images safely
+                                for img in scraped_imgs:
+                                    if img not in img_urls:
+                                        img_urls.append(img)
+                        except Exception as e:
+                            print(f"  [!] Failed to scrape website for multi-images: {e}")
 
+                        # Clean relative URLs and limit total images to 9 (Facebook limit/safety)
+                        cleaned_img_urls = []
+                        for url in img_urls[:9]:
+                            if not url.startswith(('http://', 'https://')):
+                                url = urljoin(entry_link, url)
+                            if url not in cleaned_img_urls:
+                                cleaned_img_urls.append(url)
+
+                        # Timing / Title Only Filter check
+                        title_only_flag = rule.get('title_only', False)
+                        
+                        # Format final published text
+                        if title_only_flag:
+                            final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags)
+                        else:
+                            short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
+                            if short_description:
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
+                            else:
+                                final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
+
+                        # Download all found images locally using Chrome Headers
                         photo_paths = []
-                        if cln_img_urls and rule.get('img', True):
-                            for idx, url in enumerate(cln_img_urls):
+                        if cleaned_img_urls and rule.get('img', True):
+                            for idx, url in enumerate(cleaned_img_urls):
                                 try:
-                                    img_r = requests.get(url, headers=HEADERS, timeout=20)
-                                    if img_r.status_code == 200:
-                                        pt = f"tmpr_{hash(e_lnk)}_{idx}.jpg"
-                                        with open(pt, 'wb') as fl: fl.write(img_r.content)
-                                        photo_paths.append(pt)
-                                except Exception: pass
+                                    print(f"  [+] Downloading image {idx+1}/{len(cleaned_img_urls)}: {url}")
+                                    img_response = requests.get(url, headers=HEADERS, timeout=10)
+                                    if img_response.status_code == 200:
+                                        path = f"temp_rss_img_{hash(entry_link)}_{idx}.jpg"
+                                        with open(path, 'wb') as f:
+                                            f.write(img_response.content)
+                                        photo_paths.append(path)
+                                except Exception as e:
+                                    print(f"  [!] Warning: Failed to download RSS image {idx+1}: {e}")
 
-                        posted = False
+                        # Post Publishing logic based on photo counts
+                        posted_successfully = False
                         if rule['txt']:
-                            for did in d_ids:
-                                if d_plat == "Telegram" and tg_client:
-                                    if photo_paths: await tg_client.send_file(did, photo_paths, caption=final_tx)
-                                    else: await tg_client.send_message(did, final_tx)
-                                    posted = True
-                                elif d_plat == "Facebook":
-                                    t = get_page_access_token(fb_user_token, did)
-                                    if t:
-                                        if len(photo_paths) > 1: posted = post_multi_photo_to_facebook(did, t, photo_paths, final_tx)
-                                        elif len(photo_paths) == 1: posted = post_photo_to_facebook(did, t, photo_paths[0], final_tx)
-                                        else: posted = post_text_to_facebook(did, t, final_tx)
-                                            
-                        for pt in photo_paths:
-                            if os.path.exists(pt): os.remove(pt)
-                        if posted:
-                            print(f"  [+] Synced Latest Website Release Published Successfully! >> {e.title}")
-                            new_links.append(e_lnk)
-                            
-                    memory[rule_key] = new_links[-50:]
-                except Exception as ex: print(f"  [!] Fail in Secure Request Flow. Network API delay hit -> Website timeout Error!")
-
-            # --- C. YOUTUBE COOKIE MASTER SCRIPT ---
-            elif s_plat == "YouTube":
-                try:
-                    plinks = memory.get(rule_key, [])
-                    if not isinstance(plinks, list): plinks = []
-                    new_links = list(plinks)
-
-                    feed = feedparser.parse(f"https://www.youtube.com/feeds/videos.xml?channel_id={s_id}")
-
-                    for e in reversed(feed.entries[:5]):
-                        e_time = datetime.fromtimestamp(mktime(e.published_parsed), timezone.utc) if 'published_parsed' in e else curr_t
-                        e_lnk = e.link
-                        
-                        if e_time < l_thres or e_lnk in plinks: continue
-                        print(f"\n📺 Analyzing Unprocessed Missing Server Entry Frame >> {e.title}")
-
-                        c_text = clean_text(e.title, kh_f)
-                        v_path = f"tmp_v_{hash(e_lnk)}.mp4"
-                        
-                        dl_ok = False
-                        if rule.get('vid', True):
-                            dl_ok = download_youtube_video(e_lnk, v_path)
-                            
-                        posted = False
-                        for did in d_ids:
-                            if d_plat == "Facebook":
-                                t = get_page_access_token(fb_user_token, did)
-                                if t:
-                                    if dl_ok and os.path.exists(v_path):
-                                        print("  [>] Transmitting fully processed mp4 object backlink structure chunk network block Wait approximately roughly ±60 sec !!")
-                                        posted = post_video_to_facebook(did, t, v_path, c_text)
+                            for dest_id in dest_ids:
+                                if dest_platform == "Telegram" and tg_client:
+                                    if photo_paths:
+                                        await tg_client.send_file(dest_id, photo_paths, caption=final_post_text)
                                     else:
-                                        print("  [X] Failed native pull due to Extreme IP blockage. Doing Link Output Only Text Strategy Mode >> Post...")
-                                        posted = post_text_to_facebook(did, t, f"🎥 {e.title}\n\n🔗 Source Watch: {e_lnk}")
-                            
-                            elif d_plat == "Telegram" and tg_client:
-                                if dl_ok and os.path.exists(v_path):
-                                    await tg_client.send_file(did, v_path, caption=c_text)
-                                else: await tg_client.send_message(did, f"🎥 {e.title}\n\nWatch here: {e_lnk}")
-                                posted = True
+                                        await tg_client.send_message(dest_id, final_post_text)
+                                    posted_successfully = True
+                                        
+                                elif dest_platform == "Facebook":
+                                    token = get_page_access_token(fb_user_token, dest_id)
+                                    if token:
+                                        if len(photo_paths) > 1:
+                                            # Publish as a multi-photo album post
+                                            posted_successfully = post_multi_photo_to_facebook(dest_id, token, photo_paths, final_post_text)
+                                        elif len(photo_paths) == 1:
+                                            # Publish as a single photo post
+                                            posted_successfully = post_photo_to_facebook(dest_id, token, photo_paths[0], final_post_text)
+                                        else:
+                                            # Publish as a text-only status post
+                                            posted_successfully = post_text_to_facebook(dest_id, token, final_post_text)
+                                            
+                        # Delete all temporary files to clean workspace
+                        for path in photo_paths:
+                            if os.path.exists(path):
+                                os.remove(path)
+                        
+                        if posted_successfully:
+                            print(f"  [+] Success: Successfully posted '{entry.title}' with {len(photo_paths)} images!")
+                            new_processed_links.append(entry_link)
+                        else:
+                            print(f"  [!] Fail: Skipping memory logging because post failed.")
 
-                        if v_path and os.path.exists(v_path): os.remove(v_path)
-                        if posted:
-                            new_links.append(e_lnk)
-                            print("  [$$$] Upload Action Authenticated Safe Pass Sent Execution Loop Data Successful OK!")
-                            
-                    memory[rule_key] = new_links[-50:]
-                except Exception as ex: print(f"  [!] Global Application Layer Failed Target Sync {ex}")
+                    if len(new_processed_links) > 50:
+                        new_processed_links = new_processed_links[-50:]
+                    memory[rule_key] = new_processed_links
 
-    if tg_client: await tg_client.disconnect()
+                # --- C. YOUTUBE SOURCE AUTOMATION (Uses native RSS XML under the hood with Android client bypass) ---
+                elif source_platform == "YouTube":
+                    processed_links = memory.get(rule_key, [])
+                    if not isinstance(processed_links, list):
+                        processed_links = []
+                    new_processed_links = list(processed_links)
+
+                    rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}"
+                    feed = feedparser.parse(rss_url)
+
+                    for entry in reversed(feed.entries[:5]): # Scan latest 5 videos to prevent timeout limits
+                        if 'published_parsed' in entry and entry.published_parsed:
+                            entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
+                        else:
+                            entry_time = current_time
+
+                        entry_link = entry.link
+                        print(f"📝 Found YouTube Video: {entry.title} (Published: {entry_time})")
+
+                        if entry_time < lookback_threshold:
+                            print(f"  [-] Skipped: Video is older than lookback limit ({lookback_hours} hours).")
+                            continue
+
+                        if entry_link in processed_links:
+                            print(f"  [-] Skipped: Already processed previously (Duplicate Guard).")
+                            continue
+
+                        # Clean title for captioning
+                        caption_text = clean_text(entry.title, keep_hashtags=keep_hashtags)
+
+                        # Download YouTube Video if Video Sync is enabled in UI
+                        video_path = f"temp_yt_video_{hash(entry_link)}.mp4"
+                        download_success = False
+                        
+                        if rule.get('vid', True):
+                            print(f"  [~] Downloading YouTube video via yt-dlp: {entry_link}")
+                            download_success = download_youtube_video(entry_link, video_path)
+                        
+                        if not download_success:
+                            print("  [!] Failed to download video, falling back to link post.")
+                            video_path = None
+
+                        posted_successfully = False
+                        for dest_id in dest_ids:
+                            if dest_platform == "Telegram" and tg_client:
+                                if video_path and os.path.exists(video_path):
+                                    await tg_client.send_file(dest_id, video_path, caption=caption_text)
+                                else:
+                                    await tg_client.send_message(dest_id, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
+                                posted_successfully = True
+                                    
+                            elif dest_platform == "Facebook":
+                                token = get_page_access_token(fb_user_token, dest_id)
+                                if token:
+                                    if video_path and os.path.exists(video_path):
+                                        posted_successfully = post_video_to_facebook(dest_id, token, video_path, caption_text)
+                                    else:
+                                        posted_successfully = post_text_to_facebook(dest_id, token, f"🎥 {entry.title}\n\nWatch here: {entry_link}")
+                                        
+                        # Clean up temporary video file
+                        if video_path and os.path.exists(video_path):
+                            os.remove(video_path)
+                            
+                        if posted_successfully:
+                            print(f"  [+] Success: Successfully posted '{entry.title}' to destination!")
+                            new_processed_links.append(entry_link)
+                        else:
+                            print(f"  [!] Fail: Skipping memory logging because post failed.")
+
+                    if len(new_processed_links) > 50:
+                        new_processed_links = new_processed_links[-50:]
+                    memory[rule_key] = new_processed_links
+                    
+            except Exception as e:
+                print(f"  [!] FATAL PIPELINE EXCEPTION during source {source_id}: {e}")
+
+    if tg_client:
+        await tg_client.disconnect()
+        
     return memory
 
 async def main():
-    u = await process_sync(load_json(CONFIG_FILE, {}), load_json(MEMORY_FILE, {}))
-    save_json(MEMORY_FILE, u)
-    print("\n[■] Shutting down Main Instance Controller ")
+    config = load_json(CONFIG_FILE, {})
+    memory = load_json(MEMORY_FILE, {})
+    
+    updated_memory = await process_sync(config, memory)
+    save_json(MEMORY_FILE, updated_memory)
+    print("\n🎉 OmniSync Master Process Completed!")
 
 if __name__ == "__main__":
     asyncio.run(main())
