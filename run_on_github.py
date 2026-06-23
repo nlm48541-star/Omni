@@ -244,22 +244,22 @@ async def process_sync(config, memory):
                 except Exception as ex: print(f"  [!] Fail in Web Flow: {ex}")
 
             # --- C. YOUTUBE COOKIE MASTER SCRIPT ---
-            elif source_platform == "YouTube":
+            elif s_plat == "YouTube":
                 try:
                     plinks = memory.get(rule_key, [])
                     if not isinstance(plinks, list): plinks = []
                     new_links = list(plinks)
 
-                    feed = feedparser.parse(f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}")
+                    feed = feedparser.parse(f"https://www.youtube.com/feeds/videos.xml?channel_id={s_id}")
 
                     for e in reversed(feed.entries[:5]):
-                        e_time = datetime.fromtimestamp(mktime(e.published_parsed), timezone.utc) if 'published_parsed' in e else current_time
+                        e_time = datetime.fromtimestamp(mktime(e.published_parsed), timezone.utc) if 'published_parsed' in e else curr_t
                         e_lnk = e.link
                         
-                        if e_time < lookback_threshold or e_lnk in plinks: continue
+                        if e_time < l_thres or e_lnk in plinks: continue
                         print(f"\n📺 YT Download Core Tracking Node Access : {e.title}")
 
-                        c_text = clean_text(e.title, keep_hashtags)
+                        c_text = clean_text(e.title, kh_f)
                         v_path = f"tmp_v_{hash(e_lnk)}.mp4"
                         
                         dl_ok = False
