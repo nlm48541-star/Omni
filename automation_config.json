@@ -48,7 +48,7 @@
         },
         {
             "source": "\ud83d\udce2 Telegram",
-            "source_id": "https://t.me/warnewsbysakib",
+            "source_id": "warnewsbysakib",
             "destination": "\ud83d\udc65 Facebook",
             "dest_id": "1169219789611878",
             "txt": true,
