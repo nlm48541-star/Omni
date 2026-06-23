@@ -34,14 +34,11 @@ def save_json(filepath, data):
         json.dump(data, f, indent=4)
 
 def strip_html(text):
-    if not text:
-        return ""
-    clean_re = re.compile('<.*?>')
-    return re.sub(clean_re, '', text)
+    if not text: return ""
+    return re.sub(re.compile('<.*?>'), '', text)
 
 def clean_text(text, keep_hashtags=False):
-    if not text:
-        return ""
+    if not text: return ""
     text = re.sub(r'@\w+', '', text)
     if not keep_hashtags:
         text = re.sub(r'#\w+', '', text)
@@ -49,53 +46,54 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER (ULTIMATE COOKIE & BOT BYPASS) ---
+# --- 2. YOUTUBE VIDEO DOWNLOADER (JS CHALLENGE & FORMAT ERROR KILLER) ---
 def download_youtube_video(video_url, output_path):
-    print("  [~] Attempting Secure Google-Bypass YT Download...")
+    print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
     
-    # 1st Attempt: Android emulation trick
-    ydl_opts = {
-        'format': 'best',
+    # কৌশল ১: Natural Cookie Extract & Advanced Audio-Video Multiplexing ('bv*+ba/b' allows bypass format limits)
+    ydl_opts_primary = {
+        'format': 'bv*+ba/b',
+        'merge_output_format': 'mp4',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
-        'nocheckcertificate': True,
-        'extractor_args': {
-            'youtube': {'player_client': ['android']}
-        }
+        'nocheckcertificate': True
     }
-
+    
     if os.path.exists(COOKIES_FILE):
-        ydl_opts['cookiefile'] = COOKIES_FILE
+        ydl_opts_primary['cookiefile'] = COOKIES_FILE
         
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl:
             ydl.download([video_url])
-            
         if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             return True
-        else:
-            return False
-            
     except Exception as e:
-        print(f"  [!] YouTube primary block triggered. Going dark mode fallback... ({e})")
-        # 2nd Attempt: Completely stripped parameters
-        ydl_opts_fallback = {
-            'format': 'b', 
+        print(f"  [!] JS Strategy Failed, Enganging JS-challenge immune (TV-Client) Mode! ({e})")
+        if os.path.exists(output_path): os.remove(output_path)
+            
+        # কৌশল ২: TV API Client Extraction. (TV APIs don't verify n-challenges like normal browsers)
+        ydl_opts_secondary = {
+            'format': 'bv*+ba/b',
+            'merge_output_format': 'mp4',
             'outtmpl': output_path,
             'quiet': True,
+            'no_warnings': True,
             'nocheckcertificate': True,
+            'extractor_args': {
+                'youtube': {'player_client': ['tv', 'web']}
+            }
         }
-        # CRUCIAL FIX: Inject cookies into fallback mechanism as well
+        
         if os.path.exists(COOKIES_FILE):
-            ydl_opts_fallback['cookiefile'] = COOKIES_FILE
+            ydl_opts_secondary['cookiefile'] = COOKIES_FILE
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
-                ydl_fb.download([video_url])
+            with yt_dlp.YoutubeDL(ydl_opts_secondary) as ydl2:
+                ydl2.download([video_url])
             return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
         except Exception as fb_err:
-             print(f"  [!!!] Critical bot block from Google (Needs Fresh cookies.txt): {fb_err}")
+             print(f"  [!!!] Video data totally withheld by YouTube. Switching logic...: {fb_err}")
              return False
 
 # --- 3. FACEBOOK ACCESS ENGINE ---
@@ -170,14 +168,14 @@ async def process_sync(config, memory):
         dest_ids = [d.strip() for d in rule['dest_id'].split(',') if d.strip()]
         
         min_words = rule.get("min_words", 60)
-        lookback_threshold = current_time - timedelta(hours=rule.get("lookback_hours", 1.0))
+        lookback_threshold = current_time - timedelta(hours=rule.get("lookback_hours", 24.0))
         keep_hashtags = rule.get("keep_hashtags", False)
 
         print(f"\n⚡ Processing Sync: {source_platform} ({len(source_ids)} sources) ➔ {dest_platform} ({len(dest_ids)} outputs)")
 
         for source_id in source_ids:
             try:
-                # --- A. TELEGRAM SOURCE AUTOMATION ---
+                # --- A. TELEGRAM SOURCE ---
                 if source_platform == "Telegram" and tg_client:
                     last_id = memory.get(rule_key, 0)
                     if isinstance(last_id, list): last_id = 0
@@ -213,7 +211,7 @@ async def process_sync(config, memory):
                         last_id = max(last_id, msg.id)
                     memory[rule_key] = last_id
 
-                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (WORKING AS-IS) ---
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (Same AS PREVIOUS WORKS!) ---
                 elif source_platform == "Website":
                     feed = feedparser.parse(source_id)
                     processed_links = memory.get(rule_key, [])
@@ -261,7 +259,7 @@ async def process_sync(config, memory):
                                 try:
                                     ir = requests.get(url, headers=HEADERS, timeout=10)
                                     if ir.status_code == 200:
-                                        p = f"tmp_{hash(entry_link)}_{idx}.jpg"
+                                        p = f"tmp_rss_{hash(entry_link)}_{idx}.jpg"
                                         with open(p, 'wb') as f: f.write(ir.content)
                                         photo_paths.append(p)
                                 except Exception: pass
@@ -298,7 +296,7 @@ async def process_sync(config, memory):
                         entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc) if ('published_parsed' in entry and entry.published_parsed) else current_time
                         if entry_time < lookback_threshold or entry.link in processed_links: continue
 
-                        video_path = f"tmp_{hash(entry.link)}.mp4"
+                        video_path = f"tmp_yt_{hash(entry.link)}.mp4"
                         caption = clean_text(entry.title, keep_hashtags=keep_hashtags)
                         dl_ok = rule.get('vid', True) and download_youtube_video(entry.link, video_path)
 
@@ -327,5 +325,6 @@ async def process_sync(config, memory):
 async def main():
     u = await process_sync(load_json(CONFIG_FILE, {}), load_json(MEMORY_FILE, {}))
     save_json(MEMORY_FILE, u)
+    print("\n✅ Run Completed Safely!")
 
 if __name__ == "__main__": asyncio.run(main())
