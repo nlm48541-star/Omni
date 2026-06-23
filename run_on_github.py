@@ -17,7 +17,7 @@ MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.5',
     'Connection': 'keep-alive'
@@ -45,73 +45,75 @@ def clean_text(text, keep_hashtags=False):
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n\s*\n+', '\n\n', text).strip()
 
-# --- THE REAL HUMAN (COOKIE INJECTION) VIDEO ENGINE ---
+# --- ADVANCED YOUTUBE (COOKIE & ANTI-BAN BYPASS) ENGINE ---
 def download_youtube_video(video_url, output_path):
-    print("  [~] System bypassing AI blocks with absolute Browser Session Hijacking!")
+    print("  [~] System attempting high-end Google Bot-Bypass Mechanism...")
     
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
-        # Direct Injection of human auth keys
+        # Making Youtube believe request comes from standard ios or Android phone to skip blocking
+        'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'web']}},
         'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None
     }
     
     try:
         if not os.path.exists(COOKIES_FILE):
-            print("  [!] System Alert: Custom 'cookies.txt' file missing in GitHub! Fallbacking to insecure bypasses.")
-            ydl_opts['extractor_args'] = {'youtube': {'player_client': ['android', 'ios']}}
+            print("  [!] System Alert: No cookies.txt found. Action may still trigger IP blockage. Retrying directly...")
             
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
             
         if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            print("  [+] Bypass Success! Genuine .MP4 Video Hijacked successfully!")
+            print("  [+] Video Bypassed & Harvested Complete! HD Chunk File generated.")
             return True
-        else: return False
+        else: 
+            return False
     except Exception as e:
-        print(f"  [!!!] Critical Core Protection Strike from target server: {e}")
+        print(f"  [!!!] Critical Data center lock from Google detected: {e}")
         return False
 
-# --- FACEBOOK API HELPERS ---
+# --- FACEBOOK API TIMEOUT INCREASED (FOR LARGE MEDIA FILES) ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
-        r = requests.get(f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}").json()
+        r = requests.get(f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}", timeout=30).json()
         for p in r.get('data', []):
             if p['id'] == page_id: return p['access_token']
     except Exception: pass
     return None
 
 def post_text_to_facebook(page_id, page_token, text):
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': text, 'access_token': page_token}).status_code == 200
+    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': text, 'access_token': page_token}, timeout=45).status_code == 200
     except: return False
 
 def post_photo_to_facebook(page_id, page_token, photo_path, caption):
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'caption': caption, 'access_token': page_token}, files={'source': open(photo_path, 'rb')}).status_code == 200
+    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'caption': caption, 'access_token': page_token}, files={'source': open(photo_path, 'rb')}, timeout=120).status_code == 200
     except: return False
 
 def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
     try:
         att = []
         for path in photo_paths:
-            r = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'published': 'false', 'access_token': page_token}, files={'source': open(path, 'rb')})
+            r = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'published': 'false', 'access_token': page_token}, files={'source': open(path, 'rb')}, timeout=120)
             if r.status_code == 200: att.append({"media_fbid": r.json().get('id')})
         if not att: return False
-        r_f = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token})
+        r_f = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}, timeout=60)
         return r_f.status_code == 200
     except: return False
 
 def post_video_to_facebook(page_id, page_token, video_path, caption):
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}).status_code == 200
+    # Added max timeout (3 mins) for Facebook processing chunk sized uploads slowly to stop random skipping error
+    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=180).status_code == 200
     except: return False
 
 def post_to_wordpress(wp_url, username, app_password, title, content):
-    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password)).status_code == 201
+    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=60).status_code == 201
     except: return False
 
-# --- THE MAIN SYSTEM ---
+# --- THE MAIN SYSTEM ENGINE LOOP ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -138,9 +140,9 @@ async def process_sync(config, memory):
         s_plat, d_plat = clean_platform(rule['source']), clean_platform(rule['destination'])
         s_ids, d_ids = [s.strip() for s in rule['source_id'].split(',') if s.strip()], [d.strip() for d in rule['dest_id'].split(',') if d.strip()]
         
-        min_words, l_thres, kh_f = rule.get("min_words", 60), curr_t - timedelta(hours=rule.get("lookback_hours", 1.0)), rule.get("keep_hashtags", False)
+        min_words, l_thres, kh_f = rule.get("min_words", 60), curr_t - timedelta(hours=rule.get("lookback_hours", 24.0)), rule.get("keep_hashtags", False)
 
-        print(f"\n⚡ Master Pipeline Route: {s_plat} ➔ {d_plat}")
+        print(f"\n⚡ Processing Main Operation Matrix: {s_plat} ➔ {d_plat}")
 
         for s_id in s_ids:
             # A. T_GRAM
@@ -178,7 +180,7 @@ async def process_sync(config, memory):
                     last_id = max(last_id, msg.id)
                 memory[rule_key] = last_id
 
-            # B. WEB RSS
+            # B. WEB RSS (Fixed for server timeout fails when website gives blank connection delays)
             elif s_plat == "Website":
                 try:
                     feed, p_links = feedparser.parse(s_id), memory.get(rule_key, [])
@@ -188,25 +190,24 @@ async def process_sync(config, memory):
                     for e in reversed(feed.entries[:15]):
                         e_time = datetime.fromtimestamp(mktime(e.published_parsed), timezone.utc) if 'published_parsed' in e else curr_t
                         e_lnk = e.get('link', e.get('id', '')).strip()
+                        
                         if not e_lnk.startswith('http') or e_time < l_thres or e_lnk in p_links: continue
 
                         r_d = e.summary if 'summary' in e else e.description if 'description' in e else ""
                         c_desc, f_cnt = strip_html(r_d), clean_text(e.title + " " + strip_html(r_d), kh_f)
                         if rule['txt'] and len(f_cnt.split()) < min_words: continue
 
-                        # MULTI IMG SYSTEM
                         img_urls = [enc.get('href') for enc in e.get('enclosures', []) if enc.get('href', '').endswith(('.jpg', '.png'))]
                         img_urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', r_d, re.IGNORECASE))
                         try:
-                            web_res = requests.get(e_lnk, headers=HEADERS, timeout=8)
+                            # 15s delay proxy server bypass request block error fix.
+                            web_res = requests.get(e_lnk, headers=HEADERS, timeout=15)
                             if web_res.status_code == 200:
                                 o_m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 if o_m and o_m.group(1) not in img_urls: img_urls.insert(0, o_m.group(1))
                         except Exception: pass
 
                         cln_img_urls = [u if u.startswith('http') else urljoin(e_lnk, u) for u in img_urls[:9]]
-
-                        # Post text logic
                         c_ti = clean_text(f"📝 {e.title}", kh_f)
                         final_tx = c_ti if rule.get('title_only', False) else f"{c_ti}\n\n{c_desc[:350]}...\n\n🔗 {e_lnk}"
 
@@ -214,7 +215,7 @@ async def process_sync(config, memory):
                         if cln_img_urls and rule.get('img', True):
                             for idx, url in enumerate(cln_img_urls):
                                 try:
-                                    img_r = requests.get(url, headers=HEADERS, timeout=10)
+                                    img_r = requests.get(url, headers=HEADERS, timeout=20)
                                     if img_r.status_code == 200:
                                         pt = f"tmpr_{hash(e_lnk)}_{idx}.jpg"
                                         with open(pt, 'wb') as fl: fl.write(img_r.content)
@@ -238,10 +239,11 @@ async def process_sync(config, memory):
                         for pt in photo_paths:
                             if os.path.exists(pt): os.remove(pt)
                         if posted:
-                            print(f"  [+] Synced Asset Post >> {e.title}")
+                            print(f"  [+] Synced Latest Website Release Published Successfully! >> {e.title}")
                             new_links.append(e_lnk)
+                            
                     memory[rule_key] = new_links[-50:]
-                except Exception as ex: print(f"  [!] Fail in Web Flow: {ex}")
+                except Exception as ex: print(f"  [!] Fail in Secure Request Flow. Network API delay hit -> Website timeout Error!")
 
             # --- C. YOUTUBE COOKIE MASTER SCRIPT ---
             elif s_plat == "YouTube":
@@ -257,7 +259,7 @@ async def process_sync(config, memory):
                         e_lnk = e.link
                         
                         if e_time < l_thres or e_lnk in plinks: continue
-                        print(f"\n📺 YT Download Core Tracking Node Access : {e.title}")
+                        print(f"\n📺 Analyzing Unprocessed Missing Server Entry Frame >> {e.title}")
 
                         c_text = clean_text(e.title, kh_f)
                         v_path = f"tmp_v_{hash(e_lnk)}.mp4"
@@ -266,17 +268,16 @@ async def process_sync(config, memory):
                         if rule.get('vid', True):
                             dl_ok = download_youtube_video(e_lnk, v_path)
                             
-                        # Routing logic FB/TG Server Dispatch Controller Core Engine Pipeline Code Start Check Process Log Output Run Print Info Execute Method Response Debug Status Info Done Done Execute Complete Post Push End Action Success Pass Try Safe Error Trap Valid OK OK Pass Process Data Complete Status
                         posted = False
                         for did in d_ids:
                             if d_plat == "Facebook":
                                 t = get_page_access_token(fb_user_token, did)
                                 if t:
                                     if dl_ok and os.path.exists(v_path):
-                                        print("  [>] Transmitting fully stripped media HD chunk node packet FB server backend network... Wait up to 60 sec ")
+                                        print("  [>] Transmitting fully processed mp4 object backlink structure chunk network block Wait approximately roughly ±60 sec !!")
                                         posted = post_video_to_facebook(did, t, v_path, c_text)
                                     else:
-                                        print("  [X] Failed native pull due to Google security patches update server lockout limits!")
+                                        print("  [X] Failed native pull due to Extreme IP blockage. Doing Link Output Only Text Strategy Mode >> Post...")
                                         posted = post_text_to_facebook(did, t, f"🎥 {e.title}\n\n🔗 Source Watch: {e_lnk}")
                             
                             elif d_plat == "Telegram" and tg_client:
@@ -288,10 +289,10 @@ async def process_sync(config, memory):
                         if v_path and os.path.exists(v_path): os.remove(v_path)
                         if posted:
                             new_links.append(e_lnk)
-                            print("  [$$$] Sent To Pipeline Production Front User Target Audience Display Ready Data Successfully Confirmed!  ")
+                            print("  [$$$] Upload Action Authenticated Safe Pass Sent Execution Loop Data Successful OK!")
                             
                     memory[rule_key] = new_links[-50:]
-                except Exception as ex: print(f"  [!] FB Fail Execution Engine Logic Error In Proxy Downloader Request Timeout {ex}")
+                except Exception as ex: print(f"  [!] Global Application Layer Failed Target Sync {ex}")
 
     if tg_client: await tg_client.disconnect()
     return memory
@@ -299,7 +300,7 @@ async def process_sync(config, memory):
 async def main():
     u = await process_sync(load_json(CONFIG_FILE, {}), load_json(MEMORY_FILE, {}))
     save_json(MEMORY_FILE, u)
-    print("\n[■] Complete Omni Server Close Protocol Command ")
+    print("\n[■] Shutting down Main Instance Controller ")
 
 if __name__ == "__main__":
     asyncio.run(main())
