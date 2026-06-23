@@ -97,6 +97,19 @@
             "keep_hashtags": false,
             "min_words": 1,
             "lookback_hours": 24.0
+        },
+        {
+            "source": "\ud83d\udce2 Telegram",
+            "source_id": "https://t.me/fifa26bangla",
+            "destination": "\ud83d\udc65 Facebook",
+            "dest_id": "1245958895257137",
+            "txt": true,
+            "img": true,
+            "vid": true,
+            "title_only": false,
+            "keep_hashtags": false,
+            "min_words": 2,
+            "lookback_hours": 24.0
         }
     ]
 }
