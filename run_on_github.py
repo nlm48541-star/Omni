@@ -40,11 +40,20 @@ def strip_html(text):
     clean_re = re.compile('<.*?>')
     return re.sub(clean_re, '', text)
 
-def clean_text(text):
+def clean_text(text, keep_hashtags=False):
+    """
+    Cleans text content based on rules. Mentions (@word) are ALWAYS deleted.
+    Hashtags (#word) are conditionally deleted based on the keep_hashtags flag.
+    """
     if not text:
         return ""
-    text = re.sub(r'#\w+', '', text)
+    # Always remove @mentions
     text = re.sub(r'@\w+', '', text)
+    
+    # Conditionally remove hashtags and keywords attached to them
+    if not keep_hashtags:
+        text = re.sub(r'#\w+', '', text)
+        
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n\s*\n+', '\n\n', text)
     return text.strip()
@@ -100,16 +109,12 @@ def post_photo_to_facebook(page_id, page_token, photo_path, caption):
         return False
 
 def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
-    """
-    Uploads multiple photos to Facebook as unpublished, 
-    then publishes them linked together as a single Album Post.
-    """
     try:
         attached_media = []
         for idx, path in enumerate(photo_paths):
             url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
             payload = {
-                'published': 'false', # Keep it unpublished initially
+                'published': 'false',
                 'access_token': page_token
             }
             files = {'source': open(path, 'rb')}
@@ -125,7 +130,6 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
             print("  [!] Error: No photos could be uploaded to Facebook.")
             return False
 
-        # Link all uploaded photos into a single post on Page Feed
         feed_url = f"https://graph.facebook.com/v20.0/{page_id}/feed"
         feed_payload = {
             'message': caption,
@@ -216,6 +220,7 @@ async def process_sync(config, memory):
         min_words = rule.get("min_words", 60)
         lookback_hours = rule.get("lookback_hours", 1.0)
         lookback_threshold = current_time - timedelta(hours=lookback_hours)
+        keep_hashtags = rule.get("keep_hashtags", False) # Hashtag permission extractor
 
         print(f"\n⚡ Processing Sync: {source_platform} ({len(source_ids)} sources) ➔ {dest_platform} ({len(dest_ids)} outputs)")
 
@@ -234,7 +239,7 @@ async def process_sync(config, memory):
                         if msg.id <= last_id:
                             continue
 
-                        cleaned_text = clean_text(msg.text) if msg.text else ""
+                        cleaned_text = clean_text(msg.text, keep_hashtags=keep_hashtags) if msg.text else ""
                         word_count = len(cleaned_text.split())
 
                         # Skip if the copied text is shorter than words limit
@@ -322,7 +327,7 @@ async def process_sync(config, memory):
                         cleaned_description = strip_html(raw_description)
 
                         # Count words on full post content (Title + Body)
-                        full_content_for_counting = clean_text(entry.title + " " + cleaned_description)
+                        full_content_for_counting = clean_text(entry.title + " " + cleaned_description, keep_hashtags=keep_hashtags)
                         word_count = len(full_content_for_counting.split())
 
                         if rule['txt'] and word_count < min_words:
@@ -400,13 +405,13 @@ async def process_sync(config, memory):
                         
                         # Format final published text
                         if title_only_flag:
-                            final_post_text = clean_text(f"📝 {entry.title}")
+                            final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags)
                         else:
                             short_description = (cleaned_description[:350] + "...") if len(cleaned_description) > 350 else cleaned_description
                             if short_description:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry_link}")
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n{short_description}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
                             else:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry_link}")
+                                final_post_text = clean_text(f"📝 {entry.title}\n\nRead more: {entry_link}", keep_hashtags=keep_hashtags)
 
                         # Download all found images locally using Chrome Headers
                         photo_paths = []

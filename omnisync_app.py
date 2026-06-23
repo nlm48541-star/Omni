@@ -24,7 +24,7 @@ def save_config(config_data):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=4)
 
-PLATFORMS = ["📢 Telegram", "👥 Facebook", "🌐 Website"]
+PLATFORMS = ["📢 Telegram", "👥 Facebook", "🌐 Website", "🎥 YouTube"]
 
 class OmniSyncApp(ctk.CTk):
     def __init__(self):
@@ -35,8 +35,8 @@ class OmniSyncApp(ctk.CTk):
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
         
-        self.title("OmniSync Studio v6.0 - Title Only Filtering")
-        self.geometry("1000x720")
+        self.title("OmniSync Studio v8.0 - Dynamic Rules Editor & Hashtags")
+        self.geometry("1020x730")
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -69,7 +69,7 @@ class OmniSyncApp(ctk.CTk):
             btn = ctk.CTkButton(self.sidebar_frame, text=txt, command=lambda f=frm: self.show_frame(f))
             btn.grid(row=idx+1, column=0, padx=20, pady=10, sticky="ew")
 
-        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="v6.0 Advanced API", text_color="green")
+        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="v8.0 Live Editor", text_color="green")
         self.status_label.grid(row=6, column=0, pady=(0, 20))
 
     def show_frame(self, frame_name):
@@ -83,16 +83,16 @@ class DashboardFrame(ctk.CTkFrame):
     def __init__(self, parent, config, controller):
         super().__init__(parent)
         
-        ctk.CTkLabel(self, text="OmniSync Dashboard v6.0", font=("Arial", 26, "bold")).pack(pady=20)
+        ctk.CTkLabel(self, text="OmniSync Dashboard v8.0", font=("Arial", 26, "bold")).pack(pady=20)
         
         info_text = (
-            "What's New in OmniSync Studio v6.0:\n\n"
-            "- Sync Title Only: Added 'Title Only' checkbox in Sync Rules.\n"
-            "  * If checked: Bots will only post Article Titles + Links.\n"
-            "  * If unchecked: Bots will post Titles + Summary Descriptions + Links.\n"
-            "- Multi-Input & Multi-Output Routing: Handles comma-separated IDs perfectly.\n"
-            "- Dynamic Page Token Generator: Auto-detects Page IDs including future creations.\n"
-            "- Clean-Up Filters: Auto-removes Hashtags (#word) and Mention Tags (@word) automatically."
+            "What's New in OmniSync Studio v8.0:\n\n"
+            "- Live Rules Editor: Click 'Edit' on any active pipeline to load and modify its inputs, outputs, and parameters dynamically.\n"
+            "- Granular Hashtag Control: Toggle 'Keep Hashtags' on or off.\n"
+            "  * If checked: Only '#' hashtags will be published.\n"
+            "  * If unchecked: All hashtags are removed.\n"
+            "  * '@' mentions are always stripped out automatically.\n"
+            "- Reverted to fixed 1-Hour schedule run for stability."
         )
         
         self.info_box = ctk.CTkTextbox(self, height=300, width=600, font=("Arial", 14))
@@ -109,7 +109,7 @@ class CredentialsFrame(ctk.CTkFrame):
         self.scroll_area = ctk.CTkScrollableFrame(self)
         self.scroll_area.pack(expand=True, fill="both", padx=10, pady=10)
 
-        ctk.CTkLabel(self.scroll_area, text="Universal Keychain Settings", font=("Arial", 22, "bold")).pack(pady=10, anchor="w")
+        ctk.CTkLabel(self.scroll_area, text="API Master Keychains", font=("Arial", 22, "bold")).pack(pady=10, anchor="w")
         
         self.entries = {}
         for key, value in self.config["credentials"].items():
@@ -135,23 +135,24 @@ class RulesFrame(ctk.CTkFrame):
     def __init__(self, parent, config, controller):
         super().__init__(parent)
         self.config = config
+        self.editing_index = None # Keeps track of which rule index is currently being edited
         
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(fill="x", pady=10, padx=10)
         
-        ctk.CTkLabel(top_frame, text="Create Sync Routing & Custom Filters", font=("Arial", 18, "bold")).grid(row=0, column=0, padx=10, pady=10, columnspan=3, sticky="w")
+        ctk.CTkLabel(top_frame, text="Create & Modify Pipelines", font=("Arial", 18, "bold")).grid(row=0, column=0, padx=10, pady=10, columnspan=3, sticky="w")
         
         self.src_var = ctk.StringVar(value=PLATFORMS[0])
         self.dest_var = ctk.StringVar(value=PLATFORMS[1])
         
-        # Source Config Row
+        # Source Platform Choice
         ctk.CTkLabel(top_frame, text="Source Platform:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.opt_src = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.src_var)
         self.opt_src.grid(row=1, column=1, padx=10, pady=5)
-        self.entry_src_id = ctk.CTkEntry(top_frame, placeholder_text="Source ID(s) (Comma-separated, e.g. chan1, chan2)")
+        self.entry_src_id = ctk.CTkEntry(top_frame, placeholder_text="Source ID(s) (Comma-separated, e.g. chan1, UCxxxx)")
         self.entry_src_id.grid(row=1, column=2, padx=10, pady=5, ipadx=100)
 
-        # Destination Config Row
+        # Destination Platform Choice
         ctk.CTkLabel(top_frame, text="Destination Platform:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.opt_dest = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.dest_var)
         self.opt_dest.grid(row=2, column=1, padx=10, pady=5)
@@ -163,13 +164,15 @@ class RulesFrame(ctk.CTkFrame):
         filters_frame.grid(row=3, column=0, columnspan=3, pady=10)
         
         self.chk_txt = ctk.CTkCheckBox(filters_frame, text="Allow Text")
-        self.chk_txt.pack(side="left", padx=10)
+        self.chk_txt.pack(side="left", padx=8)
         self.chk_img = ctk.CTkCheckBox(filters_frame, text="Allow Image")
-        self.chk_img.pack(side="left", padx=10)
+        self.chk_img.pack(side="left", padx=8)
         self.chk_vid = ctk.CTkCheckBox(filters_frame, text="Allow Video")
-        self.chk_vid.pack(side="left", padx=10)
-        self.chk_title_only = ctk.CTkCheckBox(filters_frame, text="Title Only Sync")
-        self.chk_title_only.pack(side="left", padx=10)
+        self.chk_vid.pack(side="left", padx=8)
+        self.chk_title_only = ctk.CTkCheckBox(filters_frame, text="Title Only")
+        self.chk_title_only.pack(side="left", padx=8)
+        self.chk_hashtags = ctk.CTkCheckBox(filters_frame, text="Keep Hashtags")
+        self.chk_hashtags.pack(side="left", padx=8)
         
         self.chk_txt.select()
         self.chk_img.select()
@@ -189,7 +192,9 @@ class RulesFrame(ctk.CTkFrame):
         self.entry_lookback.insert(0, "1")
         self.entry_lookback.pack(side="left", padx=10)
         
-        ctk.CTkButton(top_frame, text="+ Add Connection Route", command=self.add_rule).grid(row=5, column=0, columnspan=3, pady=15)
+        # Submit/Edit button
+        self.btn_submit = ctk.CTkButton(top_frame, text="+ Add Connection Route", command=self.add_rule)
+        self.btn_submit.grid(row=5, column=0, columnspan=3, pady=15)
 
         self.list_area = ctk.CTkScrollableFrame(self)
         self.list_area.pack(expand=True, fill="both", padx=10, pady=10)
@@ -198,20 +203,57 @@ class RulesFrame(ctk.CTkFrame):
         for widget in self.list_area.winfo_children():
             widget.destroy()
 
-        ctk.CTkLabel(self.list_area, text="Active Sync Routes List:", font=("Arial", 16, "bold")).pack(pady=10, anchor="w")
+        ctk.CTkLabel(self.list_area, text="Active Pipelines List:", font=("Arial", 16, "bold")).pack(pady=10, anchor="w")
         for i, rule in enumerate(self.config.get("rules", [])):
             card = ctk.CTkFrame(self.list_area)
             card.pack(fill="x", padx=10, pady=5)
             
             title_sync_status = "YES" if rule.get('title_only', False) else "NO"
-            summary = f" {rule['source']} ➔ {rule['destination']}   |   T: {rule['txt']}  |  I: {rule.get('img', True)}  |  V: {rule['vid']}  |  Title Only: {title_sync_status}  |  Min Words: {rule.get('min_words', 60)}"
-            desc = f"Mapping ID: {rule['source_id']} ➔ {rule['dest_id']}"
+            tag_sync_status = "YES" if rule.get('keep_hashtags', False) else "NO"
+            summary = f" {rule['source']} ➔ {rule['destination']}   |   T: {rule['txt']}  |  I: {rule.get('img', True)}  |  V: {rule['vid']}  |  Title Only: {title_sync_status}  |  Hashtags: {tag_sync_status}  |  Words: {rule.get('min_words', 60)}"
+            desc = f"Mapping: {rule['source_id']} ➔ {rule['dest_id']}"
             
-            ctk.CTkLabel(card, text=summary, font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+            ctk.CTkLabel(card, text=summary, font=("Arial", 11, "bold")).pack(anchor="w", padx=10, pady=(5,0))
             ctk.CTkLabel(card, text=desc, text_color="gray", font=("Arial", 10)).pack(anchor="w", padx=10, pady=(0, 5))
             
-            ctk.CTkButton(card, text="Delete Route", fg_color="red", width=80, hover_color="#550000", command=lambda idx=i: self.delete_rule(idx)).place(relx=0.85, rely=0.2)
+            # Action Buttons: Edit and Delete
+            ctk.CTkButton(card, text="✏ Edit", fg_color="goldenrod", width=60, hover_color="#8B8000", command=lambda idx=i: self.start_edit(idx)).place(relx=0.8, rely=0.2)
+            ctk.CTkButton(card, text="🗑 Delete", fg_color="red", width=60, hover_color="#550000", command=lambda idx=i: self.delete_rule(idx)).place(relx=0.9, rely=0.2)
             
+    def start_edit(self, index):
+        self.editing_index = index
+        rule = self.config["rules"][index]
+        
+        self.src_var.set(rule.get('source', PLATFORMS[0]))
+        self.dest_var.set(rule.get('destination', PLATFORMS[1]))
+        
+        self.entry_src_id.delete(0, 'end')
+        self.entry_src_id.insert(0, rule.get('source_id', ''))
+        
+        self.entry_dest_id.delete(0, 'end')
+        self.entry_dest_id.insert(0, rule.get('dest_id', ''))
+        
+        # Checkboxes Toggle
+        self.toggle_checkbox(self.chk_txt, rule.get('txt', True))
+        self.toggle_checkbox(self.chk_img, rule.get('img', True))
+        self.toggle_checkbox(self.chk_vid, rule.get('vid', True))
+        self.toggle_checkbox(self.chk_title_only, rule.get('title_only', False))
+        self.toggle_checkbox(self.chk_hashtags, rule.get('keep_hashtags', False))
+        
+        self.entry_min_words.delete(0, 'end')
+        self.entry_min_words.insert(0, str(rule.get('min_words', 60)))
+        
+        self.entry_lookback.delete(0, 'end')
+        self.entry_lookback.insert(0, str(rule.get('lookback_hours', 1.0)))
+        
+        self.btn_submit.configure(text="💾 Update Connection Route", fg_color="#D4AF37", hover_color="#996515")
+
+    def toggle_checkbox(self, checkbox, val):
+        if val:
+            checkbox.select()
+        else:
+            checkbox.deselect()
+
     def add_rule(self):
         try:
             min_words_limit = int(self.entry_min_words.get() or 60)
@@ -228,11 +270,20 @@ class RulesFrame(ctk.CTkFrame):
             "txt": bool(self.chk_txt.get()), 
             "img": bool(self.chk_img.get()),
             "vid": bool(self.chk_vid.get()),
-            "title_only": bool(self.chk_title_only.get()), # New dynamic Title Only mapping
+            "title_only": bool(self.chk_title_only.get()),
+            "keep_hashtags": bool(self.chk_hashtags.get()), # Allow/Block Hashtags selector
             "min_words": min_words_limit,
             "lookback_hours": lookback_hours
         }
-        self.config["rules"].append(r)
+
+        if self.editing_index is not None:
+            # Overwrite existing index in list
+            self.config["rules"][self.editing_index] = r
+            self.editing_index = None
+            self.btn_submit.configure(text="+ Add Connection Route", fg_color="#1f538d", hover_color="#14375e")
+        else:
+            self.config["rules"].append(r)
+
         save_config(self.config)
         self.entry_src_id.delete(0, 'end')
         self.entry_dest_id.delete(0, 'end')
