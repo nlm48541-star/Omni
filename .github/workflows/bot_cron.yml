@@ -1,10 +1,8 @@
 name: Fixed 1-Hour OmniSync Bot
 
 on:
-  schedule:
-    - cron: '0 * * * *'       # Runs automatically every 1 hour (24/7)
-  workflow_dispatch:          # Allows manual trigger button
-  repository_dispatch:        # Allows instant external trigger from cron-job.org
+  workflow_dispatch:          # গিটহাব ড্যাশবোর্ড থেকে ম্যানুয়ালি রান করার বাটন সচল রাখবে
+  repository_dispatch:        # cron-job.org থেকে রিমোট ট্রিগার সচল রাখবে
     types: [run-sync]
 
 permissions:
