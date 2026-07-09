@@ -5,11 +5,14 @@ import asyncio
 import requests
 import feedparser
 import yt_dlp
+import shutil
+import subprocess
 from time import mktime
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from PIL import Image
 
 # Dynamically import BeautifulSoup (bs4) safely
 try:
@@ -47,6 +50,195 @@ def clean_text(text, keep_hashtags=False):
     if not keep_hashtags: text = re.sub(r'#\w+', '', text)
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n\s*\n+', '\n\n', text).strip()
+
+# --- REELS GENERATION HELPERS ---
+def sanitize_filename(name):
+    if not name:
+        return "reels_video"
+    cleaned = re.sub(r'[\/:*?"<>|\x00-\x1f]', '', name)
+    return cleaned.strip()[:100]
+
+def get_audio_duration(audio_path):
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", 
+            "-show_entries", "format=duration", 
+            "-of", "default=noprint_wrappers=1:nokey=1", 
+            audio_path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        return float(result.stdout.strip())
+    except Exception as e:
+        print(f"  [!] Error reading audio duration with ffprobe: {e}")
+        return 30.0  # Fallback
+
+def find_audio_file():
+    for f in os.listdir('.'):
+        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg')):
+            print(f"  [+] Background audio file detected: {f}")
+            return f
+    return None
+
+def create_reels_video(image_paths, audio_path, output_path, fps=24):
+    print(f"  [~] Initiating Reels video generation for: '{output_path}'")
+    
+    # Filter out images >= 16:9
+    valid_images = []
+    for img_path in image_paths:
+        try:
+            with Image.open(img_path) as img:
+                w, h = img.size
+                if h == 0:
+                    continue
+                ratio = w / h
+                if ratio < (16 / 9):
+                    valid_images.append(img_path)
+                else:
+                    print(f"  [-] Skipping {img_path}: Aspect ratio ({ratio:.2f}) is >= 16/9.")
+        except Exception as e:
+            print(f"  [!] Error examining image {img_path}: {e}")
+
+    if not valid_images:
+        print("  [!] No valid images under 16:9 ratio found. Skipping video compilation.")
+        return False
+
+    audio_duration = get_audio_duration(audio_path)
+    print(f"  [+] Valid images count: {len(valid_images)}. Audio duration: {audio_duration:.2f} seconds.")
+
+    total_frames = int(audio_duration * fps)
+    num_images = len(valid_images)
+    frames_per_image = total_frames // num_images
+    remainder = total_frames % num_images
+
+    temp_dir = "_tmp_reels_frames"
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir)
+
+    try:
+        resampling = Image.Resampling.LANCZOS
+    except AttributeError:
+        resampling = Image.ANTIALIAS
+
+    frame_count = 0
+    
+    for idx, img_path in enumerate(valid_images):
+        try:
+            img = Image.open(img_path).convert('RGB')
+            w, h = img.size
+            ratio = w / h
+            num_f = frames_per_image + (1 if idx < remainder else 0)
+
+            if ratio < (9 / 16):
+                # Vertical scroll effect for taller images (No cropping, entire image is scrolled into view)
+                new_w = 720
+                new_h = int(720 / ratio)
+                resized = img.resize((new_w, new_h), resampling)
+                max_y = new_h - 1280
+                for f in range(num_f):
+                    p = f / (num_f - 1) if num_f > 1 else 0.0
+                    y = int(p * max_y)
+                    crop_box = (0, y, 720, y + 1280)
+                    frame = resized.crop(crop_box)
+                    frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
+                    frame_count += 1
+            else:
+                # Fits onto a 720x1280 canvas with absolutely NO cropping (Letterbox)
+                new_w = 720
+                new_h = int(720 / ratio)
+                resized = img.resize((new_w, new_h), resampling)
+                y_offset = (1280 - new_h) // 2
+                
+                # Create a black frame and paste the full image in the center
+                bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
+                bg_frame.paste(resized, (0, y_offset))
+                
+                for f in range(num_f):
+                    bg_frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
+                    frame_count += 1
+        except Exception as e:
+            print(f"  [!] Error building frame for image {img_path}: {e}")
+
+    if frame_count == 0:
+        print("  [!] Zero frames were generated.")
+        shutil.rmtree(temp_dir)
+        return False
+
+    if os.path.exists(output_path):
+        os.remove(output_path)
+
+    # Compile with ffmpeg
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", os.path.join(temp_dir, "frame_%05d.jpg"),
+        "-i", audio_path,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        output_path
+    ]
+
+    try:
+        subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+    except subprocess.CalledProcessError as e:
+        print(f"  [!] ffmpeg failed. stderr: {e.stderr.decode() if e.stderr else ''}")
+        success = False
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    return success
+
+def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
+    try:
+        url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
+        payload = {
+            'upload_phase': 'start',
+            'access_token': page_token
+        }
+        res = requests.post(url, data=payload, timeout=25)
+        if res.status_code != 200:
+            print(f"  [!] Reels initialization failed: {res.text}")
+            return False
+        
+        data = res.json()
+        video_id = data.get("video_id")
+        upload_url = data.get("upload_url")
+        if not video_id or not upload_url:
+            return False
+            
+        file_size = os.path.getsize(video_path)
+        headers = {
+            "Authorization": f"OAuth {page_token}",
+            "offset": "0",
+            "file_size": str(file_size)
+        }
+        with open(video_path, "rb") as f:
+            up_res = requests.post(upload_url, headers=headers, data=f, timeout=180)
+            
+        if up_res.status_code != 200:
+            print(f"  [!] Reels bytes upload failed: {up_res.text}")
+            return False
+            
+        finish_payload = {
+            "access_token": page_token,
+            "video_id": video_id,
+            "upload_phase": "finish",
+            "video_state": "PUBLISHED",
+            "description": caption,
+            "title": title
+        }
+        pub_res = requests.post(url, data=finish_payload, timeout=40)
+        if pub_res.status_code == 200:
+            print(f"  [+] Page Reels published successfully! ID: {video_id}")
+            return True
+        else:
+            print(f"  [!] Reels publishing finalize step failed: {pub_res.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Exception during Reels publishing: {e}")
+        return False
 
 # --- 2. YOUTUBE VIDEO DOWNLOADER (ULTIMATE GITHUB-COPY VERSION WITH FFMPEG MERGE) ---
 def download_youtube_video(video_url, output_path):
@@ -394,6 +586,26 @@ async def process_sync(config, memory):
                                         if len(photo_paths) > 1: posted_success = post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
                                         elif len(photo_paths) == 1: posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
                                         else: posted_success = post_text_to_facebook(did, token, final_post_text)
+
+                        # --- REELS GENERATION & PUBLISHING ADDON ---
+                        audio_file = find_audio_file()
+                        if audio_file and photo_paths:
+                            video_title = sanitize_filename(entry.title)
+                            video_filename = f"{video_title}.mp4"
+                            
+                            # Compile Reel Video
+                            video_created = create_reels_video(photo_paths, audio_file, video_filename)
+                            
+                            if video_created and os.path.exists(video_filename):
+                                for did in dest_ids:
+                                    if dest_platform == "Facebook":
+                                        token = get_page_access_token(fb_user_token, did)
+                                        if token:
+                                            print(f"  [~] Uploading Reel: '{video_title}' to Page {did}...")
+                                            post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
+                                            
+                                if os.path.exists(video_filename):
+                                    os.remove(video_filename)
 
                         for path in photo_paths:
                             if os.path.exists(path): os.remove(path)

@@ -2,3 +2,4 @@ python-telegram-bot
 telethon
 requests
 feedparser
+Pillow
