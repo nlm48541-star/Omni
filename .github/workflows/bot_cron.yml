@@ -23,7 +23,7 @@ jobs:
 
       - name: Install Requirements
         run: |
-          pip install telethon requests feedparser "yt-dlp[default]" quickjs beautifulsoup4
+          pip install telethon requests feedparser "yt-dlp[default]" quickjs beautifulsoup4 Pillow
 
       - name: Execute OmniSync Master Engine
         run: python run_on_github.py
