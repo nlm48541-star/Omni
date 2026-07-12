@@ -8,10 +8,10 @@
     },
     "rules": [
         {
-            "source": "\ud83c\udf10 Website",
+            "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtjob.net/",
-            "destination": "\ud83d\udc65 Facebook",
-            "dest_id": "1114356038435251",
+            "destination": "👥 Facebook",
+            "dest_id": "1114356038435251, 897419980112996",
             "txt": true,
             "img": true,
             "vid": false,
@@ -21,10 +21,10 @@
             "lookback_hours": 24.0
         },
         {
-            "source": "\ud83c\udf10 Website",
+            "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtnotice.com/",
-            "destination": "\ud83d\udc65 Facebook",
-            "dest_id": "1149794398220583",
+            "destination": "👥 Facebook",
+            "dest_id": "1149794398220583, 897419980112996",
             "txt": true,
             "img": true,
             "vid": false,
@@ -34,10 +34,10 @@
             "lookback_hours": 24.0
         },
         {
-            "source": "\ud83c\udf10 Website",
+            "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://projobsbd.com/",
-            "destination": "\ud83d\udc65 Facebook",
-            "dest_id": "1182772684915896",
+            "destination": "👥 Facebook",
+            "dest_id": "1182772684915896, 897419980112996",
             "txt": true,
             "img": true,
             "vid": false,
