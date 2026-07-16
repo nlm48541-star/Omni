@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      # এই নতুন স্টেপটি রানারে ffmpeg এবং ffprobe ইনস্টল করে দিবে
+      # রানারে ffmpeg এবং ffprobe ইনস্টল করার ধাপ
       - name: Install FFmpeg & FFprobe
         run: |
           sudo apt-get update
@@ -33,6 +33,27 @@ jobs:
 
       - name: Execute OmniSync Master Engine
         run: python run_on_github.py
+
+      # Rclone কনফিগারেশন এবং রানারে সেভ করার ধাপ (সিঙ্গেল কোট দিয়ে টোকেন রিডিং সুরক্ষিত করা হয়েছে)
+      - name: Configure Rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          cat <<'EOF' > ~/.config/rclone/rclone.conf
+          [gdrive]
+          type = drive
+          scope = drive
+          token = ${{ secrets.RCLONE_TOKEN }}
+          EOF
+
+      # reels_output ফোল্ডারে নতুন তৈরি হওয়া ভিডিওগুলো ড্রাইভে আপলোড করার ধাপ
+      - name: Upload Reels to Google Drive
+        run: |
+          if [ -d "reels_output" ] && [ "$(ls -A reels_output)" ]; then
+            echo "Uploading compiled Reels to Google Drive..."
+            rclone copy reels_output/ gdrive:${{ secrets.GDRIVE_FOLDER_ID }} --verbose
+          else
+            echo "No new compiled Reels found in reels_output folder."
+          fi
 
       - name: Commit & Save Sync Progress State
         run: |
