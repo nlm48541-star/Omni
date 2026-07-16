@@ -193,48 +193,57 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
 def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
     try:
         url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
+        
+        # Step 1: Initialize session via standard post parameters (highly robust)
+        print(f"  [~] Step 1: Initializing Reels upload session...")
         payload = {
             'upload_phase': 'start',
             'access_token': page_token
         }
         res = requests.post(url, data=payload, timeout=25)
         if res.status_code != 200:
-            print(f"  [!] Reels initialization failed: {res.text}")
+            print(f"  [!] Reels initialization failed (Step 1): Status {res.status_code} - {res.text}")
             return False
         
         data = res.json()
         video_id = data.get("video_id")
         upload_url = data.get("upload_url")
         if not video_id or not upload_url:
+            print("  [!] Failed to obtain video_id or upload_url from Meta Step 1.")
             return False
             
+        # Step 2: Upload raw video bytes with explicit content-type
+        print(f"  [~] Step 2: Uploading video binary ({video_path})...")
         file_size = os.path.getsize(video_path)
         headers = {
             "Authorization": f"OAuth {page_token}",
             "offset": "0",
-            "file_size": str(file_size)
+            "file_size": str(file_size),
+            "Content-Type": "application/octet-stream"
         }
         with open(video_path, "rb") as f:
             up_res = requests.post(upload_url, headers=headers, data=f, timeout=180)
             
         if up_res.status_code != 200:
-            print(f"  [!] Reels bytes upload failed: {up_res.text}")
+            print(f"  [!] Reels video upload failed (Step 2): Status {up_res.status_code} - {up_res.text}")
             return False
             
+        # Step 3: Finish and Publish
+        print(f"  [~] Step 3: Finalizing/Publishing Reel...")
         finish_payload = {
-            "access_token": page_token,
             "video_id": video_id,
             "upload_phase": "finish",
             "video_state": "PUBLISHED",
             "description": caption,
-            "title": title
+            "title": title,
+            "access_token": page_token
         }
         pub_res = requests.post(url, data=finish_payload, timeout=40)
         if pub_res.status_code == 200:
             print(f"  [+] Page Reels published successfully! ID: {video_id}")
             return True
         else:
-            print(f"  [!] Reels publishing finalize step failed: {pub_res.text}")
+            print(f"  [!] Reels publishing finalize step failed (Step 3): Status {pub_res.status_code} - {pub_res.text}")
             return False
     except Exception as e:
         print(f"  [!] Exception during Reels publishing: {e}")
@@ -299,7 +308,10 @@ def get_page_access_token(master_user_token, page_id):
         if r.status_code == 200:
             for p in r.json().get('data', []):
                 if p['id'] == page_id: return p['access_token']
-    except Exception: pass
+        else:
+            print(f"  [!] Page Access Token retrieval failed: {r.status_code} - {r.text}")
+    except Exception as e:
+        print(f"  [!] Error in get_page_access_token: {e}")
     return None
 
 def post_text_to_facebook(page_id, page_token, text):
@@ -589,9 +601,15 @@ async def process_sync(config, memory):
 
                         # --- REELS GENERATION & PUBLISHING ADDON ---
                         audio_file = find_audio_file()
+                        if not audio_file:
+                            print("  [!] Warning: No background audio file (.mp3, .wav, .m4a, .ogg) found in repository. Skipping Reels generation.")
+                        
                         if audio_file and photo_paths:
                             video_title = sanitize_filename(entry.title)
-                            video_filename = f"{video_title}.mp4"
+                            
+                            # Create reels_output directory
+                            os.makedirs("reels_output", exist_ok=True)
+                            video_filename = f"reels_output/{video_title}.mp4"
                             
                             # Compile Reel Video
                             video_created = create_reels_video(photo_paths, audio_file, video_filename)
@@ -604,8 +622,8 @@ async def process_sync(config, memory):
                                             print(f"  [~] Uploading Reel: '{video_title}' to Page {did}...")
                                             post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
                                             
-                                if os.path.exists(video_filename):
-                                    os.remove(video_filename)
+                                # Note: We do NOT delete the video_filename here anymore, 
+                                # so that Rclone can upload it to Google Drive in the next workflow step!
 
                         for path in photo_paths:
                             if os.path.exists(path): os.remove(path)
