@@ -21,11 +21,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      # রানারে ffmpeg এবং ffprobe ইনস্টল করার ধাপ
-      - name: Install FFmpeg & FFprobe
+      # রানারে ffmpeg, ffprobe এবং rclone একসাথে ইনস্টল করার ধাপ
+      - name: Install FFmpeg, FFprobe & Rclone
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg rclone
 
       - name: Install Requirements
         run: |
@@ -34,7 +34,7 @@ jobs:
       - name: Execute OmniSync Master Engine
         run: python run_on_github.py
 
-      # Rclone কনফিগারেশন এবং রানারে সেভ করার ধাপ (সিঙ্গেল কোট দিয়ে টোকেন রিডিং সুরক্ষিত করা হয়েছে)
+      # Rclone কনফিগারেশন এবং রানারে সেভ করার ধাপ
       - name: Configure Rclone
         run: |
           mkdir -p ~/.config/rclone
