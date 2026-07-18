@@ -190,11 +190,12 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     shutil.rmtree(temp_dir, ignore_errors=True)
     return success
 
+# --- FACEBOOK REELS UPLOADER ---
 def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
     try:
         url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
         
-        # Step 1: Initialize session via standard post parameters (highly robust)
+        # Step 1: Initialize session via standard post parameters
         print(f"  [~] Step 1: Initializing Reels upload session...")
         payload = {
             'upload_phase': 'start',
@@ -249,11 +250,98 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         print(f"  [!] Exception during Reels publishing: {e}")
         return False
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER (ULTIMATE GITHUB-COPY VERSION WITH FFMPEG MERGE) ---
+# --- YOUTUBE SHORTS UPLOADER ---
+def get_youtube_access_token(client_id, client_secret, refresh_token):
+    if not client_id or not client_secret or not refresh_token:
+        return None
+    url = "https://oauth2.googleapis.com/token"
+    payload = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token"
+    }
+    try:
+        res = requests.post(url, data=payload, timeout=20)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+        else:
+            print(f"  [!] Failed to refresh YouTube token: {res.status_code} - {res.text}")
+    except Exception as e:
+        print(f"  [!] Exception refreshing YouTube token: {e}")
+    return None
+
+def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path, title, description):
+    print(f"  [~] Starting YouTube Shorts upload for: '{title}'...")
+    access_token = get_youtube_access_token(client_id, client_secret, refresh_token)
+    if not access_token:
+        print("  [!] Aborting YouTube upload: Could not retrieve Access Token.")
+        return False
+
+    try:
+        # Step 1: Initiate Resumable Upload Session
+        init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Length": str(os.path.getsize(video_path)),
+            "X-Upload-Content-Type": "video/mp4"
+        }
+        
+        # Format title to be compliant with YouTube guidelines and shorts hashtag
+        yt_title = title[:80] + " #shorts"
+        yt_description = description + "\n\n#shorts #reels"
+        
+        metadata = {
+            "snippet": {
+                "title": yt_title,
+                "description": yt_description,
+                "categoryId": "22"  # People & Blogs category
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False
+            }
+        }
+        
+        res = requests.post(init_url, headers=headers, json=metadata, timeout=30)
+        if res.status_code != 200:
+            print(f"  [!] YouTube upload initiation failed: {res.status_code} - {res.text}")
+            return False
+            
+        upload_url = res.headers.get("Location")
+        if not upload_url:
+            print("  [!] Failed to get YouTube Resumable Location header.")
+            return False
+            
+        # Step 2: Upload binary bytes to Resumable Location URL
+        print("  [~] Sending video binary payload to YouTube...")
+        file_size = os.path.getsize(video_path)
+        upload_headers = {
+            "Content-Length": str(file_size),
+            "Content-Type": "video/mp4"
+        }
+        
+        with open(video_path, "rb") as f:
+            up_res = requests.put(upload_url, headers=upload_headers, data=f, timeout=300)
+            
+        if up_res.status_code in [200, 201]:
+            video_data = up_res.json()
+            video_id = video_data.get("id")
+            print(f"  [+] YouTube Short uploaded successfully! Video ID: {video_id}")
+            return True
+        else:
+            print(f"  [!] YouTube binary upload failed: {up_res.status_code} - {up_res.text}")
+            return False
+            
+    except Exception as e:
+        print(f"  [!] Exception uploading to YouTube: {e}")
+        return False
+
+# --- 2. YOUTUBE VIDEO DOWNLOADER (FALLBACK MECHANISM) ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
     
-    # Copied format sequence 'bestvideo+bestaudio/best' allowing multiplexed high-quality merge
     ydl_opts_primary = {
         'format': 'bestvideo+bestaudio/best',
         'merge_output_format': 'mp4',
@@ -273,8 +361,7 @@ def download_youtube_video(video_url, output_path):
             print("  [+] Video successfully downloaded and merged!")
             return True
     except Exception as e:
-        print(f"  [!] Primary high-quality download failed ({e}). Trying fallback to single file 'b' format...")
-        
+        print(f"  [!] Primary high-quality download failed ({e}). Trying fallback...")
         if os.path.exists(output_path):
             os.remove(output_path)
             
@@ -548,7 +635,7 @@ async def process_sync(config, memory):
                                 
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) or re.search(r'<meta[^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 scraped_imgs = [og_match.group(1)] if og_match else []
-                                scraped_imgs.extend([url for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) if url not in scraped_imgs and not any(l in url.lower() for l in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header'])])
+                                scraped_imgs.extend([url for re_match in [re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)] for url in re_match if url not in scraped_imgs and not any(l in url.lower() for l in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header'])])
                                 img_urls.extend([i for i in scraped_imgs if i not in img_urls])
                         except Exception as e:
                             print(f"  [!] Failed full-text extraction: {e}")
@@ -615,15 +702,27 @@ async def process_sync(config, memory):
                             video_created = create_reels_video(photo_paths, audio_file, video_filename)
                             
                             if video_created and os.path.exists(video_filename):
+                                # 1. Upload to Facebook Pages
                                 for did in dest_ids:
                                     if dest_platform == "Facebook":
                                         token = get_page_access_token(fb_user_token, did)
                                         if token:
                                             print(f"  [~] Uploading Reel: '{video_title}' to Page {did}...")
                                             post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
-                                            
-                                # Note: We do NOT delete the video_filename here anymore, 
-                                # so that Rclone can upload it to Google Drive in the next workflow step!
+                                
+                                # 2. Upload to YouTube Shorts (Read secrets from environment variables)
+                                yt_id = os.environ.get("YT_CLIENT_ID", "")
+                                yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
+                                yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
+                                
+                                if yt_id and yt_secret and yt_refresh:
+                                    upload_video_to_youtube(yt_id, yt_secret, yt_refresh, video_filename, entry.title, final_post_text)
+                                else:
+                                    print("  [!] Warning: YouTube credentials (YT_CLIENT_ID, YT_CLIENT_SECRET, YT_REFRESH_TOKEN) not found in environment. Skipping YouTube upload.")
+
+                                # 3. Cleanup compiled video file locally
+                                if os.path.exists(video_filename):
+                                    os.remove(video_filename)
 
                         for path in photo_paths:
                             if os.path.exists(path): os.remove(path)
