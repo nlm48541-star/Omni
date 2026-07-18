@@ -338,6 +338,44 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception uploading to YouTube: {e}")
         return False
 
+# --- TIKTOK REELS UPLOADER (PLAYWRIGHT HEADLESS COOKIES BYPASS) ---
+def upload_video_to_tiktok(video_path, description):
+    tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
+    if not tiktok_cookies_data:
+        print("  [!] Warning: TIKTOK_COOKIES not found in environment. Skipping TikTok upload.")
+        return False
+
+    print(f"  [~] Starting TikTok upload for: '{description[:50]}...'")
+    cookies_file = "tmp_tiktok_cookies.txt"
+    try:
+        # Write exported cookies data to a temporary file locally
+        with open(cookies_file, "w", encoding="utf-8") as f:
+            f.write(tiktok_cookies_data.strip())
+            
+        try:
+            from tiktok_uploader.upload import TikTokUploader
+        except ImportError:
+            print("  [!] Error: 'tiktok-uploader' package not installed. Skipping TikTok upload.")
+            return False
+
+        # Initialize the Playwright-based uploader in headless mode using browser cookies
+        uploader = TikTokUploader(cookies=cookies_file, headless=True)
+        success = uploader.upload_video(video_path, description=description)
+        if success:
+            print("  [+] TikTok video uploaded successfully!")
+            return True
+        else:
+            print("  [!] TikTok video upload failed.")
+            return False
+            
+    except Exception as e:
+        print(f"  [!] Exception during TikTok upload: {e}")
+        return False
+    finally:
+        # Securely remove temporary cookies file from disk
+        if os.path.exists(cookies_file):
+            os.remove(cookies_file)
+
 # --- 2. YOUTUBE VIDEO DOWNLOADER (FALLBACK MECHANISM) ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
@@ -718,9 +756,16 @@ async def process_sync(config, memory):
                                 if yt_id and yt_secret and yt_refresh:
                                     upload_video_to_youtube(yt_id, yt_secret, yt_refresh, video_filename, entry.title, final_post_text)
                                 else:
-                                    print("  [!] Warning: YouTube credentials (YT_CLIENT_ID, YT_CLIENT_SECRET, YT_REFRESH_TOKEN) not found in environment. Skipping YouTube upload.")
+                                    print("  [!] Warning: YouTube credentials not found in environment. Skipping YouTube upload.")
 
-                                # 3. Cleanup compiled video file locally
+                                # 3. Upload to TikTok (Read cookies from environment variables)
+                                tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
+                                if tiktok_cookies:
+                                    upload_video_to_tiktok(video_filename, final_post_text)
+                                else:
+                                    print("  [!] Warning: TIKTOK_COOKIES not found in environment. Skipping TikTok upload.")
+
+                                # 4. Cleanup compiled video file locally
                                 if os.path.exists(video_filename):
                                     os.remove(video_filename)
 
