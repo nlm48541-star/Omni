@@ -21,39 +21,23 @@ jobs:
         with:
           python-version: '3.10'
 
-      # রানারে ffmpeg, ffprobe এবং rclone একসাথে ইনস্টল করার ধাপ
-      - name: Install FFmpeg, FFprobe & Rclone
+      # রানারে ffmpeg এবং ffprobe ইনস্টল করার ধাপ (rclone এর আর কোনো প্রয়োজন নেই)
+      - name: Install FFmpeg & FFprobe
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg rclone
+          sudo apt-get install -y ffmpeg
 
       - name: Install Requirements
         run: |
           pip install telethon requests feedparser "yt-dlp[default]" quickjs beautifulsoup4 Pillow
 
+      # ইউটিউব এপিআই-এর এক্সেস টোকেনগুলো এনভায়রনমেন্ট ভ্যারিয়েবল হিসেবে পাস করার ধাপ
       - name: Execute OmniSync Master Engine
+        env:
+          YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
         run: python run_on_github.py
-
-      # Rclone কনফিগারেশন এবং রানারে সেভ করার ধাপ
-      - name: Configure Rclone
-        run: |
-          mkdir -p ~/.config/rclone
-          cat <<'EOF' > ~/.config/rclone/rclone.conf
-          [gdrive]
-          type = drive
-          scope = drive
-          token = ${{ secrets.RCLONE_TOKEN }}
-          EOF
-
-      # reels_output ফোল্ডারে নতুন তৈরি হওয়া ভিডিওগুলো ড্রাইভে আপলোড করার ধাপ
-      - name: Upload Reels to Google Drive
-        run: |
-          if [ -d "reels_output" ] && [ "$(ls -A reels_output)" ]; then
-            echo "Uploading compiled Reels to Google Drive..."
-            rclone copy reels_output/ gdrive:${{ secrets.GDRIVE_FOLDER_ID }} --verbose
-          else
-            echo "No new compiled Reels found in reels_output folder."
-          fi
 
       - name: Commit & Save Sync Progress State
         run: |
