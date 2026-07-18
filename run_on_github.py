@@ -338,8 +338,9 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception uploading to YouTube: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (PLAYWRIGHT HEADLESS COOKIES BYPASS) ---
+# --- TIKTOK REELS UPLOADER (PLAYWRIGHT SUBPROCESS ISOLATION) ---
 def upload_video_to_tiktok(video_path, description):
+    import sys
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
     if not tiktok_cookies_data:
         print("  [!] Warning: TIKTOK_COOKIES not found in environment. Skipping TikTok upload.")
@@ -352,20 +353,26 @@ def upload_video_to_tiktok(video_path, description):
         with open(cookies_file, "w", encoding="utf-8") as f:
             f.write(tiktok_cookies_data.strip())
             
-        try:
-            from tiktok_uploader.upload import TikTokUploader
-        except ImportError:
-            print("  [!] Error: 'tiktok-uploader' package not installed. Skipping TikTok upload.")
-            return False
-
-        # Initialize the Playwright-based uploader in headless mode using browser cookies
-        uploader = TikTokUploader(cookies=cookies_file, headless=True)
-        success = uploader.upload_video(video_path, description=description)
-        if success:
+        # Create an inline Python script command to execute in a totally clean, separate process
+        # This bypasses the Playwright Sync API constraint inside active asyncio loop!
+        cmd = [
+            sys.executable, "-c",
+            f"from tiktok_uploader.upload import TikTokUploader; "
+            f"uploader = TikTokUploader(cookies={cookies_file!r}, headless=True); "
+            f"success = uploader.upload_video({video_path!r}, description={description!r}); "
+            f"print('TIKTOK_UPLOAD_SUCCESS' if success else 'TIKTOK_UPLOAD_FAILED')"
+        ]
+        
+        print("  [~] Spawning separate subprocess to bypass Playwright asyncio conflict...")
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=240)
+        
+        if "TIKTOK_UPLOAD_SUCCESS" in res.stdout:
             print("  [+] TikTok video uploaded successfully!")
             return True
         else:
-            print("  [!] TikTok video upload failed.")
+            print(f"  [!] TikTok video upload failed. Output: {res.stdout.strip()}")
+            if res.stderr:
+                print(f"  [!] Subprocess Error log: {res.stderr.strip()}")
             return False
             
     except Exception as e:
