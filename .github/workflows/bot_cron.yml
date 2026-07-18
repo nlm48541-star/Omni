@@ -21,22 +21,25 @@ jobs:
         with:
           python-version: '3.10'
 
-      # রানারে ffmpeg এবং ffprobe ইনস্টল করার ধাপ (rclone এর আর কোনো প্রয়োজন নেই)
+      # রানারে ffmpeg এবং ffprobe ইনস্টল করার ধাপ
       - name: Install FFmpeg & FFprobe
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install Requirements
+      # প্রয়োজনীয় প্যাকেজ এবং প্লেরাইট ব্রাউজার ইনস্টল করার ধাপ (টিকটকের জন্য প্লেরাইট ক্রোমিয়াম প্রয়োজন)
+      - name: Install Requirements & Playwright
         run: |
-          pip install telethon requests feedparser "yt-dlp[default]" quickjs beautifulsoup4 Pillow
+          pip install telethon requests feedparser "yt-dlp[default]" quickjs beautifulsoup4 Pillow tiktok-uploader
+          playwright install chromium
 
-      # ইউটিউব এপিআই-এর এক্সেস টোকেনগুলো এনভায়রনমেন্ট ভ্যারিয়েবল হিসেবে পাস করার ধাপ
+      # ইউটিউব ও টিকটক এপিআই-এর সিক্রেটগুলো এনভায়রনমেন্ট ভ্যারিয়েবল হিসেবে পাস করার ধাপ
       - name: Execute OmniSync Master Engine
         env:
           YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          TIKTOK_COOKIES: ${{ secrets.TIKTOK_COOKIES }}
         run: python run_on_github.py
 
       - name: Commit & Save Sync Progress State
