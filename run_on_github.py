@@ -338,7 +338,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception uploading to YouTube: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (PLAYWRIGHT SUBPROCESS ISOLATION) ---
+# --- TIKTOK REELS UPLOADER (PLAYWRIGHT SUBPROCESS ISOLATION + HTTPONLY BYPASS) ---
 def upload_video_to_tiktok(video_path, description):
     import sys
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
@@ -349,9 +349,19 @@ def upload_video_to_tiktok(video_path, description):
     print(f"  [~] Starting TikTok upload for: '{description[:50]}...'")
     cookies_file = "tmp_tiktok_cookies.txt"
     try:
-        # Write exported cookies data to a temporary file locally
+        # Dynamically clean up any #HttpOnly_ prefixes from the cookie domains to prevent Playwright rejection
+        cleaned_lines = []
+        for line in tiktok_cookies_data.splitlines():
+            if line.strip().startswith("#HttpOnly_"):
+                # Strip `#HttpOnly_` from the start of the line to reveal the clean domain name (e.g. .tiktok.com)
+                cleaned_lines.append(line.strip()[len("#HttpOnly_"):])
+            else:
+                cleaned_lines.append(line)
+        cleaned_cookies_data = "\n".join(cleaned_lines)
+
+        # Write clean cookies data to a temporary file locally
         with open(cookies_file, "w", encoding="utf-8") as f:
-            f.write(tiktok_cookies_data.strip())
+            f.write(cleaned_cookies_data.strip())
             
         # Create an inline Python script command to execute in a totally clean, separate process
         # This bypasses the Playwright Sync API constraint inside active asyncio loop!
@@ -583,7 +593,7 @@ async def process_sync(config, memory):
                                             post_successful = True
                                     elif rule['txt'] and cleaned_text:
                                         print(f"  [>] Processing Plain-text Facebook Sync..")
-                                        if post_text_to_facebook(dest_id, token, cleaned_text):
+                                        if post_text_to_facebook(did, token, cleaned_text):
                                             post_successful = True
                                             
                             elif dest_platform == "Website":
