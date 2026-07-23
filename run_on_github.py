@@ -130,7 +130,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
             num_f = frames_per_image + (1 if idx < remainder else 0)
 
             if ratio < (9 / 16):
-                # Vertical scroll effect for taller images (No cropping, entire image is scrolled into view)
+                # Vertical scroll effect for taller images
                 new_w = 720
                 new_h = int(720 / ratio)
                 resized = img.resize((new_w, new_h), resampling)
@@ -143,13 +143,12 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
                     frame_count += 1
             else:
-                # Fits onto a 720x1280 canvas with absolutely NO cropping (Letterbox)
+                # Fits onto a 720x1280 canvas (Letterbox)
                 new_w = 720
                 new_h = int(720 / ratio)
                 resized = img.resize((new_w, new_h), resampling)
                 y_offset = (1280 - new_h) // 2
                 
-                # Create a black frame and paste the full image in the center
                 bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
                 bg_frame.paste(resized, (0, y_offset))
                 
@@ -195,7 +194,6 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
     try:
         url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
         
-        # Step 1: Initialize session via standard post parameters
         print(f"  [~] Step 1: Initializing Reels upload session...")
         payload = {
             'upload_phase': 'start',
@@ -213,7 +211,6 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
             print("  [!] Failed to obtain video_id or upload_url from Meta Step 1.")
             return False
             
-        # Step 2: Upload raw video bytes with explicit content-type
         print(f"  [~] Step 2: Uploading video binary ({video_path})...")
         file_size = os.path.getsize(video_path)
         headers = {
@@ -229,7 +226,6 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
             print(f"  [!] Reels video upload failed (Step 2): Status {up_res.status_code} - {up_res.text}")
             return False
             
-        # Step 3: Finish and Publish
         print(f"  [~] Step 3: Finalizing/Publishing Reel...")
         finish_payload = {
             "video_id": video_id,
@@ -279,7 +275,6 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         return False
 
     try:
-        # Step 1: Initiate Resumable Upload Session
         init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -288,7 +283,6 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             "X-Upload-Content-Type": "video/mp4"
         }
         
-        # Format title to be compliant with YouTube guidelines and shorts hashtag
         yt_title = title[:80] + " #shorts"
         yt_description = description + "\n\n#shorts #reels"
         
@@ -296,7 +290,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             "snippet": {
                 "title": yt_title,
                 "description": yt_description,
-                "categoryId": "22"  # People & Blogs category
+                "categoryId": "22"
             },
             "status": {
                 "privacyStatus": "public",
@@ -314,7 +308,6 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             print("  [!] Failed to get YouTube Resumable Location header.")
             return False
             
-        # Step 2: Upload binary bytes to Resumable Location URL
         print("  [~] Sending video binary payload to YouTube...")
         file_size = os.path.getsize(video_path)
         upload_headers = {
@@ -338,7 +331,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception uploading to YouTube: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (PLAYWRIGHT SUBPROCESS ISOLATION + HTTPONLY BYPASS) ---
+# --- TIKTOK REELS UPLOADER (NEW HAZIQ-EXE TIKTOKAUTOUPLOADER INTEGRATION) ---
 def upload_video_to_tiktok(video_path, description):
     import sys
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
@@ -346,38 +339,34 @@ def upload_video_to_tiktok(video_path, description):
         print("  [!] Warning: TIKTOK_COOKIES not found in environment. Skipping TikTok upload.")
         return False
 
-    print(f"  [~] Starting TikTok upload for: '{description[:50]}...'")
+    print(f"  [~] Starting TikTok upload using TikTokAutoUploader for: '{description[:50]}...'")
     cookies_file = "tmp_tiktok_cookies.txt"
     try:
-        # Dynamically clean up any #HttpOnly_ prefixes from the cookie domains to prevent Playwright rejection
+        # Dynamically clean up any #HttpOnly_ prefixes from cookie domains
         cleaned_lines = []
         for line in tiktok_cookies_data.splitlines():
             if line.strip().startswith("#HttpOnly_"):
-                # Strip `#HttpOnly_` from the start of the line to reveal the clean domain name (e.g. .tiktok.com)
                 cleaned_lines.append(line.strip()[len("#HttpOnly_"):])
             else:
                 cleaned_lines.append(line)
         cleaned_cookies_data = "\n".join(cleaned_lines)
 
-        # Write clean cookies data to a temporary file locally
         with open(cookies_file, "w", encoding="utf-8") as f:
             f.write(cleaned_cookies_data.strip())
             
-        # Create an inline Python script command to execute in a totally clean, separate process
-        # This bypasses the Playwright Sync API constraint inside active asyncio loop!
+        # Using haziq-exe's tiktokautouploader in isolated subprocess
         cmd = [
             sys.executable, "-c",
-            f"from tiktok_uploader.upload import TikTokUploader; "
-            f"uploader = TikTokUploader(cookies={cookies_file!r}, headless=True); "
-            f"success = uploader.upload_video({video_path!r}, description={description!r}); "
-            f"print('TIKTOK_UPLOAD_SUCCESS' if success else 'TIKTOK_UPLOAD_FAILED')"
+            f"from tiktokautouploader import upload_tiktok; "
+            f"upload_tiktok(video={video_path!r}, description={description!r}, cookies={cookies_file!r}); "
+            f"print('TIKTOK_UPLOAD_SUCCESS')"
         ]
         
-        print("  [~] Spawning separate subprocess to bypass Playwright asyncio conflict...")
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=240)
+        print("  [~] Spawning TikTokAutoUploader subprocess (Phantomwright Engine)...")
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
         
         if "TIKTOK_UPLOAD_SUCCESS" in res.stdout:
-            print("  [+] TikTok video uploaded successfully!")
+            print("  [+] TikTok video uploaded successfully via TikTokAutoUploader!")
             return True
         else:
             print(f"  [!] TikTok video upload failed. Output: {res.stdout.strip()}")
@@ -389,11 +378,10 @@ def upload_video_to_tiktok(video_path, description):
         print(f"  [!] Exception during TikTok upload: {e}")
         return False
     finally:
-        # Securely remove temporary cookies file from disk
         if os.path.exists(cookies_file):
             os.remove(cookies_file)
 
-# --- 2. YOUTUBE VIDEO DOWNLOADER (FALLBACK MECHANISM) ---
+# --- YOUTUBE VIDEO DOWNLOADER ---
 def download_youtube_video(video_url, output_path):
     print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
     
@@ -442,7 +430,7 @@ def download_youtube_video(video_url, output_path):
              return False
     return False
 
-# --- 3. FACEBOOK ACCESS ENGINE ---
+# --- FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
@@ -478,12 +466,12 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
     except Exception: return False
 
-# --- 4. WEBSITE (WORDPRESS) ENGINE ---
+# --- WEBSITE (WORDPRESS) ENGINE ---
 def post_to_wordpress(wp_url, username, app_password, title, content):
     try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
 
-# --- 5. CORE PIPELINE CONTROLLER ---
+# --- CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -521,7 +509,7 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- A. TELEGRAM AUTOMATION (WITH ALBUM MULTI-PICTURE SUPPORT) ---
+                # --- A. TELEGRAM AUTOMATION ---
                 if source_platform == "Telegram" and tg_client:
                     clean_tg_source_id = source_id.split('/')[-1] if 't.me' in source_id else source_id
                     
@@ -534,7 +522,6 @@ async def process_sync(config, memory):
                         print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
                         continue
 
-                    # Group messages by Album (grouped_id) 
                     grouped_msgs = {}
                     for msg in reversed(messages):
                         if msg.date < lookback_threshold or msg.id <= last_id: continue
@@ -580,19 +567,15 @@ async def process_sync(config, memory):
                                 token = get_page_access_token(fb_user_token, dest_id)
                                 if token: 
                                     if len(photo_paths) > 1:
-                                        print(f"  [>] Processing Album! ({len(photo_paths)} Photos) Facebook Sync..")
                                         if post_multi_photo_to_facebook(dest_id, token, photo_paths, cleaned_text):
                                             post_successful = True
                                     elif len(photo_paths) == 1:
-                                        print(f"  [>] Processing Single Picture Facebook Sync..")
                                         if post_photo_to_facebook(dest_id, token, photo_paths[0], cleaned_text):
                                             post_successful = True
                                     elif len(video_paths) >= 1:
-                                        print(f"  [>] Processing Video Facebook Sync..")
                                         if post_video_to_facebook(dest_id, token, video_paths[0], cleaned_text):
                                             post_successful = True
                                     elif rule['txt'] and cleaned_text:
-                                        print(f"  [>] Processing Plain-text Facebook Sync..")
                                         if post_text_to_facebook(did, token, cleaned_text):
                                             post_successful = True
                                             
@@ -605,18 +588,17 @@ async def process_sync(config, memory):
                             if os.path.exists(p): os.remove(p)
 
                         if post_successful:
-                            print(f"  [$$$] Successfully Pushed Telegram Post/Album to Facebook -> ID: {temp_last_id}")
+                            print(f"  [$$$] Successfully Pushed Telegram Post/Album -> ID: {temp_last_id}")
                             
                         last_id = max(last_id, temp_last_id)
                             
                     memory[rule_key] = last_id
 
-                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION (WITH PROTHOM ALO BYPASS) ---
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 elif source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
                     if is_prothom_alo:
-                        print(f"  [~] Prothom Alo feed override engaged. Redirecting to official global RSS feed securely...")
                         try:
                             resp = requests.get("https://www.prothomalo.com/feed/", headers=HEADERS, timeout=15)
                             if resp.status_code == 200:
@@ -624,21 +606,15 @@ async def process_sync(config, memory):
                             else:
                                 feed = feedparser.parse("https://www.prothomalo.com/feed/")
                         except Exception as e:
-                            print(f"  [!] Fallback to standard feedparser: {e}")
                             feed = feedparser.parse("https://www.prothomalo.com/feed/")
                             
                         clean_path = ""
                         match = re.search(r'prothomalo\.com(/[a-zA-Z0-9_\-/]+)', source_id)
-                        if match:
-                            clean_path = match.group(1)
+                        if match: clean_path = match.group(1)
                             
                         if clean_path:
-                            print(f"  [~] Filtering global feed items for category path containing: '{clean_path}'")
                             filtered = [entry for entry in feed.entries if clean_path in entry.get('link', '')]
                             feed.entries = filtered
-                            print(f"  [+] Filtered and retained {len(feed.entries)} matching category articles.")
-                        else:
-                            print("  [!] Could not parse category path. Defaulting to full global feed.")
                     else:
                         feed = feedparser.parse(source_id)
 
@@ -669,38 +645,24 @@ async def process_sync(config, memory):
                         try:
                             web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
                             if web_res.status_code == 200:
-                                # DYNAMIC FULL ARTICLE EXTRACTION FOR PROTHOM ALO (BeautifulSoup Scraper Bypass)
                                 if is_prothom_alo and BeautifulSoup:
                                     soup = BeautifulSoup(web_res.text, 'html.parser')
-                                    story_blocks = soup.select('div.story-element.story-element-text')
-                                    
-                                    if not story_blocks:
-                                        story_blocks = soup.select('div.story-element-text, div.video-description, p.story-element-text')
-                                        
-                                    if not story_blocks:
-                                        story_blocks = soup.select('article p, div.story-text p')
-                                        
+                                    story_blocks = soup.select('div.story-element.story-element-text, div.video-description, p.story-element-text, article p')
                                     if story_blocks:
                                         paragraphs = [b.get_text().strip() for b in story_blocks if b.get_text().strip()]
-                                        if paragraphs:
-                                            # Merge the paragraphs to restore the entire, full story text!
-                                            scraped_full_text = "\n\n".join(paragraphs)
-                                            cleaned_description = scraped_full_text
-                                            print(f"  [+] Full-Text Scraped Successful! ({len(cleaned_description)} chars extracted)")
+                                        if paragraphs: cleaned_description = "\n\n".join(paragraphs)
                                 
                                 og_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) or re.search(r'<meta[^>]+content=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)
                                 scraped_imgs = [og_match.group(1)] if og_match else []
-                                scraped_imgs.extend([url for re_match in [re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)] for url in re_match if url not in scraped_imgs and not any(l in url.lower() for l in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner', 'widget', 'footer', 'header'])])
+                                scraped_imgs.extend([url for re_match in [re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)] for url in re_match if url not in scraped_imgs and not any(l in url.lower() for l in ['logo', 'icon', 'avatar', 'gravatar', 'banner', 'loader', 'theme', 'spinner'])])
                                 img_urls.extend([i for i in scraped_imgs if i not in img_urls])
                         except Exception as e:
                             print(f"  [!] Failed full-text extraction: {e}")
 
-                        # Deduplicate images based on clean base URL (Strips size query params to prevent duplication)
                         cleaned_img_urls = []
                         seen_base_urls = set()
                         for url in img_urls[:9]:
-                            if not url.startswith(('http://', 'https://')):
-                                url = urljoin(entry_link, url)
+                            if not url.startswith(('http://', 'https://')): url = urljoin(entry_link, url)
                             base_url = url.split('?')[0].split('#')[0]
                             if base_url not in seen_base_urls:
                                 seen_base_urls.add(base_url)
@@ -741,19 +703,13 @@ async def process_sync(config, memory):
                                         elif len(photo_paths) == 1: posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
                                         else: posted_success = post_text_to_facebook(did, token, final_post_text)
 
-                        # --- REELS GENERATION & PUBLISHING ADDON ---
+                        # --- REELS GENERATION & PUBLISHING ---
                         audio_file = find_audio_file()
-                        if not audio_file:
-                            print("  [!] Warning: No background audio file (.mp3, .wav, .m4a, .ogg) found in repository. Skipping Reels generation.")
-                        
                         if audio_file and photo_paths:
                             video_title = sanitize_filename(entry.title)
-                            
-                            # Create reels_output directory
                             os.makedirs("reels_output", exist_ok=True)
                             video_filename = f"reels_output/{video_title}.mp4"
                             
-                            # Compile Reel Video
                             video_created = create_reels_video(photo_paths, audio_file, video_filename)
                             
                             if video_created and os.path.exists(video_filename):
@@ -762,27 +718,21 @@ async def process_sync(config, memory):
                                     if dest_platform == "Facebook":
                                         token = get_page_access_token(fb_user_token, did)
                                         if token:
-                                            print(f"  [~] Uploading Reel: '{video_title}' to Page {did}...")
                                             post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
                                 
-                                # 2. Upload to YouTube Shorts (Read secrets from environment variables)
+                                # 2. Upload to YouTube Shorts
                                 yt_id = os.environ.get("YT_CLIENT_ID", "")
                                 yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
                                 yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
-                                
                                 if yt_id and yt_secret and yt_refresh:
                                     upload_video_to_youtube(yt_id, yt_secret, yt_refresh, video_filename, entry.title, final_post_text)
-                                else:
-                                    print("  [!] Warning: YouTube credentials not found in environment. Skipping YouTube upload.")
 
-                                # 3. Upload to TikTok (Read cookies from environment variables)
+                                # 3. Upload to TikTok (via TikTokAutoUploader)
                                 tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
                                 if tiktok_cookies:
                                     upload_video_to_tiktok(video_filename, final_post_text)
-                                else:
-                                    print("  [!] Warning: TIKTOK_COOKIES not found in environment. Skipping TikTok upload.")
 
-                                # 4. Cleanup compiled video file locally
+                                # Cleanup compiled video
                                 if os.path.exists(video_filename):
                                     os.remove(video_filename)
 
