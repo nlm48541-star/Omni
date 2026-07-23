@@ -3,3 +3,7 @@ telethon
 requests
 feedparser
 Pillow
+yt-dlp
+beautifulsoup4
+quickjs
+tiktokautouploader
