@@ -14,6 +14,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from PIL import Image
 
+# Dynamically import BeautifulSoup (bs4) safely
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -23,6 +24,7 @@ CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
 
+# Real Browser Headers to bypass Cloudflare / Security Blocks
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -72,7 +74,7 @@ def get_audio_duration(audio_path):
         return float(result.stdout.strip())
     except Exception as e:
         print(f"  [!] Error reading audio duration with ffprobe: {e}")
-        return 30.0
+        return 30.0  # Fallback
 
 def find_audio_file():
     for f in os.listdir('.'):
@@ -84,6 +86,7 @@ def find_audio_file():
 def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Initiating Reels video generation for: '{output_path}'")
     
+    # Filter out images >= 16:9
     valid_images = []
     for img_path in image_paths:
         try:
@@ -127,6 +130,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
             num_f = frames_per_image + (1 if idx < remainder else 0)
 
             if ratio < (9 / 16):
+                # Vertical scroll effect for taller images
                 new_w = 720
                 new_h = int(720 / ratio)
                 resized = img.resize((new_w, new_h), resampling)
@@ -139,6 +143,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
                     frame_count += 1
             else:
+                # Fits onto a 720x1280 canvas (Letterbox)
                 new_w = 720
                 new_h = int(720 / ratio)
                 resized = img.resize((new_w, new_h), resampling)
@@ -267,7 +272,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER ---
+# --- TIKTOK REELS UPLOADER (XVFB DISPLAY + COOKIES AUTO-CONVERT) ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
@@ -306,13 +311,16 @@ def upload_video_to_tiktok(video_path, description):
             with open(cookie_filename, "w", encoding="utf-8") as f:
                 json.dump(cookies_json, f, indent=2)
 
+        # Using XVFB Virtual Display + Non-headless mode to bypass TikTok bot detection
         cmd = [
             sys.executable, "-c",
             f"from tiktokautouploader import upload_tiktok; "
-            f"upload_tiktok(video={video_path!r}, description={description!r}, accountname={account_name!r}); "
+            f"upload_tiktok(video={video_path!r}, description={description!r}, accountname={account_name!r}, headless=False); "
             f"print('TIKTOK_UPLOAD_SUCCESS')"
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        
+        print("  [~] Executing TikTokAutoUploader inside XVFB Display...")
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
         if "TIKTOK_UPLOAD_SUCCESS" in res.stdout:
             print("  [+] TikTok upload successful!")
             return True
@@ -326,6 +334,54 @@ def upload_video_to_tiktok(video_path, description):
     finally:
         if os.path.exists(cookie_filename):
             os.remove(cookie_filename)
+
+# --- YOUTUBE VIDEO DOWNLOADER ---
+def download_youtube_video(video_url, output_path):
+    print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
+    
+    ydl_opts_primary = {
+        'format': 'bestvideo+bestaudio/best',
+        'merge_output_format': 'mp4',
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+    }
+    
+    if os.path.exists(COOKIES_FILE):
+        ydl_opts_primary['cookiefile'] = COOKIES_FILE
+        
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl:
+            ydl.download([video_url])
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            print("  [+] Video successfully downloaded and merged!")
+            return True
+    except Exception as e:
+        print(f"  [!] Primary high-quality download failed ({e}). Trying fallback...")
+        if os.path.exists(output_path): os.remove(output_path)
+            
+        ydl_opts_fallback = {
+            'format': 'b', 
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'extractor_args': {
+                'youtube': {'player_client': ['tv', 'mweb', 'android']}
+            }
+        }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts_fallback['cookiefile'] = COOKIES_FILE
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
+                ydl_fb.download([video_url])
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+        except Exception as fb_err:
+             print(f"  [!!!] Critical: YouTube stream parsing failed entirely: {fb_err}")
+             return False
+    return False
 
 # --- FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
@@ -358,6 +414,11 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
 
 def post_video_to_facebook(page_id, page_token, video_path, caption):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
+    except Exception: return False
+
+# --- WEBSITE (WORDPRESS) ENGINE ---
+def post_to_wordpress(wp_url, username, app_password, title, content):
+    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
 
 # --- CORE PIPELINE CONTROLLER ---
@@ -640,6 +701,39 @@ async def process_sync(config, memory):
                             if os.path.exists(path): os.remove(path)
                         
                         if posted_success: new_processed_links.append(entry_link)
+                    memory[rule_key] = new_processed_links[-50:]
+
+                # --- C. YOUTUBE SOURCE AUTOMATION ---
+                elif source_platform == "YouTube":
+                    processed_links = memory.get(rule_key, [])
+                    if not isinstance(processed_links, list): processed_links = []
+                    new_processed_links = list(processed_links)
+
+                    feed = feedparser.parse(f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}")
+
+                    for entry in reversed(feed.entries[:5]):
+                        entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc) if ('published_parsed' in entry and entry.published_parsed) else current_time
+                        if entry_time < lookback_threshold or entry.link in processed_links: continue
+
+                        video_path = f"tmp_yt_{hash(entry.link)}.mp4"
+                        caption = clean_text(entry.title, keep_hashtags=keep_hashtags)
+                        dl_ok = rule.get('vid', True) and download_youtube_video(entry.link, video_path)
+
+                        posted = False
+                        for did in dest_ids:
+                            if dest_platform == "Telegram" and tg_client:
+                                clean_tg_target = clean_telegram_id(did)
+                                if dl_ok and os.path.exists(video_path): await tg_client.send_file(clean_tg_target, video_path, caption=caption)
+                                else: await tg_client.send_message(clean_tg_target, f"🎥 {entry.title}\n\nWatch here: {entry.link}")
+                                posted = True
+                            elif dest_platform == "Facebook":
+                                token = get_page_access_token(fb_user_token, did)
+                                if token:
+                                    if dl_ok and os.path.exists(video_path): posted = post_video_to_facebook(did, token, video_path, caption)
+                                    else: posted = post_text_to_facebook(did, token, f"🎥 {entry.title}\n\nWatch here: {entry.link}")
+                                        
+                        if video_path and os.path.exists(video_path): os.remove(video_path)
+                        if posted: new_processed_links.append(entry.link)
                     memory[rule_key] = new_processed_links[-50:]
 
             except Exception as e:
