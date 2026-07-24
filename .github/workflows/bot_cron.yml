@@ -31,11 +31,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install Requirements & Phantomwright Drivers
+      - name: Install Requirements & Playwright Drivers
         run: |
           pip install -r requirements.txt
-          phantomwright_driver install chromium || true
-          playwright install --with-deps chromium
+          python -m playwright install --with-deps chromium
 
       - name: Execute OmniSync Master Engine
         env:
