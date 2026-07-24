@@ -269,19 +269,47 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
 
 # --- TIKTOK REELS UPLOADER ---
 def upload_video_to_tiktok(video_path, description):
-    import sys
+    import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
     if not tiktok_cookies_data: return False
 
-    cookies_file = "tmp_tiktok_cookies.txt"
+    account_name = "omni_bot"
+    cookie_filename = f"TK_cookies_{account_name}.json"
+    
     try:
-        cleaned_lines = [line.strip()[len("#HttpOnly_"):] if line.strip().startswith("#HttpOnly_") else line for line in tiktok_cookies_data.splitlines()]
-        with open(cookies_file, "w", encoding="utf-8") as f: f.write("\n".join(cleaned_lines).strip())
-            
+        tiktok_cookies_str = tiktok_cookies_data.strip()
+        if tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{"):
+            with open(cookie_filename, "w", encoding="utf-8") as f:
+                f.write(tiktok_cookies_str)
+        else:
+            cookies_json = []
+            for line in tiktok_cookies_str.splitlines():
+                line = line.strip()
+                if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
+                if not line or line.startswith("#"): continue
+                parts = line.split("\t")
+                if len(parts) >= 7:
+                    domain, flag, path, secure, expiration, name, value = parts[:7]
+                    cookies_json.append({
+                        "domain": domain,
+                        "expirationDate": float(expiration) if expiration.replace('.', '', 1).isdigit() else None,
+                        "hostOnly": not domain.startswith("."),
+                        "httpOnly": False,
+                        "name": name,
+                        "path": path,
+                        "sameSite": "unspecified",
+                        "secure": secure.upper() == "TRUE",
+                        "session": False,
+                        "storeId": "0",
+                        "value": value
+                    })
+            with open(cookie_filename, "w", encoding="utf-8") as f:
+                json.dump(cookies_json, f, indent=2)
+
         cmd = [
             sys.executable, "-c",
             f"from tiktokautouploader import upload_tiktok; "
-            f"upload_tiktok(video={video_path!r}, description={description!r}, cookies={cookies_file!r}); "
+            f"upload_tiktok(video={video_path!r}, description={description!r}, accountname={account_name!r}); "
             f"print('TIKTOK_UPLOAD_SUCCESS')"
         ]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
@@ -296,7 +324,8 @@ def upload_video_to_tiktok(video_path, description):
         print(f"  [!] Exception during TikTok upload: {e}")
         return False
     finally:
-        if os.path.exists(cookies_file): os.remove(cookies_file)
+        if os.path.exists(cookie_filename):
+            os.remove(cookie_filename)
 
 # --- FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
@@ -329,11 +358,6 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
 
 def post_video_to_facebook(page_id, page_token, video_path, caption):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
-    except Exception: return False
-
-# --- WEBSITE (WORDPRESS) ENGINE ---
-def post_to_wordpress(wp_url, username, app_password, title, content):
-    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
 
 # --- CORE PIPELINE CONTROLLER ---
