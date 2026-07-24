@@ -215,7 +215,8 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         }
         pub_res = requests.post(url, data=finish_payload, timeout=40)
         return pub_res.status_code == 200
-    except Exception:
+    except Exception as e:
+        print(f"  [!] Exception during FB Reels upload: {e}")
         return False
 
 # --- YOUTUBE SHORTS UPLOADER ---
@@ -262,7 +263,8 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             up_res = requests.put(upload_url, headers={"Content-Length": str(os.path.getsize(video_path)), "Content-Type": "video/mp4"}, data=f, timeout=300)
             
         return up_res.status_code in [200, 201]
-    except Exception:
+    except Exception as e:
+        print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
 # --- TIKTOK REELS UPLOADER ---
@@ -283,8 +285,15 @@ def upload_video_to_tiktok(video_path, description):
             f"print('TIKTOK_UPLOAD_SUCCESS')"
         ]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
-        return "TIKTOK_UPLOAD_SUCCESS" in res.stdout
-    except Exception:
+        if "TIKTOK_UPLOAD_SUCCESS" in res.stdout:
+            print("  [+] TikTok upload successful!")
+            return True
+        else:
+            print(f"  [!] TikTok upload failed. Stdout: {res.stdout.strip()}")
+            if res.stderr: print(f"  [!] TikTok Stderr: {res.stderr.strip()}")
+            return False
+    except Exception as e:
+        print(f"  [!] Exception during TikTok upload: {e}")
         return False
     finally:
         if os.path.exists(cookies_file): os.remove(cookies_file)
@@ -316,6 +325,15 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
             if r.status_code == 200: att.append({"media_fbid": r.json().get('id')})
         if not att: return False
         return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}, timeout=30).status_code == 200
+    except Exception: return False
+
+def post_video_to_facebook(page_id, page_token, video_path, caption):
+    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
+    except Exception: return False
+
+# --- WEBSITE (WORDPRESS) ENGINE ---
+def post_to_wordpress(wp_url, username, app_password, title, content):
+    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
     except Exception: return False
 
 # --- CORE PIPELINE CONTROLLER ---
@@ -358,8 +376,92 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
-                if source_platform == "Website":
+                # --- A. TELEGRAM AUTOMATION ---
+                if source_platform == "Telegram" and tg_client:
+                    clean_tg_source_id = source_id.split('/')[-1] if 't.me' in source_id else source_id
+                    
+                    last_id = memory.get(rule_key, 0)
+                    if isinstance(last_id, list): last_id = 0
+                    
+                    try:
+                        messages = await tg_client.get_messages(clean_tg_source_id, limit=30)
+                    except Exception as access_err:
+                        print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
+                        continue
+
+                    grouped_msgs = {}
+                    for msg in reversed(messages):
+                        if msg.date < lookback_threshold or msg.id <= last_id: continue
+                        if msg.grouped_id:
+                            if msg.grouped_id not in grouped_msgs: grouped_msgs[msg.grouped_id] = []
+                            grouped_msgs[msg.grouped_id].append(msg)
+                        else:
+                            grouped_msgs[f"single_{msg.id}"] = [msg]
+
+                    for group_key, msg_list in grouped_msgs.items():
+                        temp_last_id = max(m.id for m in msg_list)
+                        
+                        raw_text = ""
+                        for m in msg_list:
+                            if m.text: 
+                                raw_text = m.text
+                                break
+                                
+                        cleaned_text = clean_text(raw_text, keep_hashtags=keep_hashtags)
+                        word_count = len(cleaned_text.split())
+                        has_media = any(bool(m.photo or m.video) for m in msg_list)
+                        
+                        if not has_media and rule['txt']:
+                            if word_count < min_words:
+                                last_id = max(last_id, temp_last_id)
+                                continue
+
+                        photo_paths = []
+                        video_paths = []
+                        for m in msg_list:
+                            if rule.get('img', True) and m.photo:
+                                photo_paths.append(await m.download_media())
+                            elif rule.get('vid', True) and m.video:
+                                video_paths.append(await m.download_media())
+
+                        photo_paths = [p for p in photo_paths if p and os.path.exists(p)]
+                        video_paths = [p for p in video_paths if p and os.path.exists(p)]
+
+                        post_successful = False
+                        for dest_id in dest_ids:
+                            if dest_platform == "Facebook":
+                                token = get_page_access_token(fb_user_token, dest_id)
+                                if token: 
+                                    if len(photo_paths) > 1:
+                                        if post_multi_photo_to_facebook(dest_id, token, photo_paths, cleaned_text):
+                                            post_successful = True
+                                    elif len(photo_paths) == 1:
+                                        if post_photo_to_facebook(dest_id, token, photo_paths[0], cleaned_text):
+                                            post_successful = True
+                                    elif len(video_paths) >= 1:
+                                        if post_video_to_facebook(dest_id, token, video_paths[0], cleaned_text):
+                                            post_successful = True
+                                    elif rule['txt'] and cleaned_text:
+                                        if post_text_to_facebook(dest_id, token, cleaned_text):
+                                            post_successful = True
+                                            
+                            elif dest_platform == "Website":
+                                if cleaned_text:
+                                    post_to_wordpress(dest_id, credentials.get('wp_username',''), credentials.get('wp_app_password',''), "Telegram Update", cleaned_text)
+                                    post_successful = True
+
+                        for p in photo_paths + video_paths:
+                            if os.path.exists(p): os.remove(p)
+
+                        if post_successful:
+                            print(f"  [$$$] Successfully Pushed Telegram Post -> ID: {temp_last_id}")
+                            
+                        last_id = max(last_id, temp_last_id)
+                            
+                    memory[rule_key] = last_id
+
+                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                elif source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
                     if is_prothom_alo:
@@ -449,7 +551,7 @@ async def process_sync(config, memory):
 
                         posted_success = False
                         
-                        # 1. SEND TEXT / IMAGES TO TELEGRAM CHANNEL
+                        # 1. SEND TEXT / IMAGES TO TELEGRAM CHANNEL & FACEBOOK
                         if rule['txt']:
                             for did in dest_ids:
                                 clean_tg_target = clean_telegram_id(did)
@@ -472,7 +574,7 @@ async def process_sync(config, memory):
                                         elif len(photo_paths) == 1: posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
                                         else: posted_success = post_text_to_facebook(did, token, final_post_text)
 
-                        # 2. GENERATE & SEND REELS VIDEO TO TELEGRAM + SOCIAL MEDIA
+                        # 2. GENERATE & SEND REELS VIDEO TO ALL PLATFORMS
                         audio_file = find_audio_file()
                         if audio_file and photo_paths:
                             video_title = sanitize_filename(entry.title)
@@ -483,7 +585,6 @@ async def process_sync(config, memory):
                             
                             if video_created and os.path.exists(video_filename):
                                 for did in dest_ids:
-                                    # Send Reels Video to Telegram Channel
                                     if dest_platform == "Telegram" and tg_client:
                                         clean_tg_target = clean_telegram_id(did)
                                         print(f"  [~] Uploading Reel Video to Telegram Channel: @{clean_tg_target}...")
@@ -494,20 +595,17 @@ async def process_sync(config, memory):
                                         except Exception as tg_reel_err:
                                             print(f"  [!] Failed uploading Reel Video to Telegram: {tg_reel_err}")
 
-                                    # Send Reels Video to Facebook Page
                                     elif dest_platform == "Facebook":
                                         token = get_page_access_token(fb_user_token, did)
                                         if token:
                                             post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
                                 
-                                # Send to YouTube Shorts
                                 yt_id = os.environ.get("YT_CLIENT_ID", "")
                                 yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
                                 yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
                                 if yt_id and yt_secret and yt_refresh:
                                     upload_video_to_youtube(yt_id, yt_secret, yt_refresh, video_filename, entry.title, final_post_text)
 
-                                # Send to TikTok
                                 tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
                                 if tiktok_cookies:
                                     upload_video_to_tiktok(video_filename, final_post_text)
