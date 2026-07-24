@@ -84,7 +84,12 @@
         "https://bdgovtnotice.com/?p=2253",
         "https://bdgovtnotice.com/?p=2277",
         "https://bdgovtnotice.com/?p=948",
-        "https://bdgovtnotice.com/?p=2290"
+        "https://bdgovtnotice.com/?p=2290",
+        "https://bdgovtjob.net/?p=7101",
+        "http://bdgovtjob.net/?p=1891",
+        "https://bdgovtjob.net/?p=13924",
+        "https://bdgovtjob.net/?p=14900",
+        "http://bdgovtjob.net/?p=2358"
     ],
     "route_2_\ud83c\udf10 Website_\ud83d\udc65 Facebook": [
         "https://projobsbd.com/?p=3770",
@@ -129,7 +134,9 @@
         "https://www.prothomalo.com/sports/football/4kgflfyfsx",
         "https://www.bondhushava.com/sports/4rfwozttaw",
         "https://www.prothomalo.com/video/sports/dcdlzkec09",
-        "https://www.prothomalo.com/sports/football/mo564knq6t"
+        "https://www.prothomalo.com/sports/football/mo564knq6t",
+        "https://projobsbd.com/?p=11276",
+        "https://projobsbd.com/?p=8004"
     ],
     "route_6_\ud83d\udce2 Telegram_\ud83d\udc65 Facebook": 56531,
     "route_7_\ud83d\udce2 Telegram_\ud83d\udc65 Facebook": 44,
@@ -139,5 +146,12 @@
         "https://www.youtube.com/shorts/nh1qm2gtPJg",
         "https://www.youtube.com/shorts/IqmLgW093ME",
         "https://www.youtube.com/shorts/gfM6d-9RlR0"
-    ]
+    ],
+    "route_0_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [],
+    "route_2_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [],
+    "route_3_\ud83c\udf10 Website_\ud83d\udc65 Facebook": [
+        "https://bdgovtnotice.com/?p=948",
+        "https://bdgovtnotice.com/?p=2290"
+    ],
+    "route_4_\ud83c\udf10 Website_\ud83d\udce2 Telegram": []
 }
