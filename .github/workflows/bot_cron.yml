@@ -34,7 +34,8 @@ jobs:
       - name: Install Requirements & Playwright Drivers
         run: |
           pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+          python -m playwright install --with-deps
+          python -m phantomwright_driver install || true
 
       - name: Execute OmniSync Master Engine
         env:
