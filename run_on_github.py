@@ -267,30 +267,24 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE) ---
+# --- TIKTOK REELS UPLOADER ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
     if not tiktok_cookies_data: return False
 
     engine_dir = "tiktok_engine"
-    if not os.path.exists(engine_dir):
-        print("  [!] Error: tiktok_engine directory not found. Skipping TikTok upload.")
-        return False
+    if not os.path.exists(engine_dir): return False
 
-    print(f"  [~] Starting TikTok Direct API upload for: '{description[:40]}...'")
-    
     cookies_dir = os.path.join(engine_dir, "CookiesDir")
     os.makedirs(cookies_dir, exist_ok=True)
-    
     username = "omni_user"
     cookie_file = os.path.join(cookies_dir, f"{username}.json")
 
     try:
         tiktok_cookies_str = tiktok_cookies_data.strip()
         if tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{"):
-            with open(cookie_file, "w", encoding="utf-8") as f:
-                f.write(tiktok_cookies_str)
+            with open(cookie_file, "w", encoding="utf-8") as f: f.write(tiktok_cookies_str)
         else:
             cookies_json = []
             for line in tiktok_cookies_str.splitlines():
@@ -313,83 +307,41 @@ def upload_video_to_tiktok(video_path, description):
                         "storeId": "0",
                         "value": value
                     })
-            with open(cookie_file, "w", encoding="utf-8") as f:
-                json.dump(cookies_json, f, indent=2)
+            with open(cookie_file, "w", encoding="utf-8") as f: json.dump(cookies_json, f, indent=2)
 
         abs_video_path = os.path.abspath(video_path)
-        
-        cmd = [
-            sys.executable, "cli.py", "upload",
-            "-u", username,
-            "-v", abs_video_path,
-            "-t", description[:150]
-        ]
-        
-        print("  [~] Sending Direct API Request to TikTok...")
+        cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
         res = subprocess.run(cmd, cwd=engine_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
-        
-        if res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower():
-            print("  [+] TikTok Direct API video upload successful!")
-            return True
-        else:
-            print(f"  [!] TikTok Direct API upload output: {res.stdout.strip()}")
-            if res.stderr: print(f"  [!] TikTok Stderr: {res.stderr.strip()}")
-            return False
-
+        return res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower()
     except Exception as e:
-        print(f"  [!] Exception during TikTok Direct API upload: {e}")
+        print(f"  [!] Exception during TikTok upload: {e}")
         return False
     finally:
-        if os.path.exists(cookie_file):
-            os.remove(cookie_file)
+        if os.path.exists(cookie_file): os.remove(cookie_file)
 
-# --- YOUTUBE VIDEO DOWNLOADER ---
-def download_youtube_video(video_url, output_path):
-    print(f"  [~] Advanced Protocol Fetching initiated for {video_url}...")
-    
-    ydl_opts_primary = {
-        'format': 'bestvideo+bestaudio/best',
-        'merge_output_format': 'mp4',
-        'outtmpl': output_path,
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-    }
-    
-    if os.path.exists(COOKIES_FILE):
-        ydl_opts_primary['cookiefile'] = COOKIES_FILE
-        
+# --- WHATSAPP (GREEN-API) ENGINE ---
+def post_text_to_whatsapp(id_instance, api_token, api_url, chat_id, text):
+    if not id_instance or not api_token: return False
     try:
-        with yt_dlp.YoutubeDL(ydl_opts_primary) as ydl:
-            ydl.download([video_url])
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            print("  [+] Video successfully downloaded and merged!")
-            return True
+        url = f"{api_url}/waInstance{id_instance}/sendMessage/{api_token}"
+        payload = {"chatId": chat_id, "message": text}
+        res = requests.post(url, json=payload, timeout=25)
+        return res.status_code == 200
     except Exception as e:
-        print(f"  [!] Primary high-quality download failed ({e}). Trying fallback...")
-        if os.path.exists(output_path): os.remove(output_path)
-            
-        ydl_opts_fallback = {
-            'format': 'b', 
-            'outtmpl': output_path,
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'extractor_args': {
-                'youtube': {'player_client': ['tv', 'mweb', 'android']}
-            }
-        }
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts_fallback['cookiefile'] = COOKIES_FILE
+        print(f"  [!] WhatsApp text posting error: {e}")
+        return False
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
-                ydl_fb.download([video_url])
-            return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-        except Exception as fb_err:
-             print(f"  [!!!] Critical: YouTube stream parsing failed entirely: {fb_err}")
-             return False
-    return False
+def post_file_to_whatsapp(id_instance, api_token, api_url, chat_id, file_path, caption):
+    if not id_instance or not api_token or not os.path.exists(file_path): return False
+    try:
+        url = f"{api_url}/waInstance{id_instance}/sendFileByUpload/{api_token}"
+        data = {"chatId": chat_id, "caption": caption}
+        files = {"file": open(file_path, "rb")}
+        res = requests.post(url, data=data, files=files, timeout=60)
+        return res.status_code == 200
+    except Exception as e:
+        print(f"  [!] WhatsApp file posting error: {e}")
+        return False
 
 # --- FACEBOOK ACCESS ENGINE ---
 def get_page_access_token(master_user_token, page_id):
@@ -424,18 +376,13 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
     except Exception: return False
 
-# --- WEBSITE (WORDPRESS) ENGINE ---
-def post_to_wordpress(wp_url, username, app_password, title, content):
-    try: return requests.post(f"{wp_url}/wp-json/wp/v2/posts", json={'title': title, 'content': content, 'status': 'publish'}, headers={'Content-Type': 'application/json'}, auth=(username, app_password), timeout=30).status_code == 201
-    except Exception: return False
-
 # --- CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
     if not rules: return memory
 
-    clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else "Website"))
+    clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else ("WhatsApp" if "WhatsApp" in p_str else "Website")))
     
     tg_session = credentials.get('tg_session', '')
     tg_api_id = credentials.get('tg_api_id', '')
@@ -469,92 +416,8 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- A. TELEGRAM AUTOMATION ---
-                if source_platform == "Telegram" and tg_client:
-                    clean_tg_source_id = source_id.split('/')[-1] if 't.me' in source_id else source_id
-                    
-                    last_id = memory.get(rule_key, 0)
-                    if isinstance(last_id, list): last_id = 0
-                    
-                    try:
-                        messages = await tg_client.get_messages(clean_tg_source_id, limit=30)
-                    except Exception as access_err:
-                        print(f"  [X] Failed accessing TG Source '{clean_tg_source_id}'. Errr: {access_err}")
-                        continue
-
-                    grouped_msgs = {}
-                    for msg in reversed(messages):
-                        if msg.date < lookback_threshold or msg.id <= last_id: continue
-                        if msg.grouped_id:
-                            if msg.grouped_id not in grouped_msgs: grouped_msgs[msg.grouped_id] = []
-                            grouped_msgs[msg.grouped_id].append(msg)
-                        else:
-                            grouped_msgs[f"single_{msg.id}"] = [msg]
-
-                    for group_key, msg_list in grouped_msgs.items():
-                        temp_last_id = max(m.id for m in msg_list)
-                        
-                        raw_text = ""
-                        for m in msg_list:
-                            if m.text: 
-                                raw_text = m.text
-                                break
-                                
-                        cleaned_text = clean_text(raw_text, keep_hashtags=keep_hashtags)
-                        word_count = len(cleaned_text.split())
-                        has_media = any(bool(m.photo or m.video) for m in msg_list)
-                        
-                        if not has_media and rule['txt']:
-                            if word_count < min_words:
-                                last_id = max(last_id, temp_last_id)
-                                continue
-
-                        photo_paths = []
-                        video_paths = []
-                        for m in msg_list:
-                            if rule.get('img', True) and m.photo:
-                                photo_paths.append(await m.download_media())
-                            elif rule.get('vid', True) and m.video:
-                                video_paths.append(await m.download_media())
-
-                        photo_paths = [p for p in photo_paths if p and os.path.exists(p)]
-                        video_paths = [p for p in video_paths if p and os.path.exists(p)]
-
-                        post_successful = False
-                        for dest_id in dest_ids:
-                            if dest_platform == "Facebook":
-                                token = get_page_access_token(fb_user_token, dest_id)
-                                if token: 
-                                    if len(photo_paths) > 1:
-                                        if post_multi_photo_to_facebook(dest_id, token, photo_paths, cleaned_text):
-                                            post_successful = True
-                                    elif len(photo_paths) == 1:
-                                        if post_photo_to_facebook(dest_id, token, photo_paths[0], cleaned_text):
-                                            post_successful = True
-                                    elif len(video_paths) >= 1:
-                                        if post_video_to_facebook(dest_id, token, video_paths[0], cleaned_text):
-                                            post_successful = True
-                                    elif rule['txt'] and cleaned_text:
-                                        if post_text_to_facebook(dest_id, token, cleaned_text):
-                                            post_successful = True
-                                            
-                            elif dest_platform == "Website":
-                                if cleaned_text:
-                                    post_to_wordpress(dest_id, credentials.get('wp_username',''), credentials.get('wp_app_password',''), "Telegram Update", cleaned_text)
-                                    post_successful = True
-
-                        for p in photo_paths + video_paths:
-                            if os.path.exists(p): os.remove(p)
-
-                        if post_successful:
-                            print(f"  [$$$] Successfully Pushed Telegram Post -> ID: {temp_last_id}")
-                            
-                        last_id = max(last_id, temp_last_id)
-                            
-                    memory[rule_key] = last_id
-
-                # --- B. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
-                elif source_platform == "Website":
+                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                if source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
                     if is_prothom_alo:
@@ -644,11 +507,11 @@ async def process_sync(config, memory):
 
                         posted_success = False
                         
-                        # 1. SEND TEXT / IMAGES TO TELEGRAM CHANNEL & FACEBOOK
+                        # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK, WHATSAPP
                         if rule['txt']:
                             for did in dest_ids:
-                                clean_tg_target = clean_telegram_id(did)
                                 if dest_platform == "Telegram" and tg_client:
+                                    clean_tg_target = clean_telegram_id(did)
                                     try:
                                         print(f"  [~] Sending Post to Telegram Channel: @{clean_tg_target}...")
                                         if photo_paths: 
@@ -666,6 +529,25 @@ async def process_sync(config, memory):
                                         if len(photo_paths) > 1: posted_success = post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
                                         elif len(photo_paths) == 1: posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
                                         else: posted_success = post_text_to_facebook(did, token, final_post_text)
+
+                                elif dest_platform == "WhatsApp":
+                                    green_id = credentials.get("greenapi_id_instance", "")
+                                    green_token = credentials.get("greenapi_api_token", "")
+                                    green_url = credentials.get("greenapi_url", "https://7107.api.greenapi.com")
+                                    
+                                    clean_wa_id = did.split('/')[-1] if 'whatsapp.com' in did else did
+                                    if not clean_wa_id.endswith('@newsletter') and not clean_wa_id.endswith('@g.us'):
+                                        clean_wa_id = f"{clean_wa_id}@newsletter"
+
+                                    print(f"  [~] Sending Post to WhatsApp Channel: {clean_wa_id}...")
+                                    if photo_paths:
+                                        if post_file_to_whatsapp(green_id, green_token, green_url, clean_wa_id, photo_paths[0], final_post_text):
+                                            posted_success = True
+                                            print(f"  [+] WhatsApp Channel photo post successful!")
+                                    else:
+                                        if post_text_to_whatsapp(green_id, green_token, green_url, clean_wa_id, final_post_text):
+                                            posted_success = True
+                                            print(f"  [+] WhatsApp Channel text post successful!")
 
                         # 2. GENERATE & SEND REELS VIDEO TO ALL PLATFORMS
                         audio_file = find_audio_file()
@@ -692,6 +574,20 @@ async def process_sync(config, memory):
                                         token = get_page_access_token(fb_user_token, did)
                                         if token:
                                             post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
+
+                                    elif dest_platform == "WhatsApp":
+                                        green_id = credentials.get("greenapi_id_instance", "")
+                                        green_token = credentials.get("greenapi_api_token", "")
+                                        green_url = credentials.get("greenapi_url", "https://7107.api.greenapi.com")
+                                        
+                                        clean_wa_id = did.split('/')[-1] if 'whatsapp.com' in did else did
+                                        if not clean_wa_id.endswith('@newsletter') and not clean_wa_id.endswith('@g.us'):
+                                            clean_wa_id = f"{clean_wa_id}@newsletter"
+
+                                        print(f"  [~] Uploading Reel Video to WhatsApp Channel: {clean_wa_id}...")
+                                        if post_file_to_whatsapp(green_id, green_token, green_url, clean_wa_id, video_filename, final_post_text):
+                                            print(f"  [+] Reel Video uploaded to WhatsApp Channel successfully!")
+                                            posted_success = True
                                 
                                 yt_id = os.environ.get("YT_CLIENT_ID", "")
                                 yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
@@ -709,39 +605,6 @@ async def process_sync(config, memory):
                             if os.path.exists(path): os.remove(path)
                         
                         if posted_success: new_processed_links.append(entry_link)
-                    memory[rule_key] = new_processed_links[-50:]
-
-                # --- C. YOUTUBE SOURCE AUTOMATION ---
-                elif source_platform == "YouTube":
-                    processed_links = memory.get(rule_key, [])
-                    if not isinstance(processed_links, list): processed_links = []
-                    new_processed_links = list(processed_links)
-
-                    feed = feedparser.parse(f"https://www.youtube.com/feeds/videos.xml?channel_id={source_id}")
-
-                    for entry in reversed(feed.entries[:5]):
-                        entry_time = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc) if ('published_parsed' in entry and entry.published_parsed) else current_time
-                        if entry_time < lookback_threshold or entry.link in processed_links: continue
-
-                        video_path = f"tmp_yt_{hash(entry.link)}.mp4"
-                        caption = clean_text(entry.title, keep_hashtags=keep_hashtags)
-                        dl_ok = rule.get('vid', True) and download_youtube_video(entry.link, video_path)
-
-                        posted = False
-                        for did in dest_ids:
-                            if dest_platform == "Telegram" and tg_client:
-                                clean_tg_target = clean_telegram_id(did)
-                                if dl_ok and os.path.exists(video_path): await tg_client.send_file(clean_tg_target, video_path, caption=caption)
-                                else: await tg_client.send_message(clean_tg_target, f"🎥 {entry.title}\n\nWatch here: {entry.link}")
-                                posted = True
-                            elif dest_platform == "Facebook":
-                                token = get_page_access_token(fb_user_token, did)
-                                if token:
-                                    if dl_ok and os.path.exists(video_path): posted = post_video_to_facebook(did, token, video_path, caption)
-                                    else: posted = post_text_to_facebook(did, token, f"🎥 {entry.title}\n\nWatch here: {entry.link}")
-                                        
-                        if video_path and os.path.exists(video_path): os.remove(video_path)
-                        if posted: new_processed_links.append(entry.link)
                     memory[rule_key] = new_processed_links[-50:]
 
             except Exception as e:
