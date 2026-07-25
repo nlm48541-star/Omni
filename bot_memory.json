@@ -163,7 +163,8 @@
         "http://bdgovtjob.net/?p=2239",
         "http://bdgovtjob.net/?p=1226",
         "https://bdgovtjob.net/?p=8523",
-        "https://bdgovtjob.net/?p=12965"
+        "https://bdgovtjob.net/?p=12965",
+        "https://bdgovtnotice.com/?p=186"
     ],
     "route_2_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [
         "https://bdgovtnotice.com/?p=948",
@@ -179,16 +180,29 @@
         "https://projobsbd.com/?p=2866"
     ],
     "route_2_\ud83c\udf10 Website_\ud83d\udfe2 WhatsApp": [],
-    "route_3_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [],
-    "route_4_\ud83c\udf10 Website_\ud83d\udc65 Facebook": [],
+    "route_3_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [
+        "https://projobsbd.com/?p=2034"
+    ],
+    "route_4_\ud83c\udf10 Website_\ud83d\udc65 Facebook": [
+        "https://projobsbd.com/?p=13485",
+        "https://projobsbd.com/?p=2034"
+    ],
     "route_5_\ud83c\udf10 Website_\ud83d\udfe2 WhatsApp": [],
-    "route_6_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [],
+    "route_6_\ud83c\udf10 Website_\ud83d\udce2 Telegram": [
+        "http://bdgovtjob.net/?p=2358",
+        "https://bdgovtjob.net/?p=14900",
+        "https://bdgovtjob.net/?p=8523",
+        "https://bdgovtjob.net/?p=13924",
+        "https://bdgovtjob.net/?p=12965"
+    ],
     "route_7_\ud83c\udf10 Website_\ud83d\udc65 Facebook": [
         "http://bdgovtjob.net/?p=2358",
         "https://bdgovtjob.net/?p=13924",
         "https://bdgovtjob.net/?p=12965",
         "https://bdgovtjob.net/?p=8557",
-        "https://bdgovtjob.net/?p=15030"
+        "https://bdgovtjob.net/?p=15030",
+        "https://bdgovtjob.net/?p=14900",
+        "https://bdgovtjob.net/?p=8523"
     ],
     "route_8_\ud83c\udf10 Website_\ud83d\udfe2 WhatsApp": []
 }
