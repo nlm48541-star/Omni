@@ -14,7 +14,6 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from PIL import Image
 
-# Dynamically import BeautifulSoup (bs4) safely
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -24,7 +23,6 @@ CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
 
-# Real Browser Headers to bypass Cloudflare / Security Blocks
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -74,7 +72,7 @@ def get_audio_duration(audio_path):
         return float(result.stdout.strip())
     except Exception as e:
         print(f"  [!] Error reading audio duration with ffprobe: {e}")
-        return 30.0  # Fallback
+        return 30.0
 
 def find_audio_file():
     for f in os.listdir('.'):
@@ -86,7 +84,6 @@ def find_audio_file():
 def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Initiating Reels video generation for: '{output_path}'")
     
-    # Filter out images >= 16:9
     valid_images = []
     for img_path in image_paths:
         try:
@@ -130,7 +127,6 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
             num_f = frames_per_image + (1 if idx < remainder else 0)
 
             if ratio < (9 / 16):
-                # Vertical scroll effect for taller images
                 new_w = 720
                 new_h = int(720 / ratio)
                 resized = img.resize((new_w, new_h), resampling)
@@ -143,7 +139,6 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
                     frame_count += 1
             else:
-                # Fits onto a 720x1280 canvas (Letterbox)
                 new_w = 720
                 new_h = int(720 / ratio)
                 resized = img.resize((new_w, new_h), resampling)
@@ -272,19 +267,29 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (XVFB DISPLAY + COOKIES AUTO-CONVERT) ---
+# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE) ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
     if not tiktok_cookies_data: return False
 
-    account_name = "omni_bot"
-    cookie_filename = f"TK_cookies_{account_name}.json"
+    engine_dir = "tiktok_engine"
+    if not os.path.exists(engine_dir):
+        print("  [!] Error: tiktok_engine directory not found. Skipping TikTok upload.")
+        return False
+
+    print(f"  [~] Starting TikTok Direct API upload for: '{description[:40]}...'")
     
+    cookies_dir = os.path.join(engine_dir, "CookiesDir")
+    os.makedirs(cookies_dir, exist_ok=True)
+    
+    username = "omni_user"
+    cookie_file = os.path.join(cookies_dir, f"{username}.json")
+
     try:
         tiktok_cookies_str = tiktok_cookies_data.strip()
         if tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{"):
-            with open(cookie_filename, "w", encoding="utf-8") as f:
+            with open(cookie_file, "w", encoding="utf-8") as f:
                 f.write(tiktok_cookies_str)
         else:
             cookies_json = []
@@ -308,32 +313,35 @@ def upload_video_to_tiktok(video_path, description):
                         "storeId": "0",
                         "value": value
                     })
-            with open(cookie_filename, "w", encoding="utf-8") as f:
+            with open(cookie_file, "w", encoding="utf-8") as f:
                 json.dump(cookies_json, f, indent=2)
 
-        # Using XVFB Virtual Display + Non-headless mode to bypass TikTok bot detection
+        abs_video_path = os.path.abspath(video_path)
+        
         cmd = [
-            sys.executable, "-c",
-            f"from tiktokautouploader import upload_tiktok; "
-            f"upload_tiktok(video={video_path!r}, description={description!r}, accountname={account_name!r}, headless=False); "
-            f"print('TIKTOK_UPLOAD_SUCCESS')"
+            sys.executable, "cli.py", "upload",
+            "-u", username,
+            "-v", abs_video_path,
+            "-t", description[:150]
         ]
         
-        print("  [~] Executing TikTokAutoUploader inside XVFB Display...")
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
-        if "TIKTOK_UPLOAD_SUCCESS" in res.stdout:
-            print("  [+] TikTok upload successful!")
+        print("  [~] Sending Direct API Request to TikTok...")
+        res = subprocess.run(cmd, cwd=engine_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        
+        if res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower():
+            print("  [+] TikTok Direct API video upload successful!")
             return True
         else:
-            print(f"  [!] TikTok upload failed. Stdout: {res.stdout.strip()}")
+            print(f"  [!] TikTok Direct API upload output: {res.stdout.strip()}")
             if res.stderr: print(f"  [!] TikTok Stderr: {res.stderr.strip()}")
             return False
+
     except Exception as e:
-        print(f"  [!] Exception during TikTok upload: {e}")
+        print(f"  [!] Exception during TikTok Direct API upload: {e}")
         return False
     finally:
-        if os.path.exists(cookie_filename):
-            os.remove(cookie_filename)
+        if os.path.exists(cookie_file):
+            os.remove(cookie_file)
 
 # --- YOUTUBE VIDEO DOWNLOADER ---
 def download_youtube_video(video_url, output_path):
