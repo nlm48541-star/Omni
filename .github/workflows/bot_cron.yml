@@ -26,24 +26,34 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install FFmpeg & XVFB Display Server
+      - name: Install FFmpeg & FFprobe
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg xvfb
+          sudo apt-get install -y ffmpeg
 
-      - name: Install Requirements & Playwright Drivers
+      - name: Install Python Requirements
         run: |
           pip install -r requirements.txt
-          python -m playwright install --with-deps
-          python -m phantomwright_driver install || true
 
-      - name: Execute OmniSync Master Engine in Virtual Display
+      - name: Setup TikTok Direct API Engine (makiisthenes)
+        run: |
+          git clone https://github.com/makiisthenes/TiktokAutoUploader.git tiktok_engine
+          cd tiktok_engine
+          pip install -r requirements.txt || true
+          if [ -d "tiktok_uploader/tiktok-signature" ]; then
+            cd tiktok_uploader/tiktok-signature && npm install && cd ../..
+          elif [ -d "tiktok-signature" ]; then
+            cd tiktok-signature && npm install && cd ..
+          fi
+          mkdir -p CookiesDir
+
+      - name: Execute OmniSync Master Engine
         env:
           YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           TIKTOK_COOKIES: ${{ secrets.TIKTOK_COOKIES }}
-        run: xvfb-run python run_on_github.py
+        run: python run_on_github.py
 
       - name: Commit & Save Sync Progress State
         run: |
