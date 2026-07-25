@@ -83,30 +83,11 @@ def find_audio_file():
 
 def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Initiating Reels video generation for: '{output_path}'")
-    
-    valid_images = []
-    for img_path in image_paths:
-        try:
-            with Image.open(img_path) as img:
-                w, h = img.size
-                if h == 0: continue
-                ratio = w / h
-                if ratio < (16 / 9):
-                    valid_images.append(img_path)
-                else:
-                    print(f"  [-] Skipping {img_path}: Aspect ratio ({ratio:.2f}) is >= 16/9.")
-        except Exception as e:
-            print(f"  [!] Error examining image {img_path}: {e}")
-
-    if not valid_images:
-        print("  [!] No valid images under 16:9 ratio found. Skipping video compilation.")
-        return False
+    if not image_paths: return False
 
     audio_duration = get_audio_duration(audio_path)
-    print(f"  [+] Valid images count: {len(valid_images)}. Audio duration: {audio_duration:.2f} seconds.")
-
     total_frames = int(audio_duration * fps)
-    num_images = len(valid_images)
+    num_images = len(image_paths)
     frames_per_image = total_frames // num_images
     remainder = total_frames % num_images
 
@@ -119,7 +100,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
 
     frame_count = 0
     
-    for idx, img_path in enumerate(valid_images):
+    for idx, img_path in enumerate(image_paths):
         try:
             img = Image.open(img_path).convert('RGB')
             w, h = img.size
@@ -372,10 +353,6 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
         return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}, timeout=30).status_code == 200
     except Exception: return False
 
-def post_video_to_facebook(page_id, page_token, video_path, caption):
-    try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/videos", data={'description': caption, 'access_token': page_token}, files={'file': open(video_path, 'rb')}, timeout=120).status_code == 200
-    except Exception: return False
-
 # --- CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
@@ -416,7 +393,7 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                # --- A. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 if source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
@@ -484,16 +461,19 @@ async def process_sync(config, memory):
                                 seen_base_urls.add(base_url)
                                 cleaned_img_urls.append(url)
 
+                        # APPLIED WHATSAPP CONTACT FOOTER TO EVERY POST
+                        contact_suffix = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
                         title_only_flag = rule.get('title_only', False)
                         
                         if title_only_flag:
-                            final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags)
+                            final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags) + contact_suffix
                         else:
                             if cleaned_description:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags)
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags) + contact_suffix
                             else:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags)
+                                final_post_text = clean_text(f"📝 {entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
 
+                        # DOWNLOAD & FILTER IMAGES (REJECT BANNER IMAGES WITH RATIO >= 16/9)
                         photo_paths = []
                         if cleaned_img_urls and rule.get('img', True):
                             for idx, url in enumerate(cleaned_img_urls):
@@ -502,12 +482,24 @@ async def process_sync(config, memory):
                                     if ir.status_code == 200:
                                         p = f"tmp_rss_{hash(entry_link)}_{idx}.jpg"
                                         with open(p, 'wb') as f: f.write(ir.content)
-                                        photo_paths.append(p)
+                                        
+                                        # ASPECT RATIO FILTER: SKIP IMAGES >= 16/9 RATIO
+                                        try:
+                                            with Image.open(p) as img:
+                                                w, h = img.size
+                                                if h > 0 and (w / h) < (16 / 9):
+                                                    photo_paths.append(p)
+                                                else:
+                                                    print(f"  [-] Skipping photo {p}: Aspect ratio ({w/h:.2f}) is >= 16/9.")
+                                                    if os.path.exists(p): os.remove(p)
+                                        except Exception as img_err:
+                                            print(f"  [!] Invalid image {p}: {img_err}")
+                                            if os.path.exists(p): os.remove(p)
                                 except Exception: pass
 
                         posted_success = False
                         
-                        # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK, WHATSAPP
+                        # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP CHANNELS
                         if rule['txt']:
                             for did in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
@@ -549,7 +541,7 @@ async def process_sync(config, memory):
                                             posted_success = True
                                             print(f"  [+] WhatsApp Channel text post successful!")
 
-                        # 2. GENERATE & SEND REELS VIDEO TO ALL PLATFORMS
+                        # 2. GENERATE & SEND REELS VIDEO (ONLY TO FACEBOOK, YOUTUBE & TIKTOK)
                         audio_file = find_audio_file()
                         if audio_file and photo_paths:
                             video_title = sanitize_filename(entry.title)
@@ -560,34 +552,10 @@ async def process_sync(config, memory):
                             
                             if video_created and os.path.exists(video_filename):
                                 for did in dest_ids:
-                                    if dest_platform == "Telegram" and tg_client:
-                                        clean_tg_target = clean_telegram_id(did)
-                                        print(f"  [~] Uploading Reel Video to Telegram Channel: @{clean_tg_target}...")
-                                        try:
-                                            await tg_client.send_file(clean_tg_target, video_filename, caption=final_post_text)
-                                            print(f"  [+] Reel Video uploaded to Telegram Channel successfully!")
-                                            posted_success = True
-                                        except Exception as tg_reel_err:
-                                            print(f"  [!] Failed uploading Reel Video to Telegram: {tg_reel_err}")
-
-                                    elif dest_platform == "Facebook":
+                                    if dest_platform == "Facebook":
                                         token = get_page_access_token(fb_user_token, did)
                                         if token:
                                             post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
-
-                                    elif dest_platform == "WhatsApp":
-                                        green_id = credentials.get("greenapi_id_instance", "")
-                                        green_token = credentials.get("greenapi_api_token", "")
-                                        green_url = credentials.get("greenapi_url", "https://7107.api.greenapi.com")
-                                        
-                                        clean_wa_id = did.split('/')[-1] if 'whatsapp.com' in did else did
-                                        if not clean_wa_id.endswith('@newsletter') and not clean_wa_id.endswith('@g.us'):
-                                            clean_wa_id = f"{clean_wa_id}@newsletter"
-
-                                        print(f"  [~] Uploading Reel Video to WhatsApp Channel: {clean_wa_id}...")
-                                        if post_file_to_whatsapp(green_id, green_token, green_url, clean_wa_id, video_filename, final_post_text):
-                                            print(f"  [+] Reel Video uploaded to WhatsApp Channel successfully!")
-                                            posted_success = True
                                 
                                 yt_id = os.environ.get("YT_CLIENT_ID", "")
                                 yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
