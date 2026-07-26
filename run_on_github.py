@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import random
 import asyncio
 import requests
 import feedparser
@@ -54,6 +55,27 @@ def clean_telegram_id(tg_id_str):
     clean_id = tg_id_str.split('/')[-1].replace('@', '').strip()
     return clean_id
 
+# --- MULTI-AUDIO RANDOM SELECTOR ---
+def get_all_audio_files():
+    audio_files = []
+    music_dir = "Music"
+    if os.path.exists(music_dir) and os.path.isdir(music_dir):
+        for f in os.listdir(music_dir):
+            if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg')):
+                audio_files.append(os.path.join(music_dir, f))
+    for f in os.listdir('.'):
+        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg')):
+            audio_files.append(f)
+    return list(set(audio_files))
+
+def get_random_audio_file():
+    all_audios = get_all_audio_files()
+    if all_audios:
+        chosen = random.choice(all_audios)
+        print(f"  [+] Selected random background audio: '{chosen}'")
+        return chosen
+    return None
+
 # --- REELS GENERATION HELPERS ---
 def sanitize_filename(name):
     if not name: return "reels_video"
@@ -74,13 +96,6 @@ def get_audio_duration(audio_path):
         print(f"  [!] Error reading audio duration with ffprobe: {e}")
         return 30.0
 
-def find_audio_file():
-    for f in os.listdir('.'):
-        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg')):
-            print(f"  [+] Background audio file detected: {f}")
-            return f
-    return None
-
 def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Initiating Reels video generation for: '{output_path}'")
     if not image_paths: return False
@@ -91,7 +106,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     frames_per_image = total_frames // num_images
     remainder = total_frames % num_images
 
-    temp_dir = "_tmp_reels_frames"
+    temp_dir = f"_tmp_reels_frames_{hash(output_path)}"
     if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
     os.makedirs(temp_dir)
 
@@ -195,7 +210,10 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
             "access_token": page_token
         }
         pub_res = requests.post(url, data=finish_payload, timeout=40)
-        return pub_res.status_code == 200
+        if pub_res.status_code == 200:
+            print(f"  [+] FB Reel uploaded successfully to page {page_id}!")
+            return True
+        return False
     except Exception as e:
         print(f"  [!] Exception during FB Reels upload: {e}")
         return False
@@ -320,7 +338,7 @@ def warmup_render_server(render_url):
     if not render_url: return
     try:
         url = f"{render_url.rstrip('/')}/qr"
-        print("  [~] Warming up Render WhatsApp Server (Waking up from sleep mode)...")
+        print("  [~] Warming up Render WhatsApp Server...")
         requests.get(url, timeout=15)
     except Exception: pass
 
@@ -329,11 +347,7 @@ def post_to_whatsapp_channel(render_url, channel_id, text):
     try:
         url = f"{render_url.rstrip('/')}/send"
         clean_id = channel_id.split('/')[-1].replace('@newsletter', '').strip()
-        payload = {
-            "channel_id": clean_id,
-            "text": text
-        }
-        # Increased timeout to 90 seconds to allow Render free server cold-start
+        payload = {"channel_id": clean_id, "text": text}
         res = requests.post(url, json=payload, timeout=90)
         if res.status_code == 200 and res.json().get("status") == "success":
             print(f"  [+] Posted successfully to WhatsApp Channel '{clean_id}' via Render!")
@@ -387,7 +401,6 @@ async def process_sync(config, memory):
     tg_api_hash = credentials.get('tg_api_hash', '')
     fb_user_token = credentials.get('fb_user_token', credentials.get('fb_token', ''))
 
-    # Warmup Render Server early if WhatsApp destination exists
     if any(clean_platform(r['destination']) == "WhatsApp" for r in rules):
         render_url = credentials.get("render_wa_url", "https://wa-channel-bridge.onrender.com")
         warmup_render_server(render_url)
@@ -453,7 +466,7 @@ async def process_sync(config, memory):
                         # --- SKIP ARTICLE IF ALL 4 KEYWORDS MATCH IN TITLE ---
                         target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
                         if all(kw in entry.title for kw in target_keywords):
-                            print(f"  [-] Skipping article completely '{entry.title}': Title matched filter keywords ('চলমান, সকল, চাকরির, নিয়োগ').")
+                            print(f"  [-] Skipping article completely '{entry.title}': Title matched filter keywords.")
                             new_processed_links.append(entry_link)
                             continue
 
@@ -559,33 +572,49 @@ async def process_sync(config, memory):
                                     if post_to_whatsapp_channel(render_url, did, final_post_text):
                                         posted_success = True
 
-                        # 2. GENERATE & SEND REELS VIDEO (ONLY TO FACEBOOK, YOUTUBE & TIKTOK)
-                        audio_file = find_audio_file()
-                        if audio_file and photo_paths:
-                            video_title = sanitize_filename(entry.title)
-                            os.makedirs("reels_output", exist_ok=True)
-                            video_filename = f"reels_output/{video_title}.mp4"
-                            
-                            video_created = create_reels_video(photo_paths, audio_file, video_filename)
-                            
-                            if video_created and os.path.exists(video_filename):
+                        # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR EACH FACEBOOK PAGE, YOUTUBE & TIKTOK
+                        if photo_paths:
+                            # A. Unique Video Per Facebook Page with Different Random Background Audio
+                            if dest_platform == "Facebook":
                                 for did in dest_ids:
-                                    if dest_platform == "Facebook":
-                                        token = get_page_access_token(fb_user_token, did)
-                                        if token:
-                                            post_reel_to_facebook(did, token, video_filename, entry.title, final_post_text)
+                                    token = get_page_access_token(fb_user_token, did)
+                                    if token:
+                                        audio_file = get_random_audio_file()
+                                        if audio_file:
+                                            video_title = sanitize_filename(f"{entry.title}_{did}")
+                                            os.makedirs("reels_output", exist_ok=True)
+                                            page_video_file = f"reels_output/{video_title}.mp4"
+                                            
+                                            video_created = create_reels_video(photo_paths, audio_file, page_video_file)
+                                            if video_created and os.path.exists(page_video_file):
+                                                print(f"  [~] Uploading Unique Reel to Facebook Page: {did}...")
+                                                post_reel_to_facebook(did, token, page_video_file, entry.title, final_post_text)
+                                                if os.path.exists(page_video_file):
+                                                    os.remove(page_video_file)
+
+                            # B. YouTube Shorts & TikTok Upload (Uses Random Audio)
+                            audio_file_yt_tt = get_random_audio_file()
+                            if audio_file_yt_tt:
+                                video_title_yt_tt = sanitize_filename(f"{entry.title}_yt_tt")
+                                os.makedirs("reels_output", exist_ok=True)
+                                yt_tt_video_file = f"reels_output/{video_title_yt_tt}.mp4"
                                 
-                                yt_id = os.environ.get("YT_CLIENT_ID", "")
-                                yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
-                                yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
-                                if yt_id and yt_secret and yt_refresh:
-                                    upload_video_to_youtube(yt_id, yt_secret, yt_refresh, video_filename, entry.title, final_post_text)
+                                video_created_yt_tt = create_reels_video(photo_paths, audio_file_yt_tt, yt_tt_video_file)
+                                if video_created_yt_tt and os.path.exists(yt_tt_video_file):
+                                    # YouTube Shorts
+                                    yt_id = os.environ.get("YT_CLIENT_ID", "")
+                                    yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
+                                    yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
+                                    if yt_id and yt_secret and yt_refresh:
+                                        upload_video_to_youtube(yt_id, yt_secret, yt_refresh, yt_tt_video_file, entry.title, final_post_text)
 
-                                tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
-                                if tiktok_cookies:
-                                    upload_video_to_tiktok(video_filename, final_post_text)
+                                    # TikTok
+                                    tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
+                                    if tiktok_cookies:
+                                        upload_video_to_tiktok(yt_tt_video_file, final_post_text)
 
-                                if os.path.exists(video_filename): os.remove(video_filename)
+                                    if os.path.exists(yt_tt_video_file):
+                                        os.remove(yt_tt_video_file)
 
                         for path in photo_paths:
                             if os.path.exists(path): os.remove(path)
