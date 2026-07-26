@@ -316,6 +316,14 @@ def upload_video_to_tiktok(video_path, description):
         if os.path.exists(cookie_file): os.remove(cookie_file)
 
 # --- WHATSAPP (RENDER BAILEYS BRIDGE) ENGINE ---
+def warmup_render_server(render_url):
+    if not render_url: return
+    try:
+        url = f"{render_url.rstrip('/')}/qr"
+        print("  [~] Warming up Render WhatsApp Server (Waking up from sleep mode)...")
+        requests.get(url, timeout=15)
+    except Exception: pass
+
 def post_to_whatsapp_channel(render_url, channel_id, text):
     if not render_url: return False
     try:
@@ -325,7 +333,8 @@ def post_to_whatsapp_channel(render_url, channel_id, text):
             "channel_id": clean_id,
             "text": text
         }
-        res = requests.post(url, json=payload, timeout=30)
+        # Increased timeout to 90 seconds to allow Render free server cold-start
+        res = requests.post(url, json=payload, timeout=90)
         if res.status_code == 200 and res.json().get("status") == "success":
             print(f"  [+] Posted successfully to WhatsApp Channel '{clean_id}' via Render!")
             return True
@@ -377,6 +386,11 @@ async def process_sync(config, memory):
     tg_api_id = credentials.get('tg_api_id', '')
     tg_api_hash = credentials.get('tg_api_hash', '')
     fb_user_token = credentials.get('fb_user_token', credentials.get('fb_token', ''))
+
+    # Warmup Render Server early if WhatsApp destination exists
+    if any(clean_platform(r['destination']) == "WhatsApp" for r in rules):
+        render_url = credentials.get("render_wa_url", "https://wa-channel-bridge.onrender.com")
+        warmup_render_server(render_url)
 
     tg_client = None
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
