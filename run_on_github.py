@@ -248,15 +248,21 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER ---
+# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE) ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
-    if not tiktok_cookies_data: return False
+    if not tiktok_cookies_data:
+        print("  [!] TIKTOK_COOKIES environment secret not found. Skipping TikTok upload.")
+        return False
 
     engine_dir = "tiktok_engine"
-    if not os.path.exists(engine_dir): return False
+    if not os.path.exists(engine_dir):
+        print("  [!] tiktok_engine directory not found. Make sure workflow cloned makiisthenes/TiktokAutoUploader.")
+        return False
 
+    print(f"  [~] Starting TikTok Direct API upload for: '{description[:40]}...'")
+    
     cookies_dir = os.path.join(engine_dir, "CookiesDir")
     os.makedirs(cookies_dir, exist_ok=True)
     username = "omni_user"
@@ -292,22 +298,55 @@ def upload_video_to_tiktok(video_path, description):
 
         abs_video_path = os.path.abspath(video_path)
         cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
+        
+        print("  [~] Executing TikTok Direct API Upload Request...")
         res = subprocess.run(cmd, cwd=engine_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
-        return res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower()
+        
+        if res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower():
+            print("  [+] TikTok Direct API video upload successful!")
+            return True
+        else:
+            print(f"  [!] TikTok upload failed. Stdout: {res.stdout.strip()}")
+            if res.stderr: print(f"  [!] TikTok Stderr: {res.stderr.strip()}")
+            return False
     except Exception as e:
-        print(f"  [!] Exception during TikTok upload: {e}")
+        print(f"  [!] Exception during TikTok Direct API upload: {e}")
         return False
     finally:
         if os.path.exists(cookie_file): os.remove(cookie_file)
 
 # --- WHATSAPP (GREEN-API) ENGINE ---
+def resolve_whatsapp_channel_id(id_instance, api_token, api_url, target_id):
+    clean_code = target_id.split('/')[-1].replace('@newsletter', '').replace('@g.us', '').strip()
+    if clean_code.startswith("120363") and "@" in target_id:
+        return target_id
+
+    try:
+        url = f"{api_url}/waInstance{id_instance}/getNewsletterInfo/{api_token}"
+        payload = {"inviteCode": clean_code}
+        res = requests.post(url, json=payload, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            resolved_id = data.get("chatId") or data.get("id")
+            if resolved_id:
+                print(f"  [+] Resolved WA Channel '{clean_code}' -> JID: '{resolved_id}'")
+                return resolved_id
+    except Exception: pass
+
+    if not target_id.endswith("@newsletter") and not target_id.endswith("@g.us"):
+        return f"{clean_code}@newsletter"
+    return target_id
+
 def post_text_to_whatsapp(id_instance, api_token, api_url, chat_id, text):
     if not id_instance or not api_token: return False
     try:
         url = f"{api_url}/waInstance{id_instance}/sendMessage/{api_token}"
         payload = {"chatId": chat_id, "message": text}
         res = requests.post(url, json=payload, timeout=25)
-        return res.status_code == 200
+        if res.status_code == 200: return True
+        else:
+            print(f"  [!] WA text error {res.status_code}: {res.text}")
+            return False
     except Exception as e:
         print(f"  [!] WhatsApp text posting error: {e}")
         return False
@@ -319,7 +358,10 @@ def post_file_to_whatsapp(id_instance, api_token, api_url, chat_id, file_path, c
         data = {"chatId": chat_id, "caption": caption}
         files = {"file": open(file_path, "rb")}
         res = requests.post(url, data=data, files=files, timeout=60)
-        return res.status_code == 200
+        if res.status_code == 200: return True
+        else:
+            print(f"  [!] WA file error {res.status_code}: {res.text}")
+            return False
     except Exception as e:
         print(f"  [!] WhatsApp file posting error: {e}")
         return False
@@ -393,7 +435,7 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- A. WEBSITE SOURCE (RSS FEED) AUTOMATION ---
+                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 if source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
@@ -461,17 +503,29 @@ async def process_sync(config, memory):
                                 seen_base_urls.add(base_url)
                                 cleaned_img_urls.append(url)
 
-                        # APPLIED WHATSAPP CONTACT FOOTER TO EVERY POST
+                        # CHECK FOR 4 KEYWORDS TO FORCE FULL ARTICLE POST
+                        target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
+                        full_text_search = f"{entry.title} {cleaned_description}"
+                        has_all_4_keywords = all(kw in full_text_search for kw in target_keywords)
+
                         contact_suffix = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
                         title_only_flag = rule.get('title_only', False)
                         
-                        if title_only_flag:
-                            final_post_text = clean_text(f"📝 {entry.title}", keep_hashtags=keep_hashtags) + contact_suffix
-                        else:
+                        # NO EMOJI 📝 PREFIX IN TITLE
+                        if has_all_4_keywords:
+                            print(f"  [+] All 4 Keywords Matched ('চলমান, সকল, চাকরির, নিয়োগ'). Forcing Full Post!")
                             if cleaned_description:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags) + contact_suffix
+                                final_post_text = clean_text(f"{entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags) + contact_suffix
                             else:
-                                final_post_text = clean_text(f"📝 {entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
+                                final_post_text = clean_text(f"{entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
+                        else:
+                            if title_only_flag:
+                                final_post_text = clean_text(f"{entry.title}", keep_hashtags=keep_hashtags) + contact_suffix
+                            else:
+                                if cleaned_description:
+                                    final_post_text = clean_text(f"{entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags) + contact_suffix
+                                else:
+                                    final_post_text = clean_text(f"{entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
 
                         # DOWNLOAD & FILTER IMAGES (REJECT BANNER IMAGES WITH RATIO >= 16/9)
                         photo_paths = []
@@ -483,7 +537,6 @@ async def process_sync(config, memory):
                                         p = f"tmp_rss_{hash(entry_link)}_{idx}.jpg"
                                         with open(p, 'wb') as f: f.write(ir.content)
                                         
-                                        # ASPECT RATIO FILTER: SKIP IMAGES >= 16/9 RATIO
                                         try:
                                             with Image.open(p) as img:
                                                 w, h = img.size
@@ -499,7 +552,7 @@ async def process_sync(config, memory):
 
                         posted_success = False
                         
-                        # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP CHANNELS
+                        # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP
                         if rule['txt']:
                             for did in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
@@ -527,9 +580,7 @@ async def process_sync(config, memory):
                                     green_token = credentials.get("greenapi_api_token", "")
                                     green_url = credentials.get("greenapi_url", "https://7107.api.greenapi.com")
                                     
-                                    clean_wa_id = did.split('/')[-1] if 'whatsapp.com' in did else did
-                                    if not clean_wa_id.endswith('@newsletter') and not clean_wa_id.endswith('@g.us'):
-                                        clean_wa_id = f"{clean_wa_id}@newsletter"
+                                    clean_wa_id = resolve_whatsapp_channel_id(green_id, green_token, green_url, did)
 
                                     print(f"  [~] Sending Post to WhatsApp Channel: {clean_wa_id}...")
                                     if photo_paths:
