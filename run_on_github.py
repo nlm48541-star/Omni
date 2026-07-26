@@ -315,55 +315,25 @@ def upload_video_to_tiktok(video_path, description):
     finally:
         if os.path.exists(cookie_file): os.remove(cookie_file)
 
-# --- WHATSAPP (GREEN-API) ENGINE ---
-def resolve_whatsapp_channel_id(id_instance, api_token, api_url, target_id):
-    clean_code = target_id.split('/')[-1].replace('@newsletter', '').replace('@g.us', '').strip()
-    if clean_code.startswith("120363") and "@" in target_id:
-        return target_id
-
+# --- WHATSAPP (RENDER BAILEYS BRIDGE) ENGINE ---
+def post_to_whatsapp_channel(render_url, channel_id, text):
+    if not render_url: return False
     try:
-        url = f"{api_url}/waInstance{id_instance}/getNewsletterInfo/{api_token}"
-        payload = {"inviteCode": clean_code}
-        res = requests.post(url, json=payload, timeout=15)
-        if res.status_code == 200:
-            data = res.json()
-            resolved_id = data.get("chatId") or data.get("id")
-            if resolved_id:
-                print(f"  [+] Resolved WA Channel '{clean_code}' -> JID: '{resolved_id}'")
-                return resolved_id
-    except Exception: pass
-
-    if not target_id.endswith("@newsletter") and not target_id.endswith("@g.us"):
-        return f"{clean_code}@newsletter"
-    return target_id
-
-def post_text_to_whatsapp(id_instance, api_token, api_url, chat_id, text):
-    if not id_instance or not api_token: return False
-    try:
-        url = f"{api_url}/waInstance{id_instance}/sendMessage/{api_token}"
-        payload = {"chatId": chat_id, "message": text}
-        res = requests.post(url, json=payload, timeout=25)
-        if res.status_code == 200: return True
+        url = f"{render_url.rstrip('/')}/send"
+        clean_id = channel_id.split('/')[-1].replace('@newsletter', '').strip()
+        payload = {
+            "channel_id": clean_id,
+            "text": text
+        }
+        res = requests.post(url, json=payload, timeout=30)
+        if res.status_code == 200 and res.json().get("status") == "success":
+            print(f"  [+] Posted successfully to WhatsApp Channel '{clean_id}' via Render!")
+            return True
         else:
-            print(f"  [!] WA text error {res.status_code}: {res.text}")
+            print(f"  [!] Render WA Error ({res.status_code}): {res.text}")
             return False
     except Exception as e:
-        print(f"  [!] WhatsApp text posting error: {e}")
-        return False
-
-def post_file_to_whatsapp(id_instance, api_token, api_url, chat_id, file_path, caption):
-    if not id_instance or not api_token or not os.path.exists(file_path): return False
-    try:
-        url = f"{api_url}/waInstance{id_instance}/sendFileByUpload/{api_token}"
-        data = {"chatId": chat_id, "caption": caption}
-        files = {"file": open(file_path, "rb")}
-        res = requests.post(url, data=data, files=files, timeout=60)
-        if res.status_code == 200: return True
-        else:
-            print(f"  [!] WA file error {res.status_code}: {res.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] WhatsApp file posting error: {e}")
+        print(f"  [!] WhatsApp Render posting exception: {e}")
         return False
 
 # --- FACEBOOK ACCESS ENGINE ---
@@ -472,7 +442,6 @@ async def process_sync(config, memory):
                             print(f"  [-] Skipping article completely '{entry.title}': Title matched filter keywords ('চলমান, সকল, চাকরির, নিয়োগ').")
                             new_processed_links.append(entry_link)
                             continue
-                        # -----------------------------------------------------
 
                         raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
                         cleaned_description = strip_html(raw_description)
@@ -571,21 +540,10 @@ async def process_sync(config, memory):
                                         else: posted_success = post_text_to_facebook(did, token, final_post_text)
 
                                 elif dest_platform == "WhatsApp":
-                                    green_id = credentials.get("greenapi_id_instance", "")
-                                    green_token = credentials.get("greenapi_api_token", "")
-                                    green_url = credentials.get("greenapi_url", "https://7107.api.greenapi.com")
-                                    
-                                    clean_wa_id = resolve_whatsapp_channel_id(green_id, green_token, green_url, did)
-
-                                    print(f"  [~] Sending Post to WhatsApp Channel: {clean_wa_id}...")
-                                    if photo_paths:
-                                        if post_file_to_whatsapp(green_id, green_token, green_url, clean_wa_id, photo_paths[0], final_post_text):
-                                            posted_success = True
-                                            print(f"  [+] WhatsApp Channel photo post successful!")
-                                    else:
-                                        if post_text_to_whatsapp(green_id, green_token, green_url, clean_wa_id, final_post_text):
-                                            posted_success = True
-                                            print(f"  [+] WhatsApp Channel text post successful!")
+                                    render_url = credentials.get("render_wa_url", "https://wa-channel-bridge.onrender.com")
+                                    print(f"  [~] Sending Post to WhatsApp Channel: {did} via Render...")
+                                    if post_to_whatsapp_channel(render_url, did, final_post_text):
+                                        posted_success = True
 
                         # 2. GENERATE & SEND REELS VIDEO (ONLY TO FACEBOOK, YOUTUBE & TIKTOK)
                         audio_file = find_audio_file()
