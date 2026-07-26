@@ -465,7 +465,15 @@ async def process_sync(config, memory):
 
                         if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
                         if entry_time < lookback_threshold or entry_link in processed_links: continue
-                        
+
+                        # --- SKIP ARTICLE IF ALL 4 KEYWORDS MATCH IN TITLE ---
+                        target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
+                        if all(kw in entry.title for kw in target_keywords):
+                            print(f"  [-] Skipping article completely '{entry.title}': Title matched filter keywords ('চলমান, সকল, চাকরির, নিয়োগ').")
+                            new_processed_links.append(entry_link)
+                            continue
+                        # -----------------------------------------------------
+
                         raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
                         cleaned_description = strip_html(raw_description)
 
@@ -503,29 +511,16 @@ async def process_sync(config, memory):
                                 seen_base_urls.add(base_url)
                                 cleaned_img_urls.append(url)
 
-                        # CHECK FOR 4 KEYWORDS TO FORCE FULL ARTICLE POST
-                        target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
-                        full_text_search = f"{entry.title} {cleaned_description}"
-                        has_all_4_keywords = all(kw in full_text_search for kw in target_keywords)
-
                         contact_suffix = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
                         title_only_flag = rule.get('title_only', False)
                         
-                        # NO EMOJI 📝 PREFIX IN TITLE
-                        if has_all_4_keywords:
-                            print(f"  [+] All 4 Keywords Matched ('চলমান, সকল, চাকরির, নিয়োগ'). Forcing Full Post!")
+                        if title_only_flag:
+                            final_post_text = clean_text(f"{entry.title}", keep_hashtags=keep_hashtags) + contact_suffix
+                        else:
                             if cleaned_description:
                                 final_post_text = clean_text(f"{entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags) + contact_suffix
                             else:
                                 final_post_text = clean_text(f"{entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
-                        else:
-                            if title_only_flag:
-                                final_post_text = clean_text(f"{entry.title}", keep_hashtags=keep_hashtags) + contact_suffix
-                            else:
-                                if cleaned_description:
-                                    final_post_text = clean_text(f"{entry.title}\n\n{cleaned_description}", keep_hashtags=keep_hashtags) + contact_suffix
-                                else:
-                                    final_post_text = clean_text(f"{entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
 
                         # DOWNLOAD & FILTER IMAGES (REJECT BANNER IMAGES WITH RATIO >= 16/9)
                         photo_paths = []
