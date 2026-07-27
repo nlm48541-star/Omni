@@ -13,63 +13,63 @@
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtnotice.com/",
             "destination": "📢 Telegram",
             "dest_id": "chakrirkhobor26, chakrircircular, bdjobnotice",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtnotice.com/",
             "destination": "👥 Facebook",
             "dest_id": "1149794398220583, 1182772684915896, 1114356038435251, 897419980112996, 1235216436331436, 1245958895257137, 1221270051064384, 1215385464985422, 1212616578593702",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtnotice.com/",
             "destination": "🟢 WhatsApp",
             "dest_id": "0029VbCsrU6IHphJ1G2Ctv0X@newsletter, 0029VbDN5b3CsU9XlRYVRq0s@newsletter, 0029VbDIfE217EmxC6bLbb3A@newsletter",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://projobsbd.com/",
             "destination": "📢 Telegram",
             "dest_id": "chakrirkhobor26, chakrircircular, bdjobnotice",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://projobsbd.com/",
             "destination": "👥 Facebook",
             "dest_id": "1149794398220583, 1182772684915896, 1114356038435251, 897419980112996, 1235216436331436, 1245958895257137, 1221270051064384, 1215385464985422, 1212616578593702",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://projobsbd.com/",
             "destination": "🟢 WhatsApp",
             "dest_id": "0029VbCsrU6IHphJ1G2Ctv0X@newsletter, 0029VbDN5b3CsU9XlRYVRq0s@newsletter, 0029VbDIfE217EmxC6bLbb3A@newsletter",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtjob.net/",
             "destination": "📢 Telegram",
             "dest_id": "chakrirkhobor26, chakrircircular, bdjobnotice",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtjob.net/",
             "destination": "👥 Facebook",
             "dest_id": "1149794398220583, 1182772684915896, 1114356038435251, 897419980112996, 1235216436331436, 1245958895257137, 1221270051064384, 1215385464985422, 1212616578593702",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
             "source": "🌐 Website",
             "source_id": "https://morss.it/:nolink:noref/https://bdgovtjob.net/",
             "destination": "🟢 WhatsApp",
             "dest_id": "0029VbCsrU6IHphJ1G2Ctv0X@newsletter, 0029VbDN5b3CsU9XlRYVRq0s@newsletter, 0029VbDIfE217EmxC6bLbb3A@newsletter",
-            "txt": true, "img": true, "vid": false, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
+            "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         }
     ]
-}
+        }
