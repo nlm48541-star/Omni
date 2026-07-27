@@ -1,10 +1,10 @@
 {
     "credentials": {
-        "tg_api_id": "26018266",
-        "tg_api_hash": "bcd8e73765083d7aae6ca54f53ad0fa2",
-        "tg_session": "1BVtsOGwBu5omEYgnyel-fznxg5Vxfnaw5VyPs3Zz-AN500tOrT2dflpbwT1lpleKIfRsbqltk6FX6lq9aFaSfkOkKGGTZbojpQ2biTQ0RJxIIMZE9MVlSQ9KD8mzlFbwLvZTeGTYPSjcH5pwNQ0AlOwlkarczha0BJUbbO5Ngo3EEHW9GubWOQUsqXrnnBvXRYfsUnlJBKjTUzxRa07okzgJsmHCQrqSc8Af_ELI0joC5zRkXbDNDDdxxbs9Jp7xqFmrbrsT5xsysDBEM7eypHz3P4NFW7p3Ii-asostSUIcaUGD3aySmCl2mtTjPnntLshp23oBfTrzpJIAjXT17xW2qqSq2Vc=",
-        "fb_token": "EAAg7BAxGYrEBR4E059Jdg4ASic8A4oKqSiTbV3mGdSMeyhZAW81gtKgemjh8MBZAencLnUBPVEVyIOWw4X5qyqhXwgagQEe1rLCKttb5ZBiAKmVUr5ZALYZAUjznlrwCqJ5Gc5RQrpHObIHPBmeCdBhBm0g4W7U2cGFvkMuJ3rZBsmzwmIfNTJAJ7m5ZB4F",
-        "render_wa_url": "https://wa-channel-bridge.onrender.com",
+        "tg_api_id": "",
+        "tg_api_hash": "",
+        "tg_session": "",
+        "fb_token": "",
+        "render_wa_url": "",
         "web_auth_token": ""
     },
     "rules": [
@@ -72,4 +72,4 @@
             "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         }
     ]
-        }
+}
