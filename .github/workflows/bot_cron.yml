@@ -49,6 +49,11 @@ jobs:
 
       - name: Execute OmniSync Master Engine
         env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          FB_TOKEN: ${{ secrets.FB_TOKEN }}
+          RENDER_WA_URL: ${{ secrets.RENDER_WA_URL }}
           YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
