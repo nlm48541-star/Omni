@@ -261,7 +261,10 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         with open(video_path, "rb") as f:
             up_res = requests.put(upload_url, headers={"Content-Length": str(os.path.getsize(video_path)), "Content-Type": "video/mp4"}, data=f, timeout=300)
             
-        return up_res.status_code in [200, 201]
+        if up_res.status_code in [200, 201]:
+            print(f"  [+] YouTube Short uploaded successfully!")
+            return True
+        return False
     except Exception as e:
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
@@ -288,10 +291,16 @@ def upload_video_to_tiktok(video_path, description):
 
     try:
         tiktok_cookies_str = tiktok_cookies_data.strip()
+        cookies_json = []
+
         if tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{"):
-            with open(cookie_file, "w", encoding="utf-8") as f: f.write(tiktok_cookies_str)
-        else:
-            cookies_json = []
+            try:
+                parsed = json.loads(tiktok_cookies_str)
+                if isinstance(parsed, list): cookies_json = parsed
+                elif isinstance(parsed, dict): cookies_json = [parsed]
+            except Exception: pass
+
+        if not cookies_json:
             for line in tiktok_cookies_str.splitlines():
                 line = line.strip()
                 if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
@@ -312,7 +321,25 @@ def upload_video_to_tiktok(video_path, description):
                         "storeId": "0",
                         "value": value
                     })
-            with open(cookie_file, "w", encoding="utf-8") as f: json.dump(cookies_json, f, indent=2)
+
+        # Inject explicit sessionid key if sessionid_ss exists
+        sessionid_val = None
+        for c in cookies_json:
+            if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
+                sessionid_val = c.get("value")
+                break
+        
+        if sessionid_val and not any(c.get("name") == "sessionid" for c in cookies_json if isinstance(c, dict)):
+            cookies_json.append({
+                "domain": ".tiktok.com",
+                "name": "sessionid",
+                "value": sessionid_val,
+                "path": "/",
+                "secure": True
+            })
+
+        with open(cookie_file, "w", encoding="utf-8") as f:
+            json.dump(cookies_json, f, indent=2)
 
         abs_video_path = os.path.abspath(video_path)
         cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
@@ -417,6 +444,7 @@ async def process_sync(config, memory):
                 tg_client = None
 
     current_time = datetime.now(timezone.utc)
+    global_yt_tt_processed = set()  # Deduplication set for YouTube and TikTok uploads
 
     for idx, rule in enumerate(rules):
         rule_key = f"route_{idx}_{rule['source']}_{rule['destination']}"
@@ -572,9 +600,8 @@ async def process_sync(config, memory):
                                     if post_to_whatsapp_channel(render_url, did, final_post_text):
                                         posted_success = True
 
-                        # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR EACH FACEBOOK PAGE, YOUTUBE & TIKTOK
+                        # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR FACEBOOK PAGES
                         if photo_paths:
-                            # A. Unique Video Per Facebook Page with Different Random Background Audio
                             if dest_platform == "Facebook":
                                 for did in dest_ids:
                                     token = get_page_access_token(fb_user_token, did)
@@ -592,29 +619,31 @@ async def process_sync(config, memory):
                                                 if os.path.exists(page_video_file):
                                                     os.remove(page_video_file)
 
-                            # B. YouTube Shorts & TikTok Upload (Uses Random Audio)
-                            audio_file_yt_tt = get_random_audio_file()
-                            if audio_file_yt_tt:
-                                video_title_yt_tt = sanitize_filename(f"{entry.title}_yt_tt")
-                                os.makedirs("reels_output", exist_ok=True)
-                                yt_tt_video_file = f"reels_output/{video_title_yt_tt}.mp4"
-                                
-                                video_created_yt_tt = create_reels_video(photo_paths, audio_file_yt_tt, yt_tt_video_file)
-                                if video_created_yt_tt and os.path.exists(yt_tt_video_file):
-                                    # YouTube Shorts
-                                    yt_id = os.environ.get("YT_CLIENT_ID", "")
-                                    yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
-                                    yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
-                                    if yt_id and yt_secret and yt_refresh:
-                                        upload_video_to_youtube(yt_id, yt_secret, yt_refresh, yt_tt_video_file, entry.title, final_post_text)
+                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS ONLY ONCE PER ARTICLE)
+                            if entry_link not in global_yt_tt_processed:
+                                global_yt_tt_processed.add(entry_link)
+                                audio_file_yt_tt = get_random_audio_file()
+                                if audio_file_yt_tt:
+                                    video_title_yt_tt = sanitize_filename(f"{entry.title}_yt_tt")
+                                    os.makedirs("reels_output", exist_ok=True)
+                                    yt_tt_video_file = f"reels_output/{video_title_yt_tt}.mp4"
+                                    
+                                    video_created_yt_tt = create_reels_video(photo_paths, audio_file_yt_tt, yt_tt_video_file)
+                                    if video_created_yt_tt and os.path.exists(yt_tt_video_file):
+                                        # YouTube Shorts
+                                        yt_id = os.environ.get("YT_CLIENT_ID", "")
+                                        yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
+                                        yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
+                                        if yt_id and yt_secret and yt_refresh:
+                                            upload_video_to_youtube(yt_id, yt_secret, yt_refresh, yt_tt_video_file, entry.title, final_post_text)
 
-                                    # TikTok
-                                    tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
-                                    if tiktok_cookies:
-                                        upload_video_to_tiktok(yt_tt_video_file, final_post_text)
+                                        # TikTok
+                                        tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
+                                        if tiktok_cookies:
+                                            upload_video_to_tiktok(yt_tt_video_file, final_post_text)
 
-                                    if os.path.exists(yt_tt_video_file):
-                                        os.remove(yt_tt_video_file)
+                                        if os.path.exists(yt_tt_video_file):
+                                            os.remove(yt_tt_video_file)
 
                         for path in photo_paths:
                             if os.path.exists(path): os.remove(path)
