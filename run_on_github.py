@@ -375,7 +375,6 @@ def upload_video_to_tiktok(video_path, description):
                     break
 
         if sessionid_val:
-            # Ensure both array format and key-value formats are present
             cookies_json.append({
                 "domain": ".tiktok.com",
                 "name": "sessionid",
@@ -390,7 +389,7 @@ def upload_video_to_tiktok(video_path, description):
         abs_video_path = os.path.abspath(video_path)
         cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
         
-        print("  [~] Executing TikTok Direct API Upload Request...")
+        print(f"  [~] Executing TikTok Direct API Upload Request...")
         res = subprocess.run(cmd, cwd=engine_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
         
         if res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower():
@@ -576,7 +575,7 @@ async def process_sync(config, memory):
                         img_urls = []
                         if 'enclosures' in entry and entry.enclosures: img_urls.extend([enc.get('href', '') for enc in entry.enclosures if enc.get('type', '').startswith('image/') or enc.get('href', '').lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))])
                         if 'media_content' in entry and entry.media_content: img_urls.extend([mc.get('url') for mc in entry.media_content if mc.get('url') and mc.get('url') not in img_urls])
-                        if 'media_thumbnail' in entry and entry.media_thumbnail: img_urls.extend([mt.get('url') for mt in entry.media_thumbnail if mt.get('url') and mt.get('url') not in img_urls])
+                        if 'media_thumbnail' in entry and entry.media_thumbnail: img_urls.extend([mt.get('url') for mt in entry.media_thumbnail if mt.get('url') and mt.get('url') not in mt_urls])
                         img_urls.extend([url for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_description, re.IGNORECASE) if url not in img_urls])
 
                         try:
@@ -669,8 +668,9 @@ async def process_sync(config, memory):
                                             posted_success = post_text_to_facebook(did, token, final_post_text)
 
                                 elif dest_platform == "WhatsApp":
+                                    render_url = credentials.get("render_wa_url", "https://wa-channel-bridge.onrender.com")
                                     print(f"  [~] Sending Photo/Text Post to WhatsApp Channel: {did} via Render...")
-                                    if post_to_whatsapp_channel(render_wa_url, did, final_post_text):
+                                    if post_to_whatsapp_channel(render_url, did, final_post_text):
                                         posted_success = True
 
                         # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR FACEBOOK PAGES
