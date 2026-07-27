@@ -177,13 +177,15 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     shutil.rmtree(temp_dir, ignore_errors=True)
     return success
 
-# --- FACEBOOK REELS UPLOADER ---
+# --- FACEBOOK REELS & VIDEO UPLOADER ---
 def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
     try:
         url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
         payload = {'upload_phase': 'start', 'access_token': page_token}
         res = requests.post(url, data=payload, timeout=25)
-        if res.status_code != 200: return False
+        if res.status_code != 200:
+            print(f"  [!] FB Reel Step 1 Failed ({res.status_code}) for page {page_id}: {res.text}")
+            return False
         
         data = res.json()
         video_id, upload_url = data.get("video_id"), data.get("upload_url")
@@ -199,7 +201,9 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         with open(video_path, "rb") as f:
             up_res = requests.post(upload_url, headers=headers, data=f, timeout=180)
             
-        if up_res.status_code != 200: return False
+        if up_res.status_code != 200:
+            print(f"  [!] FB Reel Step 2 Upload Failed ({up_res.status_code}): {up_res.text}")
+            return False
             
         finish_payload = {
             "video_id": video_id,
@@ -211,11 +215,29 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         }
         pub_res = requests.post(url, data=finish_payload, timeout=40)
         if pub_res.status_code == 200:
-            print(f"  [+] FB Reel uploaded successfully to page {page_id}!")
+            print(f"  [+] FB Reel published successfully to page {page_id}!")
             return True
-        return False
+        else:
+            print(f"  [!] FB Reel Step 3 Publish Failed ({pub_res.status_code}): {pub_res.text}")
+            return False
     except Exception as e:
-        print(f"  [!] Exception during FB Reels upload: {e}")
+        print(f"  [!] Exception during FB Reels upload to page {page_id}: {e}")
+        return False
+
+def post_video_to_facebook(page_id, page_token, video_path, caption):
+    try:
+        url = f"https://graph.facebook.com/v20.0/{page_id}/videos"
+        files = {'file': open(video_path, 'rb')}
+        data = {'description': caption, 'access_token': page_token}
+        res = requests.post(url, data=data, files=files, timeout=120)
+        if res.status_code == 200:
+            print(f"  [+] FB Standard Video Feed uploaded successfully to page {page_id}!")
+            return True
+        else:
+            print(f"  [!] FB Standard Video Feed failed ({res.status_code}) for page {page_id}: {res.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Exception posting FB video feed: {e}")
         return False
 
 # --- YOUTUBE SHORTS UPLOADER ---
@@ -390,12 +412,15 @@ def post_to_whatsapp_channel(render_url, channel_id, text):
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
-        r = requests.get(f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}", timeout=20)
+        url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}&limit=100"
+        r = requests.get(url, timeout=20)
         if r.status_code == 200:
             for p in r.json().get('data', []):
-                if p['id'] == page_id: return p['access_token']
-    except Exception: pass
-    return None
+                if str(p.get('id')) == str(page_id):
+                    return p.get('access_token')
+    except Exception as e:
+        print(f"  [!] Exception fetching page token for {page_id}: {e}")
+    return master_user_token
 
 def post_text_to_facebook(page_id, page_token, text):
     try: return requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': text, 'access_token': page_token}, timeout=25).status_code == 200
@@ -444,7 +469,7 @@ async def process_sync(config, memory):
                 tg_client = None
 
     current_time = datetime.now(timezone.utc)
-    global_yt_tt_processed = set()  # Deduplication set for YouTube and TikTok uploads
+    global_yt_tt_processed = set()
 
     for idx, rule in enumerate(rules):
         rule_key = f"route_{idx}_{rule['source']}_{rule['destination']}"
@@ -615,11 +640,17 @@ async def process_sync(config, memory):
                                             video_created = create_reels_video(photo_paths, audio_file, page_video_file)
                                             if video_created and os.path.exists(page_video_file):
                                                 print(f"  [~] Uploading Unique Reel to Facebook Page: {did}...")
-                                                post_reel_to_facebook(did, token, page_video_file, entry.title, final_post_text)
+                                                reel_ok = post_reel_to_facebook(did, token, page_video_file, entry.title, final_post_text)
+                                                
+                                                # Fallback to standard FB video feed if reel fails
+                                                if not reel_ok:
+                                                    print(f"  [~] Falling back to Standard Video Feed upload for FB Page: {did}...")
+                                                    post_video_to_facebook(did, token, page_video_file, final_post_text)
+
                                                 if os.path.exists(page_video_file):
                                                     os.remove(page_video_file)
 
-                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS ONLY ONCE PER ARTICLE)
+                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS EXACTLY ONCE PER ARTICLE)
                             if entry_link not in global_yt_tt_processed:
                                 global_yt_tt_processed.add(entry_link)
                                 audio_file_yt_tt = get_random_audio_file()
@@ -630,14 +661,12 @@ async def process_sync(config, memory):
                                     
                                     video_created_yt_tt = create_reels_video(photo_paths, audio_file_yt_tt, yt_tt_video_file)
                                     if video_created_yt_tt and os.path.exists(yt_tt_video_file):
-                                        # YouTube Shorts
                                         yt_id = os.environ.get("YT_CLIENT_ID", "")
                                         yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
                                         yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
                                         if yt_id and yt_secret and yt_refresh:
                                             upload_video_to_youtube(yt_id, yt_secret, yt_refresh, yt_tt_video_file, entry.title, final_post_text)
 
-                                        # TikTok
                                         tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
                                         if tiktok_cookies:
                                             upload_video_to_tiktok(yt_tt_video_file, final_post_text)
