@@ -316,7 +316,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE) ---
+# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE WITH REGEX PARSER) ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
@@ -340,6 +340,7 @@ def upload_video_to_tiktok(video_path, description):
         tiktok_cookies_str = tiktok_cookies_data.strip()
         cookies_json = []
 
+        # Parse Netscape cookie format
         for line in tiktok_cookies_str.splitlines():
             line = line.strip()
             if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
@@ -361,32 +362,27 @@ def upload_video_to_tiktok(video_path, description):
                     "value": value
                 })
 
+        # Powerful Regex Extraction for sessionid
         sessionid_val = None
-        for c in cookies_json:
-            if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
-                sessionid_val = c.get("value")
-                break
+        session_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_str, re.IGNORECASE)
+        if session_match:
+            sessionid_val = session_match.group(1)
 
-        if not sessionid_val and (tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{")):
-            try:
-                parsed = json.loads(tiktok_cookies_str)
-                if isinstance(parsed, list):
-                    cookies_json = parsed
-                    for c in parsed:
-                        if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
-                            sessionid_val = c.get("value")
-                            break
-            except Exception: pass
+        if not sessionid_val:
+            for c in cookies_json:
+                if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
+                    sessionid_val = c.get("value")
+                    break
 
         if sessionid_val:
-            if not any(c.get("name") == "sessionid" for c in cookies_json if isinstance(c, dict)):
-                cookies_json.append({
-                    "domain": ".tiktok.com",
-                    "name": "sessionid",
-                    "value": sessionid_val,
-                    "path": "/",
-                    "secure": True
-                })
+            # Ensure both array format and key-value formats are present
+            cookies_json.append({
+                "domain": ".tiktok.com",
+                "name": "sessionid",
+                "value": sessionid_val,
+                "path": "/",
+                "secure": True
+            })
 
         with open(cookie_file, "w", encoding="utf-8") as f:
             json.dump(cookies_json, f, indent=2)
@@ -648,7 +644,6 @@ async def process_sync(config, memory):
                         # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP
                         if rule['txt']:
                             for did in dest_ids:
-                                # TELEGRAM: TEXT + PHOTOS ONLY (NO VIDEO)
                                 if dest_platform == "Telegram" and tg_client:
                                     clean_tg_target = clean_telegram_id(did)
                                     try:
@@ -662,7 +657,6 @@ async def process_sync(config, memory):
                                     except Exception as tg_err:
                                         print(f"  [!] Failed sending to Telegram (@{clean_tg_target}): {tg_err}")
                                         
-                                # FACEBOOK: STEP A - PHOTO/TEXT POST
                                 elif dest_platform == "Facebook":
                                     token = get_page_access_token(fb_user_token, did)
                                     if token:
@@ -674,7 +668,6 @@ async def process_sync(config, memory):
                                         else: 
                                             posted_success = post_text_to_facebook(did, token, final_post_text)
 
-                                # WHATSAPP: TEXT + PHOTOS ONLY (NO VIDEO)
                                 elif dest_platform == "WhatsApp":
                                     print(f"  [~] Sending Photo/Text Post to WhatsApp Channel: {did} via Render...")
                                     if post_to_whatsapp_channel(render_wa_url, did, final_post_text):
@@ -682,7 +675,6 @@ async def process_sync(config, memory):
 
                         # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR FACEBOOK PAGES
                         if photo_paths:
-                            # FACEBOOK: STEP B - DYNAMICALLY LOOP ALL FB PAGE IDs FOR UNIQUE REEL VIDEO
                             if dest_platform == "Facebook":
                                 for did in dest_ids:
                                     token = get_page_access_token(fb_user_token, did)
