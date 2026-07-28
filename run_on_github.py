@@ -316,7 +316,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE WITH REGEX PARSER) ---
+# --- TIKTOK REELS UPLOADER ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
@@ -338,58 +338,71 @@ def upload_video_to_tiktok(video_path, description):
 
     try:
         tiktok_cookies_str = tiktok_cookies_data.strip()
-        cookies_json = []
+        cookies_list = []
 
-        # Parse Netscape cookie format
-        for line in tiktok_cookies_str.splitlines():
-            line = line.strip()
-            if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
-            if not line or line.startswith("#"): continue
-            parts = line.split("\t")
-            if len(parts) >= 7:
-                domain, flag, path, secure, expiration, name, value = parts[:7]
-                cookies_json.append({
-                    "domain": domain,
-                    "expirationDate": float(expiration) if expiration.replace('.', '', 1).isdigit() else 1800000000,
-                    "hostOnly": not domain.startswith("."),
-                    "httpOnly": False,
-                    "name": name,
-                    "path": path,
-                    "sameSite": "unspecified",
-                    "secure": secure.upper() == "TRUE",
+        if tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{"):
+            try:
+                parsed = json.loads(tiktok_cookies_str)
+                if isinstance(parsed, list): cookies_list = parsed
+                elif isinstance(parsed, dict): cookies_list = [parsed]
+            except Exception: pass
+
+        if not cookies_list:
+            for line in tiktok_cookies_str.splitlines():
+                line = line.strip()
+                if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
+                if not line or line.startswith("#"): continue
+                parts = line.split("\t")
+                if len(parts) >= 7:
+                    domain, flag, path, secure, expiration, name, value = parts[:7]
+                    cookies_list.append({
+                        "domain": domain,
+                        "expirationDate": float(expiration) if expiration.replace('.', '', 1).isdigit() else 1800000000,
+                        "hostOnly": not domain.startswith("."),
+                        "httpOnly": False,
+                        "name": name,
+                        "path": path,
+                        "sameSite": "unspecified",
+                        "secure": secure.upper() == "TRUE",
+                        "session": False,
+                        "storeId": "0",
+                        "value": value
+                    })
+
+        session_val = None
+        for c in cookies_list:
+            if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
+                session_val = c.get("value")
+                break
+
+        if not session_val:
+            session_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_str, re.IGNORECASE)
+            if session_match: session_val = session_match.group(1)
+
+        if session_val:
+            has_sessionid = any(isinstance(c, dict) and c.get("name") == "sessionid" for c in cookies_list)
+            if not has_sessionid:
+                cookies_list.append({
+                    "domain": ".tiktok.com",
+                    "expirationDate": 1800000000,
+                    "hostOnly": False,
+                    "httpOnly": True,
+                    "name": "sessionid",
+                    "path": "/",
+                    "sameSite": "no_restriction",
+                    "secure": True,
                     "session": False,
                     "storeId": "0",
-                    "value": value
+                    "value": session_val
                 })
 
-        # Powerful Regex Extraction for sessionid
-        sessionid_val = None
-        session_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_str, re.IGNORECASE)
-        if session_match:
-            sessionid_val = session_match.group(1)
-
-        if not sessionid_val:
-            for c in cookies_json:
-                if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
-                    sessionid_val = c.get("value")
-                    break
-
-        if sessionid_val:
-            cookies_json.append({
-                "domain": ".tiktok.com",
-                "name": "sessionid",
-                "value": sessionid_val,
-                "path": "/",
-                "secure": True
-            })
-
         with open(cookie_file, "w", encoding="utf-8") as f:
-            json.dump(cookies_json, f, indent=2)
+            json.dump(cookies_list, f, indent=2)
 
         abs_video_path = os.path.abspath(video_path)
         cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
         
-        print(f"  [~] Executing TikTok Direct API Upload Request...")
+        print("  [~] Executing TikTok Direct API Upload Request...")
         res = subprocess.run(cmd, cwd=engine_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
         
         if res.returncode == 0 or "uploaded" in res.stdout.lower() or "success" in res.stdout.lower():
@@ -529,7 +542,6 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 if source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
@@ -560,11 +572,13 @@ async def process_sync(config, memory):
                         if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
                         if entry_time < lookback_threshold or entry_link in processed_links: continue
 
+                        # ALWAYS mark entry as processed in this run to prevent infinite re-uploading loops!
+                        new_processed_links.append(entry_link)
+
                         # --- SKIP ARTICLE IF ALL 4 KEYWORDS MATCH IN TITLE ---
                         target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
                         if all(kw in entry.title for kw in target_keywords):
                             print(f"  [-] Skipping article completely '{entry.title}': Title matched filter keywords.")
-                            new_processed_links.append(entry_link)
                             continue
 
                         raw_description = entry.summary if 'summary' in entry else (entry.description if 'description' in entry else "")
@@ -638,8 +652,6 @@ async def process_sync(config, memory):
                                             if os.path.exists(p): os.remove(p)
                                 except Exception: pass
 
-                        posted_success = False
-                        
                         # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP
                         if rule['txt']:
                             for did in dest_ids:
@@ -651,7 +663,6 @@ async def process_sync(config, memory):
                                             await tg_client.send_file(clean_tg_target, photo_paths, caption=final_post_text)
                                         else: 
                                             await tg_client.send_message(clean_tg_target, final_post_text)
-                                        posted_success = True
                                         print(f"  [+] Telegram Channel post successful!")
                                     except Exception as tg_err:
                                         print(f"  [!] Failed sending to Telegram (@{clean_tg_target}): {tg_err}")
@@ -661,17 +672,15 @@ async def process_sync(config, memory):
                                     if token:
                                         print(f"  [~] Sending Photo/Text Post to FB Page: {did}...")
                                         if len(photo_paths) > 1: 
-                                            posted_success = post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
+                                            post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
                                         elif len(photo_paths) == 1: 
-                                            posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
+                                            post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
                                         else: 
-                                            posted_success = post_text_to_facebook(did, token, final_post_text)
+                                            post_text_to_facebook(did, token, final_post_text)
 
                                 elif dest_platform == "WhatsApp":
-                                    render_url = credentials.get("render_wa_url", "https://wa-channel-bridge.onrender.com")
                                     print(f"  [~] Sending Photo/Text Post to WhatsApp Channel: {did} via Render...")
-                                    if post_to_whatsapp_channel(render_url, did, final_post_text):
-                                        posted_success = True
+                                    post_to_whatsapp_channel(render_wa_url, did, final_post_text)
 
                         # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR FACEBOOK PAGES
                         if photo_paths:
@@ -697,7 +706,7 @@ async def process_sync(config, memory):
                                                 if os.path.exists(page_video_file):
                                                     os.remove(page_video_file)
 
-                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS EXACTLY ONCE PER ARTICLE)
+                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS EXACTLY ONCE PER ARTICLE LINK)
                             if entry_link not in global_yt_tt_processed:
                                 global_yt_tt_processed.add(entry_link)
                                 
@@ -737,8 +746,7 @@ async def process_sync(config, memory):
 
                         for path in photo_paths:
                             if os.path.exists(path): os.remove(path)
-                        
-                        if posted_success: new_processed_links.append(entry_link)
+
                     memory[rule_key] = new_processed_links[-50:]
 
             except Exception as e:
