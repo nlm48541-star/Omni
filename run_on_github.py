@@ -316,7 +316,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         print(f"  [!] Exception during YouTube Shorts upload: {e}")
         return False
 
-# --- TIKTOK REELS UPLOADER ---
+# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE WITH REGEX PARSER) ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
@@ -338,66 +338,52 @@ def upload_video_to_tiktok(video_path, description):
 
     try:
         tiktok_cookies_str = tiktok_cookies_data.strip()
-        cookies_list = []
+        cookies_json = []
 
-        if tiktok_cookies_str.startswith("[") or tiktok_cookies_str.startswith("{"):
-            try:
-                parsed = json.loads(tiktok_cookies_str)
-                if isinstance(parsed, list): cookies_list = parsed
-                elif isinstance(parsed, dict): cookies_list = [parsed]
-            except Exception: pass
-
-        if not cookies_list:
-            for line in tiktok_cookies_str.splitlines():
-                line = line.strip()
-                if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
-                if not line or line.startswith("#"): continue
-                parts = line.split("\t")
-                if len(parts) >= 7:
-                    domain, flag, path, secure, expiration, name, value = parts[:7]
-                    cookies_list.append({
-                        "domain": domain,
-                        "expirationDate": float(expiration) if expiration.replace('.', '', 1).isdigit() else 1800000000,
-                        "hostOnly": not domain.startswith("."),
-                        "httpOnly": False,
-                        "name": name,
-                        "path": path,
-                        "sameSite": "unspecified",
-                        "secure": secure.upper() == "TRUE",
-                        "session": False,
-                        "storeId": "0",
-                        "value": value
-                    })
-
-        session_val = None
-        for c in cookies_list:
-            if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
-                session_val = c.get("value")
-                break
-
-        if not session_val:
-            session_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_str, re.IGNORECASE)
-            if session_match: session_val = session_match.group(1)
-
-        if session_val:
-            has_sessionid = any(isinstance(c, dict) and c.get("name") == "sessionid" for c in cookies_list)
-            if not has_sessionid:
-                cookies_list.append({
-                    "domain": ".tiktok.com",
-                    "expirationDate": 1800000000,
-                    "hostOnly": False,
-                    "httpOnly": True,
-                    "name": "sessionid",
-                    "path": "/",
-                    "sameSite": "no_restriction",
-                    "secure": True,
+        # Parse Netscape cookie format
+        for line in tiktok_cookies_str.splitlines():
+            line = line.strip()
+            if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
+            if not line or line.startswith("#"): continue
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                domain, flag, path, secure, expiration, name, value = parts[:7]
+                cookies_json.append({
+                    "domain": domain,
+                    "expirationDate": float(expiration) if expiration.replace('.', '', 1).isdigit() else 1800000000,
+                    "hostOnly": not domain.startswith("."),
+                    "httpOnly": False,
+                    "name": name,
+                    "path": path,
+                    "sameSite": "unspecified",
+                    "secure": secure.upper() == "TRUE",
                     "session": False,
                     "storeId": "0",
-                    "value": session_val
+                    "value": value
                 })
 
+        sessionid_val = None
+        session_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_str, re.IGNORECASE)
+        if session_match:
+            sessionid_val = session_match.group(1)
+
+        if not sessionid_val:
+            for c in cookies_json:
+                if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
+                    sessionid_val = c.get("value")
+                    break
+
+        if sessionid_val:
+            cookies_json.append({
+                "domain": ".tiktok.com",
+                "name": "sessionid",
+                "value": sessionid_val,
+                "path": "/",
+                "secure": True
+            })
+
         with open(cookie_file, "w", encoding="utf-8") as f:
-            json.dump(cookies_list, f, indent=2)
+            json.dump(cookies_json, f, indent=2)
 
         abs_video_path = os.path.abspath(video_path)
         cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
@@ -427,15 +413,19 @@ def warmup_render_server(render_url):
         requests.get(url, timeout=15)
     except Exception: pass
 
-def post_to_whatsapp_channel(render_url, channel_id, text):
+def post_to_whatsapp_channel(render_url, channel_id, text, image_url=None):
     if not render_url: return False
     try:
         url = f"{render_url.rstrip('/')}/send"
         clean_id = channel_id.split('/')[-1].replace('@newsletter', '').strip()
-        payload = {"channel_id": clean_id, "text": text}
+        payload = {
+            "channel_id": clean_id, 
+            "text": text,
+            "image_url": image_url if image_url else ""
+        }
         res = requests.post(url, json=payload, timeout=90)
         if res.status_code == 200 and res.json().get("status") == "success":
-            print(f"  [+] Posted successfully to WhatsApp Channel '{clean_id}' via Render!")
+            print(f"  [+] Posted successfully (Media: {bool(image_url)}) to WhatsApp Channel '{clean_id}' via Render!")
             return True
         else:
             print(f"  [!] Render WA Error ({res.status_code}): {res.text}")
@@ -542,6 +532,7 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
+                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 if source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
@@ -652,6 +643,8 @@ async def process_sync(config, memory):
                                             if os.path.exists(p): os.remove(p)
                                 except Exception: pass
 
+                        posted_success = False
+                        
                         # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP
                         if rule['txt']:
                             for did in dest_ids:
@@ -663,6 +656,7 @@ async def process_sync(config, memory):
                                             await tg_client.send_file(clean_tg_target, photo_paths, caption=final_post_text)
                                         else: 
                                             await tg_client.send_message(clean_tg_target, final_post_text)
+                                        posted_success = True
                                         print(f"  [+] Telegram Channel post successful!")
                                     except Exception as tg_err:
                                         print(f"  [!] Failed sending to Telegram (@{clean_tg_target}): {tg_err}")
@@ -672,15 +666,17 @@ async def process_sync(config, memory):
                                     if token:
                                         print(f"  [~] Sending Photo/Text Post to FB Page: {did}...")
                                         if len(photo_paths) > 1: 
-                                            post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
+                                            posted_success = post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
                                         elif len(photo_paths) == 1: 
-                                            post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
+                                            posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
                                         else: 
-                                            post_text_to_facebook(did, token, final_post_text)
+                                            posted_success = post_text_to_facebook(did, token, final_post_text)
 
                                 elif dest_platform == "WhatsApp":
+                                    first_img_url = cleaned_img_urls[0] if (cleaned_img_urls and photo_paths) else None
                                     print(f"  [~] Sending Photo/Text Post to WhatsApp Channel: {did} via Render...")
-                                    post_to_whatsapp_channel(render_wa_url, did, final_post_text)
+                                    if post_to_whatsapp_channel(render_wa_url, did, final_post_text, image_url=first_img_url):
+                                        posted_success = True
 
                         # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR FACEBOOK PAGES
                         if photo_paths:
@@ -706,7 +702,7 @@ async def process_sync(config, memory):
                                                 if os.path.exists(page_video_file):
                                                     os.remove(page_video_file)
 
-                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS EXACTLY ONCE PER ARTICLE LINK)
+                            # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS EXACTLY ONCE PER ARTICLE)
                             if entry_link not in global_yt_tt_processed:
                                 global_yt_tt_processed.add(entry_link)
                                 
