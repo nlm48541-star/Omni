@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import base64
 import random
 import asyncio
 import requests
@@ -106,7 +107,6 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Generating Reel Video: '{output_path}'")
     if not image_paths: return False
 
-    # Filter out images >= 16:9
     valid_images = []
     for img_path in image_paths:
         try:
@@ -116,14 +116,10 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                 ratio = w / h
                 if ratio < (16 / 9):
                     valid_images.append(img_path)
-                else:
-                    print(f"  [-] Skipping {img_path}: Aspect ratio ({ratio:.2f}) is >= 16/9.")
         except Exception as e:
-            print(f"  [!] Error examining image {img_path}: {e}")
+            pass
 
-    if not valid_images:
-        print("  [!] No valid images under 16:9 ratio found. Skipping video compilation.")
-        return False
+    if not valid_images: return False
 
     audio_duration = get_audio_duration(audio_path)
     total_frames = int(audio_duration * fps)
@@ -196,7 +192,6 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
         subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
     except subprocess.CalledProcessError as e:
-        print(f"  [!] ffmpeg failed. stderr: {e.stderr.decode() if e.stderr else ''}")
         success = False
 
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -209,7 +204,6 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         payload = {'upload_phase': 'start', 'access_token': page_token}
         res = requests.post(url, data=payload, timeout=25)
         if res.status_code != 200:
-            print(f"  [!] FB Reel Step 1 Failed ({res.status_code}) for page {page_id}: {res.text}")
             return False
         
         data = res.json()
@@ -226,9 +220,7 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         with open(video_path, "rb") as f:
             up_res = requests.post(upload_url, headers=headers, data=f, timeout=180)
             
-        if up_res.status_code != 200:
-            print(f"  [!] FB Reel Step 2 Upload Failed ({up_res.status_code}): {up_res.text}")
-            return False
+        if up_res.status_code != 200: return False
             
         finish_payload = {
             "video_id": video_id,
@@ -242,11 +234,8 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
         if pub_res.status_code == 200:
             print(f"  [+] FB Reel published successfully to page {page_id}!")
             return True
-        else:
-            print(f"  [!] FB Reel Step 3 Publish Failed ({pub_res.status_code}): {pub_res.text}")
-            return False
+        else: return False
     except Exception as e:
-        print(f"  [!] Exception during FB Reels upload to page {page_id}: {e}")
         return False
 
 def post_video_to_facebook(page_id, page_token, video_path, caption):
@@ -258,11 +247,8 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         if res.status_code == 200:
             print(f"  [+] FB Standard Video Feed uploaded successfully to page {page_id}!")
             return True
-        else:
-            print(f"  [!] FB Standard Video Feed failed ({res.status_code}) for page {page_id}: {res.text}")
-            return False
+        else: return False
     except Exception as e:
-        print(f"  [!] Exception posting FB video feed: {e}")
         return False
 
 # --- YOUTUBE SHORTS UPLOADER ---
@@ -312,22 +298,16 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             print(f"  [+] YouTube Short uploaded successfully!")
             return True
         return False
-    except Exception as e:
-        print(f"  [!] Exception during YouTube Shorts upload: {e}")
-        return False
+    except Exception as e: return False
 
-# --- TIKTOK REELS UPLOADER (MAKIISTHENES DIRECT API ENGINE WITH REGEX PARSER) ---
+# --- TIKTOK REELS UPLOADER (ENHANCED COOKIE BUILDER) ---
 def upload_video_to_tiktok(video_path, description):
     import sys, json
     tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
-    if not tiktok_cookies_data:
-        print("  [!] TIKTOK_COOKIES environment secret not found. Skipping TikTok upload.")
-        return False
+    if not tiktok_cookies_data: return False
 
     engine_dir = "tiktok_engine"
-    if not os.path.exists(engine_dir):
-        print("  [!] tiktok_engine directory not found. Make sure workflow cloned makiisthenes/TiktokAutoUploader.")
-        return False
+    if not os.path.exists(engine_dir): return False
 
     print(f"  [~] Starting TikTok Direct API upload for: '{description[:40]}...'")
     
@@ -337,53 +317,26 @@ def upload_video_to_tiktok(video_path, description):
     cookie_file = os.path.join(cookies_dir, f"{username}.json")
 
     try:
-        tiktok_cookies_str = tiktok_cookies_data.strip()
-        cookies_json = []
+        # Step 1: Highly Strict Cookie Injection 
+        sessionid_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_data, re.IGNORECASE)
+        mstoken_match = re.search(r'msToken[\t\s"=\:]+([A-Za-z0-9_\-\=]+)', tiktok_cookies_data, re.IGNORECASE)
+        
+        robust_cookie = [
+            {"name": "tiktok_webapp_theme", "value": "dark", "domain": ".www.tiktok.com", "path": "/", "secure": True},
+            {"name": "_ttp", "value": "34mvYu0NbunHJp4gB1sU9fpDlC8", "domain": ".tiktok.com", "path": "/", "secure": True}
+        ]
 
-        # Parse Netscape cookie format
-        for line in tiktok_cookies_str.splitlines():
-            line = line.strip()
-            if line.startswith("#HttpOnly_"): line = line[len("#HttpOnly_"):]
-            if not line or line.startswith("#"): continue
-            parts = line.split("\t")
-            if len(parts) >= 7:
-                domain, flag, path, secure, expiration, name, value = parts[:7]
-                cookies_json.append({
-                    "domain": domain,
-                    "expirationDate": float(expiration) if expiration.replace('.', '', 1).isdigit() else 1800000000,
-                    "hostOnly": not domain.startswith("."),
-                    "httpOnly": False,
-                    "name": name,
-                    "path": path,
-                    "sameSite": "unspecified",
-                    "secure": secure.upper() == "TRUE",
-                    "session": False,
-                    "storeId": "0",
-                    "value": value
-                })
+        if sessionid_match:
+            sid = sessionid_match.group(1)
+            robust_cookie.append({"name": "sessionid", "value": sid, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True})
+            robust_cookie.append({"name": "sessionid_ss", "value": sid, "domain": ".tiktok.com", "path": "/", "secure": True, "httpOnly": True})
 
-        sessionid_val = None
-        session_match = re.search(r'sessionid(?:_ss)?[\t\s"=\:]+([a-f0-9]{32})', tiktok_cookies_str, re.IGNORECASE)
-        if session_match:
-            sessionid_val = session_match.group(1)
-
-        if not sessionid_val:
-            for c in cookies_json:
-                if isinstance(c, dict) and c.get("name") in ["sessionid", "sessionid_ss"]:
-                    sessionid_val = c.get("value")
-                    break
-
-        if sessionid_val:
-            cookies_json.append({
-                "domain": ".tiktok.com",
-                "name": "sessionid",
-                "value": sessionid_val,
-                "path": "/",
-                "secure": True
-            })
+        if mstoken_match:
+            mt = mstoken_match.group(1)
+            robust_cookie.append({"name": "msToken", "value": mt, "domain": ".tiktok.com", "path": "/", "secure": True})
 
         with open(cookie_file, "w", encoding="utf-8") as f:
-            json.dump(cookies_json, f, indent=2)
+            json.dump(robust_cookie, f, indent=2)
 
         abs_video_path = os.path.abspath(video_path)
         cmd = [sys.executable, "cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]]
@@ -404,28 +357,40 @@ def upload_video_to_tiktok(video_path, description):
     finally:
         if os.path.exists(cookie_file): os.remove(cookie_file)
 
-# --- WHATSAPP (RENDER BAILEYS BRIDGE) ENGINE ---
+# --- WHATSAPP MULTIPLE PHOTOS API ENGINE (BASE64 ALBUM MAKER) ---
 def warmup_render_server(render_url):
     if not render_url: return
     try:
         url = f"{render_url.rstrip('/')}/qr"
-        print("  [~] Warming up Render WhatsApp Server...")
         requests.get(url, timeout=15)
     except Exception: pass
 
-def post_to_whatsapp_channel(render_url, channel_id, text, image_url=None):
+def post_to_whatsapp_channel(render_url, channel_id, text, photo_paths):
     if not render_url: return False
     try:
         url = f"{render_url.rstrip('/')}/send"
         clean_id = channel_id.split('/')[-1].replace('@newsletter', '').strip()
+        
+        # Read ALL photo files securely and Base64 encode them for Album sending
+        encoded_images = []
+        if photo_paths:
+            for p in photo_paths:
+                if os.path.exists(p):
+                    with open(p, 'rb') as f:
+                        # Append the pure base64 chunk string
+                        encoded_images.append(base64.b64encode(f.read()).decode('utf-8'))
+        
         payload = {
-            "channel_id": clean_id, 
+            "channel_id": clean_id,
             "text": text,
-            "image_url": image_url if image_url else ""
+            "images": encoded_images
         }
-        res = requests.post(url, json=payload, timeout=90)
+        
+        # Generous timeout up to 120s due to Base64 large array loading + processing inside Render free Node VM
+        res = requests.post(url, json=payload, timeout=120)
+        
         if res.status_code == 200 and res.json().get("status") == "success":
-            print(f"  [+] Posted successfully (Media: {bool(image_url)}) to WhatsApp Channel '{clean_id}' via Render!")
+            print(f"  [+] Posted successfully (Media Array Sent: {len(encoded_images)}) to WhatsApp Channel '{clean_id}' via Render!")
             return True
         else:
             print(f"  [!] Render WA Error ({res.status_code}): {res.text}")
@@ -444,31 +409,20 @@ def get_page_access_token(master_user_token, page_id):
             for p in r.json().get('data', []):
                 if str(p.get('id')) == str(page_id):
                     return p.get('access_token')
-    except Exception as e:
-        print(f"  [!] Exception fetching page token for {page_id}: {e}")
+    except Exception as e: pass
     return master_user_token
 
 def post_text_to_facebook(page_id, page_token, text):
     try: 
         res = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': text, 'access_token': page_token}, timeout=25)
         if res.status_code == 200: return True
-        else:
-            print(f"  [!] FB text post error on page {page_id}: {res.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] FB text post exception on page {page_id}: {e}")
-        return False
+    except Exception: return False
 
 def post_photo_to_facebook(page_id, page_token, photo_path, caption):
     try: 
         res = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'caption': caption, 'access_token': page_token}, files={'source': open(photo_path, 'rb')}, timeout=60)
         if res.status_code == 200: return True
-        else:
-            print(f"  [!] FB photo post error on page {page_id}: {res.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] FB photo post exception on page {page_id}: {e}")
-        return False
+    except Exception: return False
 
 def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
     try:
@@ -479,12 +433,7 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
         if not att: return False
         res = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}, timeout=30)
         if res.status_code == 200: return True
-        else:
-            print(f"  [!] FB multi-photo post error on page {page_id}: {res.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] FB multi-photo post exception on page {page_id}: {e}")
-        return False
+    except Exception as e: return False
 
 # --- CORE PIPELINE CONTROLLER ---
 async def process_sync(config, memory):
@@ -532,7 +481,6 @@ async def process_sync(config, memory):
 
         for source_id in source_ids:
             try:
-                # --- WEBSITE SOURCE (RSS FEED) AUTOMATION ---
                 if source_platform == "Website":
                     is_prothom_alo = "prothomalo.com" in source_id
                     
@@ -563,10 +511,10 @@ async def process_sync(config, memory):
                         if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
                         if entry_time < lookback_threshold or entry_link in processed_links: continue
 
-                        # ALWAYS mark entry as processed in this run to prevent infinite re-uploading loops!
+                        # Mark processed
                         new_processed_links.append(entry_link)
 
-                        # --- SKIP ARTICLE IF ALL 4 KEYWORDS MATCH IN TITLE ---
+                        # Keyword Title Skimmer Check
                         target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
                         if all(kw in entry.title for kw in target_keywords):
                             print(f"  [-] Skipping article completely '{entry.title}': Title matched filter keywords.")
@@ -620,8 +568,13 @@ async def process_sync(config, memory):
                             else:
                                 final_post_text = clean_text(f"{entry.title}\n\n🔗 {entry_link}", keep_hashtags=keep_hashtags) + contact_suffix
 
-                        # DOWNLOAD & FILTER IMAGES (SKIP BANNER IMAGES RATIO >= 16/9)
-                        photo_paths = []
+                        # ---- NEW ALGO: Separate All Images array, and Valid Filtered Array! ----
+                        # raw_photo_paths array (Without Aspect Ratio skipping! Uses ALL original files available. Sent to FB/WA/TG!)
+                        # filtered_photo_paths array (With 16:9 check, Used STRICTLY for Reel MP4 generator frame building!)
+                        
+                        raw_photo_paths = []
+                        filtered_photo_paths = []
+                        
                         if cleaned_img_urls and rule.get('img', True):
                             for idx, url in enumerate(cleaned_img_urls):
                                 try:
@@ -629,15 +582,16 @@ async def process_sync(config, memory):
                                     if ir.status_code == 200:
                                         p = f"tmp_rss_{hash(entry_link)}_{idx}.jpg"
                                         with open(p, 'wb') as f: f.write(ir.content)
-                                        
                                         try:
                                             with Image.open(p) as img:
                                                 w, h = img.size
-                                                if h > 0 and (w / h) < (16 / 9):
-                                                    photo_paths.append(p)
-                                                else:
-                                                    print(f"  [-] Skipping photo {p}: Aspect ratio ({w/h:.2f}) is >= 16/9.")
-                                                    if os.path.exists(p): os.remove(p)
+                                                if h > 0:
+                                                    raw_photo_paths.append(p)
+                                                    # STRICT 16:9 FILTER LOGIC applied ONLY for videos
+                                                    if (w / h) < (16 / 9):
+                                                        filtered_photo_paths.append(p)
+                                                    else:
+                                                        print(f"  [-] Skipped for Video Frame ({p}): Aspect ratio ({w/h:.2f}) >= 16/9.")
                                         except Exception as img_err:
                                             print(f"  [!] Invalid image file {p}: {img_err}")
                                             if os.path.exists(p): os.remove(p)
@@ -645,15 +599,15 @@ async def process_sync(config, memory):
 
                         posted_success = False
                         
-                        # 1. SEND TEXT / IMAGES TO TELEGRAM, FACEBOOK & WHATSAPP
+                        # 1. SEND TEXT / MULTIPLE IMAGES ALBUM TO TELEGRAM, FACEBOOK & WHATSAPP
                         if rule['txt']:
                             for did in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
                                     clean_tg_target = clean_telegram_id(did)
                                     try:
                                         print(f"  [~] Sending Photo/Text Post to Telegram Channel: @{clean_tg_target}...")
-                                        if photo_paths: 
-                                            await tg_client.send_file(clean_tg_target, photo_paths, caption=final_post_text)
+                                        if raw_photo_paths: 
+                                            await tg_client.send_file(clean_tg_target, raw_photo_paths, caption=final_post_text)
                                         else: 
                                             await tg_client.send_message(clean_tg_target, final_post_text)
                                         posted_success = True
@@ -665,21 +619,20 @@ async def process_sync(config, memory):
                                     token = get_page_access_token(fb_user_token, did)
                                     if token:
                                         print(f"  [~] Sending Photo/Text Post to FB Page: {did}...")
-                                        if len(photo_paths) > 1: 
-                                            posted_success = post_multi_photo_to_facebook(did, token, photo_paths, final_post_text)
-                                        elif len(photo_paths) == 1: 
-                                            posted_success = post_photo_to_facebook(did, token, photo_paths[0], final_post_text)
+                                        if len(raw_photo_paths) > 1: 
+                                            post_multi_photo_to_facebook(did, token, raw_photo_paths, final_post_text)
+                                        elif len(raw_photo_paths) == 1: 
+                                            post_photo_to_facebook(did, token, raw_photo_paths[0], final_post_text)
                                         else: 
-                                            posted_success = post_text_to_facebook(did, token, final_post_text)
+                                            post_text_to_facebook(did, token, final_post_text)
 
                                 elif dest_platform == "WhatsApp":
-                                    first_img_url = cleaned_img_urls[0] if (cleaned_img_urls and photo_paths) else None
-                                    print(f"  [~] Sending Photo/Text Post to WhatsApp Channel: {did} via Render...")
-                                    if post_to_whatsapp_channel(render_wa_url, did, final_post_text, image_url=first_img_url):
+                                    print(f"  [~] Sending Photo/Text Album to WhatsApp Channel: {did} via Render...")
+                                    if post_to_whatsapp_channel(render_wa_url, did, final_post_text, raw_photo_paths):
                                         posted_success = True
 
                         # 2. GENERATE & SEND UNIQUE REELS VIDEO FOR FACEBOOK PAGES
-                        if photo_paths:
+                        if filtered_photo_paths:
                             if dest_platform == "Facebook":
                                 for did in dest_ids:
                                     token = get_page_access_token(fb_user_token, did)
@@ -690,17 +643,13 @@ async def process_sync(config, memory):
                                             os.makedirs("reels_output", exist_ok=True)
                                             page_video_file = f"reels_output/{video_title}.mp4"
                                             
-                                            video_created = create_reels_video(photo_paths, audio_file, page_video_file)
+                                            video_created = create_reels_video(filtered_photo_paths, audio_file, page_video_file)
                                             if video_created and os.path.exists(page_video_file):
                                                 print(f"  [~] Uploading UNIQUE Reel to FB Page: {did} (Music: {os.path.basename(audio_file)})...")
                                                 reel_ok = post_reel_to_facebook(did, token, page_video_file, entry.title, final_post_text)
-                                                
                                                 if not reel_ok:
-                                                    print(f"  [~] Falling back to Standard Video Feed for FB Page: {did}...")
                                                     post_video_to_facebook(did, token, page_video_file, final_post_text)
-
-                                                if os.path.exists(page_video_file):
-                                                    os.remove(page_video_file)
+                                                if os.path.exists(page_video_file): os.remove(page_video_file)
 
                             # 3. YOUTUBE SHORTS & TIKTOK UPLOAD (RUNS EXACTLY ONCE PER ARTICLE)
                             if entry_link not in global_yt_tt_processed:
@@ -713,16 +662,14 @@ async def process_sync(config, memory):
                                     os.makedirs("reels_output", exist_ok=True)
                                     yt_video_file = f"reels_output/{video_title_yt}.mp4"
                                     
-                                    if create_reels_video(photo_paths, audio_file_yt, yt_video_file) and os.path.exists(yt_video_file):
+                                    if create_reels_video(filtered_photo_paths, audio_file_yt, yt_video_file) and os.path.exists(yt_video_file):
                                         yt_id = os.environ.get("YT_CLIENT_ID", "")
                                         yt_secret = os.environ.get("YT_CLIENT_SECRET", "")
                                         yt_refresh = os.environ.get("YT_REFRESH_TOKEN", "")
                                         if yt_id and yt_secret and yt_refresh:
                                             print(f"  [~] Uploading UNIQUE Reel to YouTube Shorts (Music: {os.path.basename(audio_file_yt)})...")
                                             upload_video_to_youtube(yt_id, yt_secret, yt_refresh, yt_video_file, entry.title, final_post_text)
-
-                                        if os.path.exists(yt_video_file):
-                                            os.remove(yt_video_file)
+                                        if os.path.exists(yt_video_file): os.remove(yt_video_file)
 
                                 # TikTok
                                 audio_file_tt = get_random_audio_file()
@@ -731,18 +678,16 @@ async def process_sync(config, memory):
                                     os.makedirs("reels_output", exist_ok=True)
                                     tt_video_file = f"reels_output/{video_title_tt}.mp4"
                                     
-                                    if create_reels_video(photo_paths, audio_file_tt, tt_video_file) and os.path.exists(tt_video_file):
-                                        tiktok_cookies = os.environ.get("TIKTOK_COOKIES", "")
-                                        if tiktok_cookies:
-                                            print(f"  [~] Uploading UNIQUE Reel to TikTok (Music: {os.path.basename(audio_file_tt)})...")
-                                            upload_video_to_tiktok(tt_video_file, final_post_text)
+                                    if create_reels_video(filtered_photo_paths, audio_file_tt, tt_video_file) and os.path.exists(tt_video_file):
+                                        print(f"  [~] Uploading UNIQUE Reel to TikTok (Music: {os.path.basename(audio_file_tt)})...")
+                                        upload_video_to_tiktok(tt_video_file, final_post_text)
+                                        if os.path.exists(tt_video_file): os.remove(tt_video_file)
 
-                                        if os.path.exists(tt_video_file):
-                                            os.remove(tt_video_file)
-
-                        for path in photo_paths:
+                        # CLEANUP ALL FILES
+                        for path in raw_photo_paths:
                             if os.path.exists(path): os.remove(path)
-
+                        
+                        if posted_success: new_processed_links.append(entry_link)
                     memory[rule_key] = new_processed_links[-50:]
 
             except Exception as e:
