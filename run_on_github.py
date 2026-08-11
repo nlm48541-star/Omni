@@ -111,7 +111,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                 ratio = w / h
                 if ratio < (16 / 9):
                     valid_images.append(img_path)
-        except Exception as e:
+        except Exception:
             pass
 
     if not valid_images: return False
@@ -162,7 +162,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                 for f in range(num_f):
                     bg_frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
                     frame_count += 1
-        except Exception as e: pass
+        except Exception: pass
 
     if frame_count == 0:
         shutil.rmtree(temp_dir)
@@ -175,7 +175,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     try:
         subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-    except subprocess.CalledProcessError as e: success = False
+    except subprocess.CalledProcessError: success = False
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     return success
@@ -205,7 +205,7 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
             print(f"  [+] FB Reel published successfully to page {page_id}!")
             return True
         else: return False
-    except Exception as e: return False
+    except Exception: return False
 
 def post_video_to_facebook(page_id, page_token, video_path, caption):
     try:
@@ -213,9 +213,8 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         files = {'file': open(video_path, 'rb')}
         data = {'description': caption, 'access_token': page_token}
         res = requests.post(url, data=data, files=files, timeout=120)
-        if res.status_code == 200: return True
-        else: return False
-    except Exception as e: return False
+        return res.status_code == 200
+    except Exception: return False
 
 def post_photo_to_facebook(page_id, page_token, photo_path, caption):
     try: 
@@ -235,7 +234,7 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
             print(f"  [+] FB Multi-Photo Album published to page {page_id}!")
             return True
         return False
-    except Exception as e: return False
+    except Exception: return False
 
 # --- YOUTUBE SHORTS UPLOADER ---
 def get_youtube_access_token(client_id, client_secret, refresh_token):
@@ -270,83 +269,77 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             print(f"  [+] YouTube Short uploaded successfully!")
             return True
         return False
-    except Exception as e: return False
+    except Exception: return False
 
-# --- SUPER TT SESSION BYPASS (MAKIISTHENES TIKTOK DIRECT API) ---
-def upload_video_to_tiktok(video_path, description):
-    import sys, json, time
-    tiktok_cookies_data = os.environ.get("TIKTOK_COOKIES", "")
-    if not tiktok_cookies_data: return False
-
-    engine_dir = "tiktok_engine"
-    if not os.path.exists(engine_dir): return False
-
-    print(f"  [~] Starting TikTok Direct API Setup Protocol...")
-    username = "omni_bot"
-
-    # Master Sessionid Locator Framework 
-    sessionid_val = None
-    s_match = re.search(r'sessionid(?:_ss)?[\t\s\=\"\:]+([A-Fa-f0-9]{32})', tiktok_cookies_data, re.IGNORECASE)
-    if s_match: sessionid_val = s_match.group(1).strip()
+# --- TIKTOK BUFFER UPLOADER ---
+def upload_video_to_tiktok(video_path, description, config=None):
+    if config is None: config = {}
+    buffer_profile_id = get_credential(config, "buffer_profile_id", "BUFFER_PROFILE_ID")
+    buffer_access_token = get_credential(config, "buffer_access_token", "BUFFER_ACCESS_TOKEN")
     
-    if not sessionid_val:
-        # Fallback reading raw components if strictly delimited cleanly line by line natively specifically sequentially... 
-        for line in tiktok_cookies_data.splitlines():
-            if 'sessionid' in line.lower() and 'tiktok.com' in line.lower():
-                pts = line.strip().split()
-                if len(pts) > 3 and len(pts[-1]) == 32:
-                    sessionid_val = pts[-1]
-                    break
-    
-    if not sessionid_val:
-        print("  [!] Critical Failure: Found zero instances matching Tiktok 'sessionid' format (32 chars) inside Secret key payload. TT bypass failed!")
+    if not buffer_profile_id or not buffer_access_token:
+        print("  [!] Buffer Credentials missing (BUFFER_PROFILE_ID / BUFFER_ACCESS_TOKEN). Skipping TikTok upload.")
         return False
 
-    abs_video_path = os.path.abspath(video_path)
-
-    # Bruteforce Direct Terminal Setup for the Direct-API 
-    print(f"  [~] Extracted TT Login Hash Signature Successfully => Executing Local Binding Pre-flight Config...")
+    print("  [~] Uploading TikTok video via Buffer API...")
+    
+    video_url = None
     try:
-        registration_arrays = [
-            ["login", "-u", username, "-s", sessionid_val],
-            ["add", "-u", username, "-s", sessionid_val],
-            ["user", "add", "-s", sessionid_val],
-            ["set", "-s", sessionid_val]
-        ]
-        # Silently trigger setup configurations locally
-        for regs in registration_arrays:
-            subprocess.run([sys.executable, "cli.py"] + regs, cwd=engine_dir, capture_output=True, timeout=15)
-        
-        # Ensure deep override on configuration mappings natively.
-        cookie_drop = os.path.join(engine_dir, "config.json")
-        with open(cookie_drop, "w") as fw: json.dump({"users": {username: {"sessionid": sessionid_val}}, "session": sessionid_val}, fw)
+        with open(video_path, 'rb') as f:
+            up_res = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, timeout=60)
+            if up_res.status_code == 200:
+                raw_url = up_res.json().get("data", {}).get("url", "")
+                if raw_url:
+                    video_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+    except Exception as e:
+        print(f"  [!] Primary video host upload error: {e}")
 
-    except Exception: pass
-        
-    print("  [~] Triggering Headless Video Frame Payload across direct backend servers API pipeline... ")
+    if not video_url:
+        try:
+            with open(video_path, 'rb') as f:
+                up_res = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": f}, timeout=60)
+                if up_res.status_code == 200 and up_res.text.startswith("http"):
+                    video_url = up_res.text.strip()
+        except Exception:
+            pass
+
+    if not video_url:
+        try:
+            with open(video_path, 'rb') as f:
+                up_res = requests.post("https://file.io", files={"file": f}, timeout=60)
+                if up_res.status_code == 200:
+                    video_url = up_res.json().get("link")
+        except Exception:
+            pass
+
+    url = "https://api.bufferapp.com/1/updates/create.json"
+    payload = {
+        "access_token": buffer_access_token,
+        "profile_ids[]": buffer_profile_id,
+        "text": description[:150],
+        "now": "true"
+    }
     
-    # Execution Fallback Queue to guarantee upload success no matter which CLI args the engine cloned targets natively reliably exclusively efficiently accurately dependably!
-    execute_chains = [
-        ["cli.py", "upload", "-u", username, "-v", abs_video_path, "-t", description[:150]],
-        ["cli.py", "upload", "-s", sessionid_val, "-v", abs_video_path, "-t", description[:150]],
-        ["cli.py", "-s", sessionid_val, "-v", abs_video_path, "-t", description[:150]],
-        ["main.py", "-s", sessionid_val, "-v", abs_video_path, "-t", description[:150]]
-    ]
-    
-    for ec in execute_chains:
-        if not os.path.exists(os.path.join(engine_dir, ec[0])): continue
-        cmd_launch = [sys.executable] + ec
-        res = subprocess.run(cmd_launch, cwd=engine_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+    if video_url:
+        payload["media[video]"] = video_url
+        payload["media[link]"] = video_url
+
+    try:
+        res = requests.post(url, data=payload, timeout=60)
         
-        combined_logs = res.stdout.lower() + (res.stderr.lower() if res.stderr else "")
-        if res.returncode == 0 or "success" in combined_logs or "upload complete" in combined_logs or "published" in combined_logs:
-            print("  [+] TikTok Direct API video upload successful (Post Payload delivered perfectly)!")
+        if res.status_code != 200 and os.path.exists(video_path):
+            with open(video_path, 'rb') as f:
+                res = requests.post(url, data=payload, files={"media[video]": f}, timeout=90)
+
+        if res.status_code == 200:
+            print("  [+] TikTok video uploaded successfully via Buffer!")
             return True
-            
-    print(f"  [!] TT Exception Pipeline Fault Captured OutLog: {res.stdout.strip()}")
-    if res.stderr: print(f"  [!] Backend Rejection Error Code Exception Frame Tracelog Data -> {res.stderr.strip()}")
-    return False
-
+        else:
+            print(f"  [!] Buffer API returned status code {res.status_code}: {res.text}")
+            return False
+    except Exception as e:
+        print(f"  [!] Buffer upload exception: {e}")
+        return False
 
 # --- WHATSAPP RENDER BACKEND MEDIA COMPILER / CHUNKER BASE64 MAKER BRIDGE SYSTEM---
 def warmup_render_server(render_url):
@@ -360,7 +353,7 @@ def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
         clean_id = channel_id.split('/')[-1].replace('@newsletter', '').strip()
         encoded_images = []
         if image_paths and len(image_paths) > 0:
-            for p in image_paths[:5]: # Allows generating super heavy dynamic up to 5 albums sequence automatically explicitly unconditionally!
+            for p in image_paths[:5]:
                 if os.path.exists(p):
                     with open(p, 'rb') as f: encoded_images.append(base64.b64encode(f.read()).decode('utf-8'))
         
@@ -371,7 +364,6 @@ def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
             return True
         return False
     except Exception: return False
-
 
 # --- FACEBOOK PAGE ACCESS HANDLER ---
 def get_page_access_token(master_user_token, page_id):
@@ -385,7 +377,7 @@ def get_page_access_token(master_user_token, page_id):
     except Exception: pass
     return master_user_token
 
-# --- MAIN CONTROLLER ALGORITHMIC PIPELINE STRUCTURE (DUAL IMAGE PARSER INCORPORATED NATIVELY) ---
+# --- MAIN CONTROLLER ALGORITHMIC PIPELINE STRUCTURE ---
 async def process_sync(config, memory):
     credentials = config.get("credentials", {})
     rules = config.get("rules", [])
@@ -484,7 +476,6 @@ async def process_sync(config, memory):
                                             if os.path.exists(p): os.remove(p)
                                 except Exception: pass
 
-                        # 1. SEND RAW PICTURE ARRAYS DIRECTLY (Bypass Video Filters limits uniquely mapping to social pages organically effectively logically safely securely smoothly flawlessly identically accurately exclusively dependably efficiently properly precisely comprehensively systematically) 
                         if rule['txt']:
                             for did in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
@@ -498,11 +489,9 @@ async def process_sync(config, memory):
                                     if token:
                                         if len(raw_paths) > 1: post_multi_photo_to_facebook(did, token, raw_paths, final_post_text)
                                         elif len(raw_paths) == 1: post_photo_to_facebook(did, token, raw_paths[0], final_post_text)
-                                        else: post_text_to_facebook(did, token, final_post_text)
                                 elif dest_platform == "WhatsApp":
                                     post_to_whatsapp_channel(render_wa_url, did, final_post_text, raw_paths)
 
-                        # 2. GENERATE AND BROADCAST HIGHLY TARGETED MEDIA SHORTS UNIQUELY PRECISELY UNIQUELY AND SEQUENTIALLY EFFECTIVELY CORRECTLY EFFORTLESSLY DEPENDABLY SYSTEMATICALLY DEFINITIVELY.
                         if video_paths:
                             if dest_platform == "Facebook":
                                 for did in dest_ids:
@@ -526,10 +515,11 @@ async def process_sync(config, memory):
                                 if audio_tt:
                                     tt_f = f"reels_output/{sanitize_filename(entry.title)}_tt_{random.randint(10, 99)}.mp4"
                                     if create_reels_video(video_paths, audio_tt, tt_f):
-                                        if os.environ.get("TIKTOK_COOKIES", ""): upload_video_to_tiktok(tt_f, final_post_text)
+                                        if os.environ.get("BUFFER_ACCESS_TOKEN", "") or os.environ.get("BUFFER_PROFILE_ID", "") or config.get("credentials", {}).get("buffer_access_token"):
+                                            upload_video_to_tiktok(tt_f, final_post_text, config)
                                         if os.path.exists(tt_f): os.remove(tt_f)
 
-                        for path in raw_photo_paths:
+                        for path in raw_paths:
                             if os.path.exists(path): os.remove(path)
                     memory[rule_key] = new_processed_links[-50:]
             except Exception: pass
@@ -538,6 +528,6 @@ async def process_sync(config, memory):
 
 async def main():
     save_json(MEMORY_FILE, await process_sync(load_json(CONFIG_FILE, {}), load_json(MEMORY_FILE, {})))
-    print("\n✅ Task Exectued.")
+    print("\n✅ Task Executed.")
 
 if __name__ == "__main__": asyncio.run(main())

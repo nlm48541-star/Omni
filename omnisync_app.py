@@ -13,7 +13,9 @@ def load_config():
                 "tg_session": "",
                 "fb_user_token": "",
                 "wp_username": "",
-                "wp_app_password": ""
+                "wp_app_password": "",
+                "buffer_profile_id": "",
+                "buffer_access_token": ""
             },
             "rules": []
         }
@@ -135,7 +137,7 @@ class RulesFrame(ctk.CTkFrame):
     def __init__(self, parent, config, controller):
         super().__init__(parent)
         self.config = config
-        self.editing_index = None # Keeps track of which rule index is currently being edited
+        self.editing_index = None
         
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(fill="x", pady=10, padx=10)
@@ -145,21 +147,18 @@ class RulesFrame(ctk.CTkFrame):
         self.src_var = ctk.StringVar(value=PLATFORMS[0])
         self.dest_var = ctk.StringVar(value=PLATFORMS[1])
         
-        # Source Platform Choice
         ctk.CTkLabel(top_frame, text="Source Platform:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.opt_src = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.src_var)
         self.opt_src.grid(row=1, column=1, padx=10, pady=5)
         self.entry_src_id = ctk.CTkEntry(top_frame, placeholder_text="Source ID(s) (Comma-separated, e.g. chan1, UCxxxx)")
         self.entry_src_id.grid(row=1, column=2, padx=10, pady=5, ipadx=100)
 
-        # Destination Platform Choice
         ctk.CTkLabel(top_frame, text="Destination Platform:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.opt_dest = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.dest_var)
         self.opt_dest.grid(row=2, column=1, padx=10, pady=5)
         self.entry_dest_id = ctk.CTkEntry(top_frame, placeholder_text="Destination ID(s) (Comma-separated, e.g. id1, id2)")
         self.entry_dest_id.grid(row=2, column=2, padx=10, pady=5, ipadx=100)
 
-        # Sync Media Checkboxes
         filters_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         filters_frame.grid(row=3, column=0, columnspan=3, pady=10)
         
@@ -178,7 +177,6 @@ class RulesFrame(ctk.CTkFrame):
         self.chk_img.select()
         self.chk_vid.select()
 
-        # Limits Configuration Row
         timing_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         timing_frame.grid(row=4, column=0, columnspan=3, pady=10)
 
@@ -192,7 +190,6 @@ class RulesFrame(ctk.CTkFrame):
         self.entry_lookback.insert(0, "1")
         self.entry_lookback.pack(side="left", padx=10)
         
-        # Submit/Edit button
         self.btn_submit = ctk.CTkButton(top_frame, text="+ Add Connection Route", command=self.add_rule)
         self.btn_submit.grid(row=5, column=0, columnspan=3, pady=15)
 
@@ -216,7 +213,6 @@ class RulesFrame(ctk.CTkFrame):
             ctk.CTkLabel(card, text=summary, font=("Arial", 11, "bold")).pack(anchor="w", padx=10, pady=(5,0))
             ctk.CTkLabel(card, text=desc, text_color="gray", font=("Arial", 10)).pack(anchor="w", padx=10, pady=(0, 5))
             
-            # Action Buttons: Edit and Delete
             ctk.CTkButton(card, text="✏ Edit", fg_color="goldenrod", width=60, hover_color="#8B8000", command=lambda idx=i: self.start_edit(idx)).place(relx=0.8, rely=0.2)
             ctk.CTkButton(card, text="🗑 Delete", fg_color="red", width=60, hover_color="#550000", command=lambda idx=i: self.delete_rule(idx)).place(relx=0.9, rely=0.2)
             
@@ -233,7 +229,6 @@ class RulesFrame(ctk.CTkFrame):
         self.entry_dest_id.delete(0, 'end')
         self.entry_dest_id.insert(0, rule.get('dest_id', ''))
         
-        # Checkboxes Toggle
         self.toggle_checkbox(self.chk_txt, rule.get('txt', True))
         self.toggle_checkbox(self.chk_img, rule.get('img', True))
         self.toggle_checkbox(self.chk_vid, rule.get('vid', True))
@@ -249,10 +244,8 @@ class RulesFrame(ctk.CTkFrame):
         self.btn_submit.configure(text="💾 Update Connection Route", fg_color="#D4AF37", hover_color="#996515")
 
     def toggle_checkbox(self, checkbox, val):
-        if val:
-            checkbox.select()
-        else:
-            checkbox.deselect()
+        if val: checkbox.select()
+        else: checkbox.deselect()
 
     def add_rule(self):
         try:
@@ -271,13 +264,12 @@ class RulesFrame(ctk.CTkFrame):
             "img": bool(self.chk_img.get()),
             "vid": bool(self.chk_vid.get()),
             "title_only": bool(self.chk_title_only.get()),
-            "keep_hashtags": bool(self.chk_hashtags.get()), # Allow/Block Hashtags selector
+            "keep_hashtags": bool(self.chk_hashtags.get()),
             "min_words": min_words_limit,
             "lookback_hours": lookback_hours
         }
 
         if self.editing_index is not None:
-            # Overwrite existing index in list
             self.config["rules"][self.editing_index] = r
             self.editing_index = None
             self.btn_submit.configure(text="+ Add Connection Route", fg_color="#1f538d", hover_color="#14375e")
