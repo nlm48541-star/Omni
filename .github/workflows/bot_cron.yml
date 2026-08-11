@@ -35,18 +35,6 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Setup TikTok Direct API Engine (makiisthenes)
-        run: |
-          git clone https://github.com/makiisthenes/TiktokAutoUploader.git tiktok_engine
-          cd tiktok_engine
-          pip install -r requirements.txt || true
-          if [ -d "tiktok_uploader/tiktok-signature" ]; then
-            cd tiktok_uploader/tiktok-signature && npm install && cd ../..
-          elif [ -d "tiktok-signature" ]; then
-            cd tiktok-signature && npm install && cd ..
-          fi
-          mkdir -p CookiesDir
-
       - name: Execute OmniSync Master Engine
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -57,7 +45,8 @@ jobs:
           YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-          TIKTOK_COOKIES: ${{ secrets.TIKTOK_COOKIES }}
+          BUFFER_PROFILE_ID: ${{ secrets.BUFFER_PROFILE_ID }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
         run: python run_on_github.py
 
       - name: Commit & Save Sync Progress State
