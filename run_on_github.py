@@ -271,7 +271,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         return False
     except Exception: return False
 
-# --- TIKTOK BUFFER UPLOADER ---
+# --- TIKTOK BUFFER GRAPHQL UPLOADER ---
 def upload_video_to_tiktok(video_path, description, config=None):
     if config is None: config = {}
     buffer_profile_id = get_credential(config, "buffer_profile_id", "BUFFER_PROFILE_ID")
@@ -281,7 +281,7 @@ def upload_video_to_tiktok(video_path, description, config=None):
         print("  [!] Buffer Credentials missing (BUFFER_PROFILE_ID / BUFFER_ACCESS_TOKEN). Skipping TikTok upload.")
         return False
 
-    print("  [~] Uploading TikTok video via Buffer API...")
+    print("  [~] Uploading TikTok video via Buffer GraphQL API...")
     
     video_url = None
     try:
@@ -312,34 +312,69 @@ def upload_video_to_tiktok(video_path, description, config=None):
         except Exception:
             pass
 
-    url = "https://api.bufferapp.com/1/updates/create.json"
-    payload = {
-        "access_token": buffer_access_token,
-        "profile_ids[]": buffer_profile_id,
-        "text": description[:150],
-        "now": "true"
-    }
-    
-    if video_url:
-        payload["media[video]"] = video_url
-        payload["media[link]"] = video_url
-
-    try:
-        res = requests.post(url, data=payload, timeout=60)
-        
-        if res.status_code != 200 and os.path.exists(video_path):
-            with open(video_path, 'rb') as f:
-                res = requests.post(url, data=payload, files={"media[video]": f}, timeout=90)
-
-        if res.status_code == 200:
-            print("  [+] TikTok video uploaded successfully via Buffer!")
-            return True
-        else:
-            print(f"  [!] Buffer API returned status code {res.status_code}: {res.text}")
-            return False
-    except Exception as e:
-        print(f"  [!] Buffer upload exception: {e}")
+    if not video_url:
+        print("  [!] Failed to upload video to temporary public host for Buffer.")
         return False
+
+    graphql_url = "https://api.buffer.com"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {buffer_access_token}"
+    }
+
+    mutation = """
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post {
+            id
+          }
+        }
+        ... on MutationError {
+          message
+        }
+      }
+    }
+    """
+
+    for mode in ["shareNow", "addToQueue"]:
+        payload = {
+            "query": mutation,
+            "variables": {
+                "input": {
+                    "channelId": buffer_profile_id,
+                    "text": description[:150],
+                    "schedulingType": "automatic",
+                    "mode": mode,
+                    "assets": [
+                        {
+                            "video": {
+                                "url": video_url
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        try:
+            res = requests.post(graphql_url, json=payload, headers=headers, timeout=60)
+            if res.status_code == 200:
+                res_data = res.json()
+                data = res_data.get("data", {}).get("createPost", {})
+                if "post" in data and data["post"]:
+                    print(f"  [+] TikTok video published successfully via Buffer GraphQL API ({mode})!")
+                    return True
+                elif "message" in data and data["message"]:
+                    print(f"  [!] Buffer GraphQL Mutation Warning ({mode}): {data['message']}")
+                elif "errors" in res_data:
+                    print(f"  [!] Buffer GraphQL API Errors: {res_data['errors']}")
+            else:
+                print(f"  [!] Buffer GraphQL API HTTP Error ({res.status_code}): {res.text}")
+        except Exception as e:
+            print(f"  [!] Exception during Buffer GraphQL request: {e}")
+
+    return False
 
 # --- WHATSAPP RENDER BACKEND MEDIA COMPILER / CHUNKER BASE64 MAKER BRIDGE SYSTEM---
 def warmup_render_server(render_url):
