@@ -284,16 +284,16 @@ def upload_video_to_tiktok(video_path, description, config=None):
     print("  [~] Uploading TikTok video via Buffer GraphQL API...")
     
     video_url = None
+    # 1. Catbox.moe (Direct permanent raw video stream host)
     try:
         with open(video_path, 'rb') as f:
-            up_res = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, timeout=60)
-            if up_res.status_code == 200:
-                raw_url = up_res.json().get("data", {}).get("url", "")
-                if raw_url:
-                    video_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+            up_res = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, timeout=60)
+            if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
+                video_url = up_res.text.strip()
     except Exception as e:
-        print(f"  [!] Primary video host upload error: {e}")
+        print(f"  [!] Catbox upload error: {e}")
 
+    # 2. Litterbox (Catbox temporary host fallback)
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
@@ -303,17 +303,18 @@ def upload_video_to_tiktok(video_path, description, config=None):
         except Exception:
             pass
 
+    # 3. 0x0.st fallback
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
-                up_res = requests.post("https://file.io", files={"file": f}, timeout=60)
-                if up_res.status_code == 200:
-                    video_url = up_res.json().get("link")
+                up_res = requests.post("https://0x0.st", files={"file": f}, timeout=60)
+                if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
+                    video_url = up_res.text.strip()
         except Exception:
             pass
 
     if not video_url:
-        print("  [!] Failed to upload video to temporary public host for Buffer.")
+        print("  [!] Failed to upload video to public host for Buffer.")
         return False
 
     graphql_url = "https://api.buffer.com"
