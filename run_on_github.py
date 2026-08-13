@@ -102,18 +102,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Generating Reel Video: '{output_path}'")
     if not image_paths: return False
 
-    valid_images = []
-    for img_path in image_paths:
-        try:
-            with Image.open(img_path) as img:
-                w, h = img.size
-                if h == 0: continue
-                ratio = w / h
-                if ratio < (16 / 9):
-                    valid_images.append(img_path)
-        except Exception:
-            pass
-
+    valid_images = [p for p in image_paths if os.path.exists(p)]
     if not valid_images: return False
 
     audio_duration = get_audio_duration(audio_path)
@@ -135,6 +124,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
         try:
             img = Image.open(img_path).convert('RGB')
             w, h = img.size
+            if h == 0: continue
             ratio = w / h
             num_f = frames_per_image + (1 if idx < remainder else 0)
 
@@ -495,7 +485,7 @@ async def process_sync(config, memory):
                         contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
                         final_post_text = f"{clean_text(entry.title)}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(entry.title)}\n\n{raw_desc[:250]}...{contact_sfx}"
 
-                        raw_paths, video_paths = [], []
+                        raw_paths = []
                         if cleaned_img_urls and rule.get('img', True):
                             for idx, u in enumerate(cleaned_img_urls):
                                 try:
@@ -507,10 +497,31 @@ async def process_sync(config, memory):
                                             with Image.open(p) as img:
                                                 if img.size[1] > 0:
                                                     raw_paths.append(p)
-                                                    if (img.size[0] / img.size[1]) < (16 / 9): video_paths.append(p)
                                         except Exception:
                                             if os.path.exists(p): os.remove(p)
                                 except Exception: pass
+
+                        # --- VIDEO IMAGES SELECTION LOGIC ---
+                        # 1. 如果只有一个图片: 不管 scaling 直接使用
+                        # 2. 如果有多个图片: 仅检查第一个图片 whether is 16:9 banner (w/h >= 16/9), Skip 1st image if banner, keep all remaining images!
+                        video_paths = []
+                        if raw_paths:
+                            if len(raw_paths) == 1:
+                                video_paths = list(raw_paths)
+                            else:
+                                skip_first = False
+                                try:
+                                    with Image.open(raw_paths[0]) as first_img:
+                                        w, h = first_img.size
+                                        if h > 0 and (w / h) >= (16 / 9):
+                                            skip_first = True
+                                except Exception:
+                                    pass
+
+                                if skip_first and len(raw_paths) > 1:
+                                    video_paths = list(raw_paths[1:])
+                                else:
+                                    video_paths = list(raw_paths)
 
                         if rule['txt']:
                             for did in dest_ids:
