@@ -9,6 +9,7 @@ import feedparser
 import yt_dlp
 import shutil
 import subprocess
+import math
 from time import mktime
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
@@ -118,6 +119,23 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     try: resampling = Image.Resampling.LANCZOS
     except AttributeError: resampling = Image.ANTIALIAS
 
+    # Load floating Front.png overlay if present in repo
+    front_overlay = None
+    if os.path.exists("Front.png"):
+        try:
+            overlay_raw = Image.open("Front.png").convert("RGBA")
+            ow, oh = overlay_raw.size
+            target_w = 160  # Optimal watermark width for 720p vertical video
+            if ow > target_w:
+                target_h = max(1, int(oh * (target_w / ow)))
+                front_overlay = overlay_raw.resize((target_w, target_h), resampling)
+            else:
+                front_overlay = overlay_raw
+            print("  [+] Floating Front.png overlay loaded successfully!")
+        except Exception as e:
+            print(f"  [!] Failed to load Front.png overlay: {e}")
+            front_overlay = None
+
     frame_count = 0
     
     for idx, img_path in enumerate(valid_images):
@@ -138,6 +156,20 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     y = int(p * max_y)
                     crop_box = (0, y, 720, y + 1280)
                     frame = resized.crop(crop_box)
+
+                    # Float Front.png across corners smoothly
+                    if front_overlay:
+                        ow, oh = front_overlay.size
+                        max_x = max(0, 720 - ow)
+                        max_y_f = max(0, 1280 - oh)
+                        progress = frame_count / max(1, total_frames)
+                        ox = int(((math.sin(progress * math.pi * 6) + 1) / 2) * max_x)
+                        oy = int(((math.cos(progress * math.pi * 4) + 1) / 2) * max_y_f)
+                        
+                        frame_rgba = frame.convert("RGBA")
+                        frame_rgba.paste(front_overlay, (ox, oy), front_overlay)
+                        frame = frame_rgba.convert("RGB")
+
                     frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
                     frame_count += 1
             else:
@@ -146,10 +178,23 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                 resized = img.resize((new_w, new_h), resampling)
                 y_offset = (1280 - new_h) // 2
                 
-                bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
-                bg_frame.paste(resized, (0, y_offset))
-                
                 for f in range(num_f):
+                    bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
+                    bg_frame.paste(resized, (0, y_offset))
+
+                    # Float Front.png across corners smoothly
+                    if front_overlay:
+                        ow, oh = front_overlay.size
+                        max_x = max(0, 720 - ow)
+                        max_y_f = max(0, 1280 - oh)
+                        progress = frame_count / max(1, total_frames)
+                        ox = int(((math.sin(progress * math.pi * 6) + 1) / 2) * max_x)
+                        oy = int(((math.cos(progress * math.pi * 4) + 1) / 2) * max_y_f)
+                        
+                        bg_rgba = bg_frame.convert("RGBA")
+                        bg_rgba.paste(front_overlay, (ox, oy), front_overlay)
+                        bg_frame = bg_rgba.convert("RGB")
+
                     bg_frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
                     frame_count += 1
         except Exception: pass
