@@ -99,6 +99,14 @@ def get_audio_duration(audio_path):
         print(f"  [!] Error reading audio duration with ffprobe: {e}")
         return 30.0
 
+def find_front_overlay_file():
+    if os.path.exists("Front.png"):
+        return "Front.png"
+    for filename in os.listdir("."):
+        if filename.lower() in ["front.png", "front.jpg", "front.jpeg", "front.webp"]:
+            return filename
+    return None
+
 def create_reels_video(image_paths, audio_path, output_path, fps=24):
     print(f"  [~] Generating Reel Video: '{output_path}'")
     if not image_paths: return False
@@ -119,11 +127,12 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     try: resampling = Image.Resampling.LANCZOS
     except AttributeError: resampling = Image.ANTIALIAS
 
-    # Load floating Front.png overlay if present in repo
+    # Load floating Front.png overlay dynamically
     front_overlay = None
-    if os.path.exists("Front.png"):
+    overlay_filename = find_front_overlay_file()
+    if overlay_filename:
         try:
-            overlay_raw = Image.open("Front.png").convert("RGBA")
+            overlay_raw = Image.open(overlay_filename).convert("RGBA")
             ow, oh = overlay_raw.size
             target_w = 160  # Optimal watermark width for 720p vertical video
             if ow > target_w:
@@ -131,9 +140,9 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                 front_overlay = overlay_raw.resize((target_w, target_h), resampling)
             else:
                 front_overlay = overlay_raw
-            print("  [+] Floating Front.png overlay loaded successfully!")
+            print(f"  [+] Floating Front overlay loaded successfully from '{overlay_filename}'!")
         except Exception as e:
-            print(f"  [!] Failed to load Front.png overlay: {e}")
+            print(f"  [!] Failed to load Front overlay image: {e}")
             front_overlay = None
 
     frame_count = 0
@@ -319,34 +328,63 @@ def upload_video_to_tiktok(video_path, description, config=None):
     print("  [~] Uploading TikTok video via Buffer GraphQL API...")
     
     video_url = None
-    # 1. Catbox.moe (Direct permanent raw video stream host)
+    filename = os.path.basename(video_path)
+
+    # Tier 1: transfer.sh (Super fast & reliable on GitHub Actions runner)
     try:
         with open(video_path, 'rb') as f:
-            up_res = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, timeout=60)
+            up_res = requests.put(f"https://transfer.sh/{filename}", data=f, headers=HEADERS, timeout=45)
             if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
                 video_url = up_res.text.strip()
+                print(f"  [+] Video uploaded to transfer.sh: {video_url}")
     except Exception as e:
-        print(f"  [!] Catbox upload error: {e}")
+        print(f"  [!] transfer.sh error: {e}")
 
-    # 2. Litterbox (Catbox temporary host fallback)
+    # Tier 2: tmpfiles.org
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
-                up_res = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": f}, timeout=60)
-                if up_res.status_code == 200 and up_res.text.startswith("http"):
-                    video_url = up_res.text.strip()
-        except Exception:
-            pass
+                up_res = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, headers=HEADERS, timeout=45)
+                if up_res.status_code == 200:
+                    raw_url = up_res.json().get("data", {}).get("url", "")
+                    if raw_url:
+                        video_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                        print(f"  [+] Video uploaded to tmpfiles.org: {video_url}")
+        except Exception as e:
+            print(f"  [!] tmpfiles.org error: {e}")
 
-    # 3. 0x0.st fallback
+    # Tier 3: Catbox.moe
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
-                up_res = requests.post("https://0x0.st", files={"file": f}, timeout=60)
+                up_res = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, headers=HEADERS, timeout=45)
                 if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
                     video_url = up_res.text.strip()
-        except Exception:
-            pass
+                    print(f"  [+] Video uploaded to Catbox: {video_url}")
+        except Exception as e:
+            print(f"  [!] Catbox error: {e}")
+
+    # Tier 4: Litterbox
+    if not video_url:
+        try:
+            with open(video_path, 'rb') as f:
+                up_res = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": f}, headers=HEADERS, timeout=45)
+                if up_res.status_code == 200 and up_res.text.startswith("http"):
+                    video_url = up_res.text.strip()
+                    print(f"  [+] Video uploaded to Litterbox: {video_url}")
+        except Exception as e:
+            print(f"  [!] Litterbox error: {e}")
+
+    # Tier 5: 0x0.st
+    if not video_url:
+        try:
+            with open(video_path, 'rb') as f:
+                up_res = requests.post("https://0x0.st", files={"file": f}, headers=HEADERS, timeout=45)
+                if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
+                    video_url = up_res.text.strip()
+                    print(f"  [+] Video uploaded to 0x0.st: {video_url}")
+        except Exception as e:
+            print(f"  [!] 0x0.st error: {e}")
 
     if not video_url:
         print("  [!] Failed to upload video to public host for Buffer.")
@@ -547,8 +585,8 @@ async def process_sync(config, memory):
                                 except Exception: pass
 
                         # --- VIDEO IMAGES SELECTION LOGIC ---
-                        # 1. 如果只有一个图片: 不管 scaling 直接使用
-                        # 2. 如果有多个图片: 仅检查第一个图片 whether is 16:9 banner (w/h >= 16/9), Skip 1st image if banner, keep all remaining images!
+                        # 1. Single image: Use unconditionally
+                        # 2. Multiple images: Check ONLY 1st image. If 1st image is 16:9 banner (w/h >= 16/9), skip 1st image and keep all remaining images!
                         video_paths = []
                         if raw_paths:
                             if len(raw_paths) == 1:
