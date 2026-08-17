@@ -330,41 +330,30 @@ def upload_video_to_tiktok(video_path, description, config=None):
     video_url = None
     filename = os.path.basename(video_path)
 
-    # Tier 1: transfer.sh (Super fast & reliable on GitHub Actions runner)
+    # Host 1: Catbox.moe (Direct raw .mp4 stream, 100% compatible with Buffer bot)
     try:
         with open(video_path, 'rb') as f:
-            up_res = requests.put(f"https://transfer.sh/{filename}", data=f, headers=HEADERS, timeout=45)
+            up_res = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, headers=HEADERS, timeout=45)
             if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
                 video_url = up_res.text.strip()
-                print(f"  [+] Video uploaded to transfer.sh: {video_url}")
+                print(f"  [+] Video uploaded to Catbox: {video_url}")
     except Exception as e:
-        print(f"  [!] transfer.sh error: {e}")
+        print(f"  [!] Catbox error: {e}")
 
-    # Tier 2: tmpfiles.org
+    # Host 2: Pixeldrain (Direct file API, fast and raw stream)
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
-                up_res = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, headers=HEADERS, timeout=45)
-                if up_res.status_code == 200:
-                    raw_url = up_res.json().get("data", {}).get("url", "")
-                    if raw_url:
-                        video_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-                        print(f"  [+] Video uploaded to tmpfiles.org: {video_url}")
+                up_res = requests.post("https://pixeldrain.com/api/file", files={"file": f}, headers=HEADERS, timeout=45)
+                if up_res.status_code in [200, 201]:
+                    file_id = up_res.json().get("id")
+                    if file_id:
+                        video_url = f"https://pixeldrain.com/api/file/{file_id}"
+                        print(f"  [+] Video uploaded to Pixeldrain: {video_url}")
         except Exception as e:
-            print(f"  [!] tmpfiles.org error: {e}")
+            print(f"  [!] Pixeldrain error: {e}")
 
-    # Tier 3: Catbox.moe
-    if not video_url:
-        try:
-            with open(video_path, 'rb') as f:
-                up_res = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, headers=HEADERS, timeout=45)
-                if up_res.status_code == 200 and up_res.text.strip().startswith("http"):
-                    video_url = up_res.text.strip()
-                    print(f"  [+] Video uploaded to Catbox: {video_url}")
-        except Exception as e:
-            print(f"  [!] Catbox error: {e}")
-
-    # Tier 4: Litterbox
+    # Host 3: Litterbox (Catbox temporary host)
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
@@ -375,7 +364,7 @@ def upload_video_to_tiktok(video_path, description, config=None):
         except Exception as e:
             print(f"  [!] Litterbox error: {e}")
 
-    # Tier 5: 0x0.st
+    # Host 4: 0x0.st
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
