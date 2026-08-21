@@ -63,6 +63,19 @@ def get_credential(config, key, env_var):
         val = config.get("credentials", {}).get(key, "").strip()
     return val
 
+def clean_feed_url(url):
+    if not url: return ""
+    # Strip broken morss.it wrapper if present
+    if "morss.it" in url:
+        matches = re.findall(r'https?://[^\s\'"]+', url)
+        if len(matches) > 1:
+            return matches[-1]
+        cleaned = re.sub(r'https?://morss\.it/([^/]+/)*', '', url)
+        if not cleaned.startswith('http'):
+            cleaned = 'https://' + cleaned.lstrip('/')
+        return cleaned
+    return url
+
 # --- MULTI-AUDIO RANDOM SELECTOR ---
 def get_all_audio_files():
     audio_files = []
@@ -127,13 +140,14 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     try: resampling = Image.Resampling.LANCZOS
     except AttributeError: resampling = Image.ANTIALIAS
 
+    # Load floating Front.png overlay dynamically
     front_overlay = None
     overlay_filename = find_front_overlay_file()
     if overlay_filename:
         try:
             overlay_raw = Image.open(overlay_filename).convert("RGBA")
             ow, oh = overlay_raw.size
-            target_w = 160
+            target_w = 230  # Increased size for better visibility
             if ow > target_w:
                 target_h = max(1, int(oh * (target_w / ow)))
                 front_overlay = overlay_raw.resize((target_w, target_h), resampling)
@@ -165,13 +179,14 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     crop_box = (0, y, 720, y + 1280)
                     frame = resized.crop(crop_box)
 
+                    # Slow & smooth floating Front.png movement across corners
                     if front_overlay:
                         ow, oh = front_overlay.size
                         max_x = max(0, 720 - ow)
                         max_y_f = max(0, 1280 - oh)
                         progress = frame_count / max(1, total_frames)
-                        ox = int(((math.sin(progress * math.pi * 6) + 1) / 2) * max_x)
-                        oy = int(((math.cos(progress * math.pi * 4) + 1) / 2) * max_y_f)
+                        ox = int(((math.sin(progress * math.pi * 1.2) + 1) / 2) * max_x)
+                        oy = int(((math.cos(progress * math.pi * 0.8) + 1) / 2) * max_y_f)
                         
                         frame_rgba = frame.convert("RGBA")
                         frame_rgba.paste(front_overlay, (ox, oy), front_overlay)
@@ -189,13 +204,14 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
                     bg_frame.paste(resized, (0, y_offset))
 
+                    # Slow & smooth floating Front.png movement across corners
                     if front_overlay:
                         ow, oh = front_overlay.size
                         max_x = max(0, 720 - ow)
                         max_y_f = max(0, 1280 - oh)
                         progress = frame_count / max(1, total_frames)
-                        ox = int(((math.sin(progress * math.pi * 6) + 1) / 2) * max_x)
-                        oy = int(((math.cos(progress * math.pi * 4) + 1) / 2) * max_y_f)
+                        ox = int(((math.sin(progress * math.pi * 1.2) + 1) / 2) * max_x)
+                        oy = int(((math.cos(progress * math.pi * 0.8) + 1) / 2) * max_y_f)
                         
                         bg_rgba = bg_frame.convert("RGBA")
                         bg_rgba.paste(front_overlay, (ox, oy), front_overlay)
@@ -505,15 +521,22 @@ async def process_sync(config, memory):
         lookback_threshold = current_time - timedelta(hours=rule.get("lookback_hours", 24.0))
 
         for source_id in source_ids:
-            print(f"\n[~] Checking Source Route ({source_platform} ➔ {dest_platform}): '{source_id}'")
+            target_feed_url = clean_feed_url(source_id)
+            print(f"\n[~] Checking Source Route ({source_platform} ➔ {dest_platform}): '{target_feed_url}'")
             try:
                 if source_platform == "Website":
+                    feed = None
                     try:
-                        resp = requests.get("https://www.prothomalo.com/feed/" if "prothomalo.com" in source_id else source_id, headers=HEADERS, timeout=20)
-                        feed = feedparser.parse(resp.content if resp.status_code == 200 else source_id)
+                        rss_target = target_feed_url if target_feed_url.endswith(('/feed', '/feed/', '/rss', '/rss/')) else target_feed_url.rstrip('/') + '/feed/'
+                        resp = requests.get(rss_target, headers=HEADERS, timeout=12)
+                        if resp.status_code == 200:
+                            feed = feedparser.parse(resp.content)
+                        else:
+                            resp2 = requests.get(target_feed_url, headers=HEADERS, timeout=12)
+                            feed = feedparser.parse(resp2.content if resp2.status_code == 200 else target_feed_url)
                     except Exception as fe:
                         print(f"  [!] Feed fetch exception: {fe}")
-                        feed = feedparser.parse(source_id)
+                        feed = feedparser.parse(target_feed_url)
 
                     processed_links = memory.get(rule_key, [])
                     if not isinstance(processed_links, list): processed_links = []
@@ -592,8 +615,6 @@ async def process_sync(config, memory):
                         print(f"  [+] Downloaded {len(raw_paths)} valid local image file(s).")
 
                         # --- VIDEO IMAGES SELECTION LOGIC ---
-                        # 1. Single image: Use unconditionally
-                        # 2. Multiple images: Check ONLY 1st image. If 1st image is 16:9 banner (w/h >= 16/9), skip 1st image and keep all remaining images!
                         video_paths = []
                         if raw_paths:
                             if len(raw_paths) == 1:
