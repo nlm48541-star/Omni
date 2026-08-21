@@ -127,14 +127,13 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
     try: resampling = Image.Resampling.LANCZOS
     except AttributeError: resampling = Image.ANTIALIAS
 
-    # Load floating Front.png overlay dynamically
     front_overlay = None
     overlay_filename = find_front_overlay_file()
     if overlay_filename:
         try:
             overlay_raw = Image.open(overlay_filename).convert("RGBA")
             ow, oh = overlay_raw.size
-            target_w = 160  # Optimal watermark width for 720p vertical video
+            target_w = 160
             if ow > target_w:
                 target_h = max(1, int(oh * (target_w / ow)))
                 front_overlay = overlay_raw.resize((target_w, target_h), resampling)
@@ -166,7 +165,6 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     crop_box = (0, y, 720, y + 1280)
                     frame = resized.crop(crop_box)
 
-                    # Float Front.png across corners smoothly
                     if front_overlay:
                         ow, oh = front_overlay.size
                         max_x = max(0, 720 - ow)
@@ -191,7 +189,6 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
                     bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
                     bg_frame.paste(resized, (0, y_offset))
 
-                    # Float Front.png across corners smoothly
                     if front_overlay:
                         ow, oh = front_overlay.size
                         max_x = max(0, 720 - ow)
@@ -330,7 +327,7 @@ def upload_video_to_tiktok(video_path, description, config=None):
     video_url = None
     filename = os.path.basename(video_path)
 
-    # Host 1: Catbox.moe (Direct raw .mp4 stream, 100% compatible with Buffer bot)
+    # Host 1: Catbox.moe
     try:
         with open(video_path, 'rb') as f:
             up_res = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, headers=HEADERS, timeout=45)
@@ -340,7 +337,7 @@ def upload_video_to_tiktok(video_path, description, config=None):
     except Exception as e:
         print(f"  [!] Catbox error: {e}")
 
-    # Host 2: Pixeldrain (Direct file API, fast and raw stream)
+    # Host 2: Pixeldrain
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
@@ -353,11 +350,11 @@ def upload_video_to_tiktok(video_path, description, config=None):
         except Exception as e:
             print(f"  [!] Pixeldrain error: {e}")
 
-    # Host 3: Litterbox (Catbox temporary host)
+    # Host 3: Litterbox
     if not video_url:
         try:
             with open(video_path, 'rb') as f:
-                up_res = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": f}, headers=HEADERS, timeout=45)
+                up_res = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": f}, timeout=45)
                 if up_res.status_code == 200 and up_res.text.startswith("http"):
                     video_url = up_res.text.strip()
                     print(f"  [+] Video uploaded to Litterbox: {video_url}")
@@ -508,30 +505,46 @@ async def process_sync(config, memory):
         lookback_threshold = current_time - timedelta(hours=rule.get("lookback_hours", 24.0))
 
         for source_id in source_ids:
+            print(f"\n[~] Checking Source Route ({source_platform} ➔ {dest_platform}): '{source_id}'")
             try:
                 if source_platform == "Website":
                     try:
-                        resp = requests.get("https://www.prothomalo.com/feed/" if "prothomalo.com" in source_id else source_id, headers=HEADERS, timeout=15)
+                        resp = requests.get("https://www.prothomalo.com/feed/" if "prothomalo.com" in source_id else source_id, headers=HEADERS, timeout=20)
                         feed = feedparser.parse(resp.content if resp.status_code == 200 else source_id)
-                    except Exception: feed = feedparser.parse(source_id)
+                    except Exception as fe:
+                        print(f"  [!] Feed fetch exception: {fe}")
+                        feed = feedparser.parse(source_id)
 
                     processed_links = memory.get(rule_key, [])
                     if not isinstance(processed_links, list): processed_links = []
                     new_processed_links = list(processed_links)
+
+                    entries_found = len(feed.entries) if hasattr(feed, 'entries') else 0
+                    print(f"  [~] Total entries found in feed: {entries_found}")
 
                     for entry in reversed(feed.entries[:15]):
                         entry_link = entry.get('link', '').strip()
                         if not entry_link and 'links' in entry and entry.links: entry_link = entry.links[0].get('href', '').strip()
                         if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
-                        if not entry_link or not entry_link.startswith(('http://', 'https://')) or entry_link in processed_links: continue
+                        if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
+                        
+                        if entry_link in processed_links:
+                            print(f"  [~] Skipping entry (Already processed): '{entry.get('title', '')[:50]}...'")
+                            continue
+
+                        print(f"\n[+] Processing New Article: '{entry.get('title', '')}'")
                         new_processed_links.append(entry_link)
                         
                         target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
-                        if all(kw in entry.title for kw in target_keywords): continue
+                        if all(kw in entry.get('title', '') for kw in target_keywords):
+                            print("  [~] Skipping due to generic keyword match.")
+                            continue
 
                         raw_desc = strip_html(entry.summary if 'summary' in entry else entry.description if 'description' in entry else "")
-                        if rule['txt'] and len(clean_text(entry.title + " " + raw_desc).split()) < min_words: continue
+                        if rule['txt'] and len(clean_text(entry.get('title', '') + " " + raw_desc).split()) < min_words:
+                            print(f"  [~] Skipping due to short word count (< {min_words} words).")
+                            continue
 
                         img_urls = []
                         if 'enclosures' in entry and entry.enclosures: img_urls.extend([enc.get('href', '') for enc in entry.enclosures if enc.get('href', '').lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
@@ -539,11 +552,12 @@ async def process_sync(config, memory):
                         img_urls.extend([url for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc, re.IGNORECASE)])
 
                         try:
-                            web_res = requests.get(entry_link, headers=HEADERS, timeout=10)
+                            web_res = requests.get(entry_link, headers=HEADERS, timeout=12)
                             if web_res.status_code == 200:
                                 scraped_imgs = [u for r in [re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)] for u in r if not any(l in u.lower() for l in ['logo', 'icon', 'avatar'])]
                                 img_urls.extend([i for i in scraped_imgs if i not in img_urls])
-                        except Exception: pass
+                        except Exception as e:
+                            print(f"  [!] Web scraping exception: {e}")
 
                         cleaned_img_urls = []
                         seen_bases = set()
@@ -554,8 +568,10 @@ async def process_sync(config, memory):
                                 seen_bases.add(b_url)
                                 cleaned_img_urls.append(u)
 
+                        print(f"  [+] Found {len(cleaned_img_urls)} unique image URL(s) for article.")
+
                         contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
-                        final_post_text = f"{clean_text(entry.title)}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(entry.title)}\n\n{raw_desc[:250]}...{contact_sfx}"
+                        final_post_text = f"{clean_text(entry.get('title', ''))}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(entry.get('title', ''))}\n\n{raw_desc[:250]}...{contact_sfx}"
 
                         raw_paths = []
                         if cleaned_img_urls and rule.get('img', True):
@@ -572,6 +588,8 @@ async def process_sync(config, memory):
                                         except Exception:
                                             if os.path.exists(p): os.remove(p)
                                 except Exception: pass
+
+                        print(f"  [+] Downloaded {len(raw_paths)} valid local image file(s).")
 
                         # --- VIDEO IMAGES SELECTION LOGIC ---
                         # 1. Single image: Use unconditionally
@@ -595,6 +613,8 @@ async def process_sync(config, memory):
                                 else:
                                     video_paths = list(raw_paths)
 
+                        print(f"  [+] Selected {len(video_paths)} image(s) for Reels/Shorts/TikTok generation.")
+
                         if rule['txt']:
                             for did in dest_ids:
                                 if dest_platform == "Telegram" and tg_client:
@@ -617,22 +637,22 @@ async def process_sync(config, memory):
                                     token = get_page_access_token(fb_user_token, did)
                                     audio = get_random_audio_file()
                                     if token and audio:
-                                        pvf = f"reels_output/{sanitize_filename(entry.title)}_{did}.mp4"
+                                        pvf = f"reels_output/{sanitize_filename(entry.get('title', ''))}_{did}.mp4"
                                         os.makedirs("reels_output", exist_ok=True)
                                         if create_reels_video(video_paths, audio, pvf):
-                                            if not post_reel_to_facebook(did, token, pvf, entry.title, final_post_text): post_video_to_facebook(did, token, pvf, final_post_text)
+                                            if not post_reel_to_facebook(did, token, pvf, entry.get('title', ''), final_post_text): post_video_to_facebook(did, token, pvf, final_post_text)
                                         if os.path.exists(pvf): os.remove(pvf)
                             if entry_link not in global_yt_tt_processed:
                                 global_yt_tt_processed.add(entry_link)
                                 audio_yt, audio_tt = get_random_audio_file(), get_random_audio_file()
                                 if audio_yt:
-                                    yt_f = f"reels_output/{sanitize_filename(entry.title)}_yt_{random.randint(10, 99)}.mp4"
+                                    yt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_yt_{random.randint(10, 99)}.mp4"
                                     if create_reels_video(video_paths, audio_yt, yt_f):
                                         yt_i, yt_s, yt_r = os.environ.get("YT_CLIENT_ID",""), os.environ.get("YT_CLIENT_SECRET",""), os.environ.get("YT_REFRESH_TOKEN","")
-                                        if yt_i and yt_s and yt_r: upload_video_to_youtube(yt_i, yt_s, yt_r, yt_f, entry.title, final_post_text)
+                                        if yt_i and yt_s and yt_r: upload_video_to_youtube(yt_i, yt_s, yt_r, yt_f, entry.get('title', ''), final_post_text)
                                         if os.path.exists(yt_f): os.remove(yt_f)
                                 if audio_tt:
-                                    tt_f = f"reels_output/{sanitize_filename(entry.title)}_tt_{random.randint(10, 99)}.mp4"
+                                    tt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_tt_{random.randint(10, 99)}.mp4"
                                     if create_reels_video(video_paths, audio_tt, tt_f):
                                         if os.environ.get("BUFFER_ACCESS_TOKEN", "") or os.environ.get("BUFFER_PROFILE_ID", "") or config.get("credentials", {}).get("buffer_access_token"):
                                             upload_video_to_tiktok(tt_f, final_post_text, config)
@@ -641,7 +661,8 @@ async def process_sync(config, memory):
                         for path in raw_paths:
                             if os.path.exists(path): os.remove(path)
                     memory[rule_key] = new_processed_links[-50:]
-            except Exception: pass
+            except Exception as e:
+                print(f"  [!] Route processing exception: {e}")
     if tg_client: await tg_client.disconnect()
     return memory
 
