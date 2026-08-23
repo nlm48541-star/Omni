@@ -327,18 +327,62 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
 
 # --- MULTI-HOST CONTINUOUS RETRY VIDEO UPLOADER ENGINE ---
 def upload_to_public_host(video_path):
-    filename = os.path.basename(video_path)
-    clean_filename = re.sub(r'[^a-zA-Z0-9_\.]', '_', filename)
+    # Short clean ASCII filename for social media crawlers
+    clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
     
-    # 7 Multi-tier public video hostings
+    # Tiered hosts with explicit MIME type and clean filename
+    def try_catbox():
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+        return None
+
+    def try_litterbox():
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+        return None
+
+    def try_pixeldrain():
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://pixeldrain.com/api/file", files={"file": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
+            if r.status_code in [200, 201]:
+                fid = r.json().get("id")
+                if fid: return f"https://pixeldrain.com/api/file/{fid}"
+        return None
+
+    def try_filebin():
+        bid = uuid.uuid4().hex[:10]
+        furl = f"https://filebin.net/{bid}/{clean_filename}"
+        with open(video_path, 'rb') as f:
+            r = requests.post(furl, data=f, headers=HEADERS, timeout=45)
+            if r.status_code in [200, 201]:
+                return furl
+        return None
+
+    def try_envssh():
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://envs.sh", files={"file": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+        return None
+
+    def try_0x0st():
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://0x0.st", files={"file": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+        return None
+
     hosts = [
-        ("Catbox.moe", lambda: requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": open(video_path, 'rb')}, headers=HEADERS, timeout=45).text.strip()),
-        ("Filebin.net", lambda: f"https://filebin.net/{uuid.uuid4().hex[:10]}/{clean_filename}" if requests.post(f"https://filebin.net/{uuid.uuid4().hex[:10]}/{clean_filename}", data=open(video_path, 'rb'), headers=HEADERS, timeout=45).status_code in [200, 201] else None),
-        ("Pixeldrain", lambda: f"https://pixeldrain.com/api/file/{requests.post('https://pixeldrain.com/api/file', files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=45).json().get('id')}" if requests.post('https://pixeldrain.com/api/file', files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=45).status_code in [200, 201] else None),
-        ("Litterbox", lambda: requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": open(video_path, 'rb')}, headers=HEADERS, timeout=45).text.strip()),
-        ("Envs.sh", lambda: requests.post("https://envs.sh", files={"file": open(video_path, 'rb')}, headers=HEADERS, timeout=45).text.strip()),
-        ("0x0.st", lambda: requests.post("https://0x0.st", files={"file": open(video_path, 'rb')}, headers=HEADERS, timeout=45).text.strip()),
-        ("Tmpfiles", lambda: f"https://tmpfiles.org/dl/{requests.post('https://tmpfiles.org/api/v1/upload', files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=45).json().get('data', {}).get('url', '').split('/')[-2]}/{filename}" if requests.post('https://tmpfiles.org/api/v1/upload', files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=45).status_code == 200 else None)
+        ("Catbox.moe", try_catbox),
+        ("Litterbox", try_litterbox),
+        ("Pixeldrain", try_pixeldrain),
+        ("Filebin.net", try_filebin),
+        ("Envs.sh", try_envssh),
+        ("0x0.st", try_0x0st)
     ]
 
     for name, host_func in hosts:
@@ -367,11 +411,11 @@ def upload_video_to_tiktok(video_path, description, config=None):
 
     print("  [~] Uploading TikTok video via Buffer GraphQL API...")
     
-    # Try all 7 hosts sequentially until one succeeds
+    # Try all hosts sequentially until one succeeds
     video_url = upload_to_public_host(video_path)
 
     if not video_url:
-        print("  [!] Failed to upload video to all 7 public hosts for Buffer.")
+        print("  [!] Failed to upload video to all public hosts for Buffer.")
         return False
 
     graphql_url = "https://api.buffer.com"
