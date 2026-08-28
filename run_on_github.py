@@ -146,7 +146,7 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
         try:
             overlay_raw = Image.open(overlay_filename).convert("RGBA")
             ow, oh = overlay_raw.size
-            target_w = 230  # Increased size for better visibility
+            target_w = 230
             if ow > target_w:
                 target_h = max(1, int(oh * (target_w / ow)))
                 front_overlay = overlay_raw.resize((target_w, target_h), resampling)
@@ -224,12 +224,14 @@ def create_reels_video(image_paths, audio_path, output_path, fps=24):
 
     if os.path.exists(output_path): os.remove(output_path)
 
-    ffmpeg_cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(temp_dir, "frame_%05d.jpg"), "-i", audio_path, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", output_path]
+    ffmpeg_cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(temp_dir, "frame_%05d.jpg"), "-i", audio_path, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-shortest", output_path]
 
     try:
-        subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        res = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-    except subprocess.CalledProcessError: success = False
+    except subprocess.CalledProcessError as err:
+        print(f"  [!] FFmpeg generation error: {err.stderr[:200] if err.stderr else err}")
+        success = False
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     return success
@@ -327,10 +329,8 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
 
 # --- MULTI-HOST CONTINUOUS RETRY VIDEO UPLOADER ENGINE ---
 def upload_to_public_host(video_path):
-    # Short clean ASCII filename for social media crawlers
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
     
-    # Tiered hosts with explicit MIME type and clean filename
     def try_catbox():
         with open(video_path, 'rb') as f:
             r = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
@@ -410,8 +410,13 @@ def upload_video_to_tiktok(video_path, description, config=None):
         return False
 
     print("  [~] Uploading TikTok video via Buffer GraphQL API...")
+
+    # Clean description for TikTok to avoid Community Guidelines Violation for phone/whatsapp numbers
+    clean_desc = re.sub(r'whatsapp\s*\d+', '', description, flags=re.IGNORECASE)
+    clean_desc = re.sub(r'01\d{9}', '', clean_desc)
+    clean_desc = re.sub(r'আবেদন করতে যোগাযোগ করুন.*$', '', clean_desc, flags=re.DOTALL)
+    clean_desc = clean_desc.strip()[:100] + " #jobcircular #jobnews #bangladesh #jobs"
     
-    # Try all hosts sequentially until one succeeds
     video_url = upload_to_public_host(video_path)
 
     if not video_url:
@@ -445,7 +450,7 @@ def upload_video_to_tiktok(video_path, description, config=None):
             "variables": {
                 "input": {
                     "channelId": buffer_profile_id,
-                    "text": description[:150],
+                    "text": clean_desc,
                     "schedulingType": "automatic",
                     "mode": mode,
                     "assets": [
@@ -690,20 +695,23 @@ async def process_sync(config, memory):
                                             if not post_reel_to_facebook(did, token, pvf, entry.get('title', ''), final_post_text): post_video_to_facebook(did, token, pvf, final_post_text)
                                         if os.path.exists(pvf): os.remove(pvf)
                             if entry_link not in global_yt_tt_processed:
-                                global_yt_tt_processed.add(entry_link)
                                 audio_yt, audio_tt = get_random_audio_file(), get_random_audio_file()
+                                yt_done, tt_done = False, False
                                 if audio_yt:
                                     yt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_yt_{random.randint(10, 99)}.mp4"
                                     if create_reels_video(video_paths, audio_yt, yt_f):
                                         yt_i, yt_s, yt_r = os.environ.get("YT_CLIENT_ID",""), os.environ.get("YT_CLIENT_SECRET",""), os.environ.get("YT_REFRESH_TOKEN","")
-                                        if yt_i and yt_s and yt_r: upload_video_to_youtube(yt_i, yt_s, yt_r, yt_f, entry.get('title', ''), final_post_text)
+                                        if yt_i and yt_s and yt_r:
+                                            yt_done = upload_video_to_youtube(yt_i, yt_s, yt_r, yt_f, entry.get('title', ''), final_post_text)
                                         if os.path.exists(yt_f): os.remove(yt_f)
                                 if audio_tt:
                                     tt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_tt_{random.randint(10, 99)}.mp4"
                                     if create_reels_video(video_paths, audio_tt, tt_f):
                                         if os.environ.get("BUFFER_ACCESS_TOKEN", "") or os.environ.get("BUFFER_PROFILE_ID", "") or config.get("credentials", {}).get("buffer_access_token"):
-                                            upload_video_to_tiktok(tt_f, final_post_text, config)
+                                            tt_done = upload_video_to_tiktok(tt_f, final_post_text, config)
                                         if os.path.exists(tt_f): os.remove(tt_f)
+                                if yt_done or tt_done:
+                                    global_yt_tt_processed.add(entry_link)
 
                         for path in raw_paths:
                             if os.path.exists(path): os.remove(path)
