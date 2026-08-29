@@ -4,7 +4,16 @@ import re
 import time
 import requests
 
-FREE_PERMITTED_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # George (News Anchor)
+# 🌟 ElevenLabs-এর প্রিমিয়াম ও ন্যাচারাল ফ্রি-পারমিটেড ভয়েস লিস্ট
+PERMITTED_FREE_VOICES = [
+    {"id": "JBFqnCBsd6RMkjVDRZzb", "name": "George (News Anchor)"},
+    {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam (Deep Professional)"},
+    {"id": "nPczCjzI2devNBz1zQrb", "name": "Brian (Narrative Anchor)"},
+    {"id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel (Authoritative News)"},
+    {"id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam (Crisp Dynamic)"},
+    {"id": "iP95p4xoKVk53GoZ742B", "name": "Chris (Casual Professional)"},
+    {"id": "pqHfZKP75CvOlQylNhV4", "name": "Bill (Warm Trustworthy)"}
+]
 
 def mask_key(k):
     if not k or len(k) <= 8: return "****"
@@ -24,33 +33,29 @@ def get_all_elevenlabs_keys():
     if not raw_keys: return []
     return [k.strip() for k in re.split(r'[\r\n,;]+', raw_keys) if k.strip()]
 
-def get_best_free_voice(api_key):
+def get_voice_for_index(voice_index, api_key):
+    """
+    প্রতিটি পেজের জন্য ভিন্ন ভিন্ন ভয়েস নির্ধারণ করে (George ➔ Adam ➔ Brian ➔ Daniel...)
+    """
     try:
         url = "https://api.elevenlabs.io/v1/voices"
         headers = {"xi-api-key": api_key}
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
-            voices = resp.json().get("voices", [])
-            for v in voices:
-                if v.get("category") == "generated":
-                    return v.get("voice_id"), f"'{v.get('name')}' (Custom)"
-            for v in voices:
-                if v.get("category") == "premade" and "george" in v.get("name", "").lower():
-                    return v.get("voice_id"), f"'{v.get('name')}' (Official)"
-            for v in voices:
-                if v.get("category") == "premade" and "adam" in v.get("name", "").lower():
-                    return v.get("voice_id"), f"'{v.get('name')}' (Official)"
-            for v in voices:
-                if v.get("category") == "premade":
-                    return v.get("voice_id"), f"'{v.get('name')}' (Premade)"
-    except Exception:
-        pass
-    return FREE_PERMITTED_VOICE_ID, "'George' (Default)"
+            custom_voices = [v for v in resp.json().get("voices", []) if v.get("category") == "generated"]
+            if custom_voices:
+                selected = custom_voices[voice_index % len(custom_voices)]
+                return selected.get("voice_id"), f"'{selected.get('name')}' (Custom Generated)"
+    except Exception: pass
 
-def generate_voiceover_audio_pipeline(text, output_audio_path):
-    print("\n" + "="*60)
-    print("🎙️ [AUDIO ENGINE] ElevenLabs Eleven v3 Bengali Voiceover Synthesis")
-    print("="*60)
+    # প্রি-মেড পারমিটেড ভয়েস লিস্ট থেকে রোটেট করবে
+    v_info = PERMITTED_FREE_VOICES[voice_index % len(PERMITTED_FREE_VOICES)]
+    return v_info["id"], f"'{v_info['name']}' (Official Premade)"
+
+def generate_voiceover_audio_pipeline(text, output_audio_path, voice_index=0):
+    print("\n" + "="*65)
+    print(f"🎙️ [AUDIO ENGINE] Generating Voiceover (Page/Voice #{voice_index + 1})")
+    print("="*65)
 
     speech_text = clean_script_for_speech(text)
     words = len(speech_text.split())
@@ -63,11 +68,11 @@ def generate_voiceover_audio_pipeline(text, output_audio_path):
         return False
 
     for idx, api_key in enumerate(eleven_keys, start=1):
-        voice_id, voice_name = get_best_free_voice(api_key)
+        voice_id, voice_name = get_voice_for_index(voice_index, api_key)
         tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
         print(f"  • Attempting Key #{idx}/{len(eleven_keys)}: {mask_key(api_key)}")
-        print(f"  • Selected Voice: {voice_name} [ID: {voice_id}]")
+        print(f"  • Assigned Voice: {voice_name} [ID: {voice_id}]")
 
         payload = {
             "text": speech_text,
@@ -94,15 +99,15 @@ def generate_voiceover_audio_pipeline(text, output_audio_path):
                 with open(output_audio_path, "wb") as f:
                     f.write(resp.content)
                 size_mb = round(os.path.getsize(output_audio_path) / (1024*1024), 2)
-                print(f"  ✅ [SUCCESS] Generated Voiceover ({size_mb} MB) in {elapsed}s!")
-                print(f"  📁 Saved Path: {output_audio_path}")
-                print("="*60 + "\n")
+                print(f"  ✅ [SUCCESS] Voiceover Generated with {voice_name} ({size_mb} MB) in {elapsed}s!")
+                print(f"  📁 Saved: {output_audio_path}")
+                print("="*65 + "\n")
                 return True
             else:
                 print(f"  ⚠️ Key #{idx} returned HTTP {resp.status_code}: {resp.text[:180]}")
                 continue
         except Exception as e:
-            print(f"  ⚠️ Key #{idx} network error: {e}")
+            print(f"  ⚠️ Key #{idx} error: {e}")
             continue
 
     print("❌ [FAILED] All ElevenLabs keys exhausted.")
