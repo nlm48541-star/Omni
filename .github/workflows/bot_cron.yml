@@ -47,6 +47,7 @@ jobs:
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           BUFFER_PROFILE_ID: ${{ secrets.BUFFER_PROFILE_ID }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python run_on_github.py
 
       - name: Commit & Save Sync Progress State
