@@ -12,7 +12,7 @@ from config_manager import (
     load_json, save_json, get_credential,
     clean_text, clean_telegram_id, sanitize_filename
 )
-from ai_service import generate_job_data_and_script
+from ai_service import generate_job_data_and_multi_scripts
 from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
 from video_engine import render_vertical_video
@@ -89,7 +89,7 @@ async def process_sync(config, memory):
                         print(f"  [~] Skipping due to short word count (< {min_words} words).")
                         continue
 
-                    # ১. ইমেজ ডাউনলোড
+                    # ১. মূল নিয়োগ বিজ্ঞপ্তির ছবি ডাউনলোড
                     img_urls = extract_article_images(entry, entry_link, raw_desc)
                     downloaded_imgs = []
                     for i_idx, u in enumerate(img_urls):
@@ -101,21 +101,75 @@ async def process_sync(config, memory):
                                 downloaded_imgs.append(p)
                         except Exception: pass
 
-                    # ২. এআই দিয়ে স্ট্রাকচার্ড ডাটা ও ১-মিনিটের স্ক্রিপ্ট তৈরি
-                    job_data = generate_job_data_and_script(title, downloaded_imgs)
-                    voiceover_script = job_data.get("voiceover_script", "")
+                    # ২. ফেসবুক পেজের সংখ্যা অনুযায়ী এআই স্ক্রিপ্ট ও স্ট্রাকচার্ড ডাটা তৈরি
+                    fb_dest_ids = dest_ids if dest_platform == "Facebook" else []
+                    num_fb_pages = max(1, len(fb_dest_ids))
 
-                    # ৩. ElevenLabs দিয়ে একবারই অডিও জেনারেট
-                    gen_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
-                    audio_success = generate_voiceover_audio_pipeline(voiceover_script, gen_audio_path)
+                    job_data = generate_job_data_and_multi_scripts(title, downloaded_imgs, num_scripts=num_fb_pages)
+                    scripts = job_data.get("voiceover_scripts", [])
 
-                    # ৪. TikTok / Reels এর জন্য ব্যাকগ্রাউন্ড + ফন্ট দিয়ে স্লাইড তৈরি
-                    slide_paths = prepare_tiktok_slides(job_data, output_prefix=f"slide_{hash(entry_link)}")
+                    # ৩. প্রতিটি ফেসবুক পেজের জন্য আলাদা আলাদা ভয়েস দিয়ে অডিও তৈরি
+                    fb_audios = []
+                    for v_idx, script in enumerate(scripts):
+                        a_path = f"tmp_voice_{hash(entry_link)}_{v_idx}.mp3"
+                        if generate_voiceover_audio_pipeline(script, a_path, voice_index=v_idx):
+                            fb_audios.append(a_path)
+                        else:
+                            if fb_audios: fb_audios.append(fb_audios[0])
 
-                    # ৫. টেক্সট পোস্ট ডেলিভারি (Telegram / Facebook Feed / WhatsApp)
+                    # ৪. ফেসবুক ও ইউটিউবের জন্য ভিডিও রেন্ডারিং (মূল সার্কুলার ইমেজ দিয়ে)
+                    fb_source_imgs = downloaded_imgs if downloaded_imgs else prepare_tiktok_slides(job_data, f"fallback_{hash(entry_link)}")
+                    fb_videos = []
+
+                    for v_idx, a_path in enumerate(fb_audios):
+                        v_path = f"tmp_fb_reel_{hash(entry_link)}_{v_idx}.mp4"
+                        if render_vertical_video(fb_source_imgs, a_path, v_path):
+                            fb_videos.append({"video": v_path, "audio": a_path})
+
+                    # ৫. পোস্টের টেক্সট ও কল-টু-অ্যাকশন
                     contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
                     final_post_text = f"{clean_text(title)}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(title)}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
 
+                    # ৬. ফেসবুক পেজগুলোতে ভিন্ন ভিন্ন ভিডিও আপলোড
+                    if dest_platform == "Facebook" and fb_videos:
+                        for idx_p, did in enumerate(dest_ids):
+                            token = get_page_access_token(fb_user_token, did)
+                            if token:
+                                current_v = fb_videos[idx_p % len(fb_videos)]["video"]
+                                print(f"  [+] Uploading Facebook Reel (Voice #{ (idx_p % len(fb_videos)) + 1 }) to Page '{did}'...")
+                                if not post_reel_to_facebook(did, token, current_v, title, final_post_text):
+                                    post_video_to_facebook(did, token, current_v, final_post_text)
+
+                    # ৭. YouTube Shorts আপলোড (১ম ফেসবুক পেজের তৈরি ভিডিও সরাসরি ব্যবহার করবে)
+                    if fb_videos and yt_client_id and yt_client_secret and yt_refresh_token:
+                        primary_video = fb_videos[0]["video"]
+                        print("  [+] Uploading Primary Video to YouTube Shorts...")
+                        upload_video_to_youtube(
+                            yt_client_id, yt_client_secret, yt_refresh_token,
+                            primary_video,
+                            job_data.get("optimized_title", title),
+                            job_data.get("video_description", final_post_text)
+                        )
+
+                    # ৮. TikTok-এর জন্য আলাদা ভিডিও জেনারেশন ও আপলোড (Backgrounds + 4 Fonts + Voice 1 অডিও)
+                    if fb_audios:
+                        primary_audio = fb_audios[0]
+                        print("  [~] Preparing Custom TikTok Infographic Slide(s) on Background...")
+                        
+                        # Backgrounds ফোল্ডার ও ফন্ট ব্যবহার করে টিকটক স্লাইড প্রস্তুত
+                        tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tiktok_slide_{hash(entry_link)}")
+                        tiktok_video_path = f"tmp_tiktok_{hash(entry_link)}.mp4"
+
+                        if render_vertical_video(tiktok_slides, primary_audio, tiktok_video_path):
+                            print("  [+] Uploading Custom Infographic Video to TikTok via Buffer...")
+                            upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
+
+                        # টিকটকের টেম্প ফাইল মুছে ফেলা
+                        if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
+                        for sp in tiktok_slides:
+                            if os.path.exists(sp): os.remove(sp)
+
+                    # ৯. Telegram, WhatsApp ও Facebook Photo Albums ডেলিভারি
                     for did in dest_ids:
                         if dest_platform == "Telegram" and tg_client:
                             clean_tg = clean_telegram_id(did)
@@ -124,42 +178,13 @@ async def process_sync(config, memory):
                                 else: await tg_client.send_message(clean_tg, final_post_text)
                             except Exception: pass
 
-                        elif dest_platform == "Facebook":
-                            token = get_page_access_token(fb_user_token, did)
-                            if token:
-                                if len(downloaded_imgs) > 1: post_multi_photo_to_facebook(did, token, downloaded_imgs, final_post_text)
-                                elif len(downloaded_imgs) == 1: post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
-
                         elif dest_platform == "WhatsApp":
                             post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
 
-                    # ৬. ভিডিও রেন্ডারিং ও একক অডিও দিয়ে সর্বত্র আপলোড (FB Reel, YouTube Shorts, TikTok)
-                    if audio_success and os.path.exists(gen_audio_path) and slide_paths:
-                        video_out = f"final_reel_{hash(entry_link)}.mp4"
-                        if render_vertical_video(slide_paths, gen_audio_path, video_out):
-                            # Facebook Reel
-                            if dest_platform == "Facebook":
-                                for did in dest_ids:
-                                    token = get_page_access_token(fb_user_token, did)
-                                    if token:
-                                        if not post_reel_to_facebook(did, token, video_out, title, final_post_text):
-                                            post_video_to_facebook(did, token, video_out, final_post_text)
-                            
-                            # YouTube Shorts
-                            if yt_client_id and yt_client_secret and yt_refresh_token:
-                                upload_video_to_youtube(yt_client_id, yt_client_secret, yt_refresh_token, video_out, job_data.get("optimized_title", title), job_data.get("video_description", final_post_text))
-                                print(f"  [+] Published to YouTube Shorts!")
-
-                            # TikTok via Buffer
-                            upload_video_to_tiktok_buffer(video_out, final_post_text, config)
-
-                        # ক্লিনআপ
-                        if os.path.exists(video_out): os.remove(video_out)
-
-                    # টেম্প ফাইল ডিলিট
-                    if os.path.exists(gen_audio_path): os.remove(gen_audio_path)
-                    for sp in slide_paths:
-                        if os.path.exists(sp): os.remove(sp)
+                    # ১০. ক্লিনআপ (সার্কুলার ছবি ও ফেসবুক ভিডিও/অডিও মুছে ফেলা)
+                    for fv in fb_videos:
+                        if os.path.exists(fv["video"]): os.remove(fv["video"])
+                        if os.path.exists(fv["audio"]): os.remove(fv["audio"])
                     for dp in downloaded_imgs:
                         if os.path.exists(dp): os.remove(dp)
 
