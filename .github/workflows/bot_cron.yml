@@ -19,11 +19,11 @@ jobs:
         uses: actions/checkout@v4
         
       - name: Setup Python environment
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install System Dependencies & Fonts
+      - name: Install System Dependencies & Bengali Font Support
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libraqm-dev fonts-beng
@@ -34,19 +34,37 @@ jobs:
 
       - name: Execute OmniSync Master Engine
         env:
+          # Telegram Credentials
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ secrets.TG_SESSION }}
+          
+          # Facebook Credentials
           FB_TOKEN: ${{ secrets.FB_TOKEN }}
+          
+          # WhatsApp Render Bridge
           RENDER_WA_URL: ${{ secrets.RENDER_WA_URL }}
+          
+          # YouTube Channel 1 (Main Shorts)
           YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          
+          # YouTube Channel 2 (TikTok Infographic Video)
+          YT_CLIENT_ID_2: ${{ secrets.CLIENT_ID_2 }}
+          YT_CLIENT_SECRET_2: ${{ secrets.CLIENT_SECRET_2 }}
+          YT_REFRESH_TOKEN_2: ${{ secrets.REFRESH_TOKEN_2 }}
+          
+          # TikTok (Buffer GraphQL)
           BUFFER_PROFILE_ID: ${{ secrets.BUFFER_PROFILE_ID }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          
+          # AI Services (Ollama Cloud / Groq)
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_API_URL: ${{ secrets.OLLAMA_API_URL }}
           GROQ_API: ${{ secrets.GROQ_API }}
+          
+          # ElevenLabs Voiceover API
           ELEVENLABS_API_KEYS: ${{ secrets.ELEVENLABS_API_KEYS }}
         run: python run_on_github.py
 
@@ -55,5 +73,5 @@ jobs:
           git config --local user.email "engine@omnisync.io"
           git config --local user.name "OmniSync Master Engine"
           git add bot_memory.json
-          git commit -m "Auto-Update: OmniSync Video & Audio sync state [skip-ci]" || echo "No new updates to save"
+          git commit -m "Auto-Update: Visual & Multi-Output checkpoint [skip-ci]" || echo "No new updates to save"
           git push
