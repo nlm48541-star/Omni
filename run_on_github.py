@@ -1,627 +1,46 @@
+# -*- coding: utf-8 -*-
 import os
 import re
-import json
-import base64
-import random
 import asyncio
 import requests
-import feedparser
-import yt_dlp
-import shutil
-import subprocess
-import math
-import uuid
-from time import mktime
-from urllib.parse import urljoin
-from datetime import datetime, timedelta, timezone
+from PIL import Image
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from PIL import Image
 
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    BeautifulSoup = None
-
-CONFIG_FILE = "automation_config.json"
-MEMORY_FILE = "bot_memory.json"
-COOKIES_FILE = "cookies.txt"
-
-# --- TIKTOK-ONLY AI IMAGE EDITING ---
-# This prompt is applied to every image before a TikTok video is built.
-# Override it per-run via the TIKTOK_AI_PROMPT env var, or set
-# "tiktok_ai_prompt" in automation_config.json to change it permanently.
-DEFAULT_TIKTOK_AI_PROMPT = (
-    "তোমাকে একটি নিয়োগ বিজ্ঞপ্তির একাধিক ছবি একসাথে দেওয়া হয়েছে। এগুলো একই বিজ্ঞপ্তির "
-    "বিভিন্ন অংশ হতে পারে — যেমন একটি ছবিতে পদের নাম ও শিক্ষাগত যোগ্যতা, আরেকটি ছবিতে "
-    "আবেদন প্রক্রিয়া ও তারিখ থাকতে পারে। সব ছবি একসাথে পড়ে পুরো বিজ্ঞপ্তির সম্পূর্ণ তথ্য "
-    "আগে বুঝে নাও, তারপর সেই তথ্য দিয়ে সম্পূর্ণ নতুন, পরিষ্কার ও প্রফেশনাল ডিজাইনের এক বা "
-    "একাধিক ইনফোগ্রাফিক-স্টাইল স্লাইড তৈরি করো। প্রতিটি তথ্য শুধুমাত্র একবার দেখাও — কোনো "
-    "তথ্যের পুনরাবৃত্তি করো না এবং একই তথ্য একাধিক স্লাইডে বসিও না।\n\n"
-    "স্লাইডের বিষয়বস্তু এভাবে সাজাও:\n"
-    "১. প্রথম স্লাইডের উপরে বড় হেডলাইনে প্রতিষ্ঠান/মন্ত্রণালয়/অফিসের নাম সহ 'নিয়োগ বিজ্ঞপ্তি' লেখা "
-    "(যেমন: 'ডিসি অফিস নিয়োগ বিজ্ঞপ্তি', 'পল্লী বিদ্যুৎ নিয়োগ বিজ্ঞপ্তি'), তার নিচে দুই কলামে — "
-    "বাম কলামে শিরোনাম 'পদের নাম' দিয়ে পদগুলোর তালিকা, ডান কলামে শিরোনাম 'শিক্ষাগত যোগ্যতা' "
-    "দিয়ে সংশ্লিষ্ট যোগ্যতা।\n"
-    "২. বাকি স্লাইড(গুলো)-এ শুধু অবশিষ্ট তথ্য দাও — যেমন আবেদন প্রক্রিয়া, এবং সবার নিচে "
-    "স্পষ্টভাবে 'আবেদন শুরু' ও 'আবেদনের শেষ তারিখ'। যদি কোনো ছবিতে এই তথ্য না থাকে, "
-    "সেই অংশ খালি না রেখে সংশ্লিষ্ট স্লাইড বাদ দাও।\n\n"
-    "মূল ছবিগুলোর সব তথ্য ও সংখ্যা হুবহু অক্ষুণ্ণ রাখো, কোনো তথ্য বাদ দিও না বা বদলিও না — "
-    "শুধু রঙ, ফন্ট, লেআউট ও ভিজ্যুয়াল ডিজাইন সম্পূর্ণ নতুনভাবে সাজাও। "
-    "একটি পরিষ্কার, সহজপাঠ্য, সরকারি নোটিশ-ঘরানার ডিজাইন ব্যবহার করো।"
+from config_manager import (
+    CONFIG_FILE, MEMORY_FILE, HEADERS,
+    load_json, save_json, get_credential,
+    clean_text, clean_telegram_id, sanitize_filename
+)
+from ai_service import generate_job_data_and_script
+from audio_engine import generate_voiceover_audio_pipeline
+from tiktok_designer import prepare_tiktok_slides
+from video_engine import render_vertical_video
+from feed_manager import fetch_feed_entries, extract_article_images
+from uploader_service import (
+    get_page_access_token, post_photo_to_facebook,
+    post_multi_photo_to_facebook, post_reel_to_facebook,
+    post_video_to_facebook, upload_video_to_youtube,
+    upload_video_to_tiktok_buffer, post_to_whatsapp_channel
 )
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Connection': 'keep-alive'
-}
-
-def load_json(filepath, default_val):
-    if os.path.exists(filepath):
-        with open(filepath, 'r') as f: return json.load(f)
-    return default_val
-
-def save_json(filepath, data):
-    with open(filepath, 'w') as f: json.dump(data, f, indent=4)
-
-def strip_html(text):
-    if not text: return ""
-    return re.sub(re.compile('<.*?>'), '', text)
-
-def clean_text(text, keep_hashtags=False):
-    if not text: return ""
-    text = re.sub(r'@\w+', '', text)
-    if not keep_hashtags: text = re.sub(r'#\w+', '', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    return re.sub(r'\n\s*\n+', '\n\n', text).strip()
-
-def clean_telegram_id(tg_id_str):
-    if not tg_id_str: return ""
-    clean_id = tg_id_str.split('/')[-1].replace('@', '').strip()
-    return clean_id
-
-def get_credential(config, key, env_var):
-    val = os.environ.get(env_var, "").strip()
-    if not val:
-        val = config.get("credentials", {}).get(key, "").strip()
-    return val
-
-def clean_feed_url(url):
-    if not url: return ""
-    if "morss.it" in url:
-        matches = re.findall(r'https?://[^\s\'"]+', url)
-        if len(matches) > 1:
-            return matches[-1]
-        cleaned = re.sub(r'https?://morss\.it/([^/]+/)*', '', url)
-        if not cleaned.startswith('http'):
-            cleaned = 'https://' + cleaned.lstrip('/')
-        return cleaned
-    return url
-
-# --- MULTI-AUDIO RANDOM SELECTOR ---
-def get_all_audio_files():
-    audio_files = []
-    music_dir = "Music"
-    if os.path.exists(music_dir) and os.path.isdir(music_dir):
-        for f in os.listdir(music_dir):
-            if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg')):
-                audio_files.append(os.path.join(music_dir, f))
-    for f in os.listdir('.'):
-        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg')):
-            audio_files.append(f)
-    return list(set(audio_files))
-
-def get_random_audio_file():
-    all_audios = get_all_audio_files()
-    if all_audios:
-        chosen = random.choice(all_audios)
-        print(f"  [+] Selected random background audio: '{chosen}'")
-        return chosen
-    return None
-
-# --- TIKTOK AI IMAGE EDITOR (Gemini 2.5 Flash Image / "Nano Banana") ---
-def ai_edit_images_gemini_batch(image_paths, prompt, api_key, model="gemini-2.5-flash-image"):
-    """
-    Sends ALL of the article's images together in ONE request, so Gemini can
-    read the full notice (info that may be split across images) before
-    generating slides — avoiding missing or duplicated fields.
-    Returns a list of newly generated image paths, or None on failure.
-    """
-    try:
-        parts = [{"text": prompt}]
-        for p in image_paths:
-            with open(p, "rb") as f:
-                img_b64 = base64.b64encode(f.read()).decode("utf-8")
-            mime_type = "image/png" if p.lower().endswith(".png") else "image/jpeg"
-            parts.append({"inline_data": {"mime_type": mime_type, "data": img_b64}})
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        payload = {"contents": [{"parts": parts}]}
-
-        resp = requests.post(url, json=payload, timeout=90)
-        if resp.status_code != 200:
-            print(f"  [!] Gemini batch edit failed ({resp.status_code}): {resp.text[:200]}")
-            return None
-
-        data = resp.json()
-        out_parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        out_paths = []
-        base_name = os.path.splitext(image_paths[0])[0]
-        for idx, part in enumerate(out_parts):
-            inline = part.get("inline_data") or part.get("inlineData")
-            if inline and inline.get("data"):
-                out_bytes = base64.b64decode(inline["data"])
-                out_path = f"{base_name}_ai_tt_{idx}.png"
-                with open(out_path, "wb") as out_f:
-                    out_f.write(out_bytes)
-                out_paths.append(out_path)
-
-        if not out_paths:
-            print("  [!] Gemini response contained no image data.")
-            return None
-        return out_paths
-    except Exception as e:
-        print(f"  [!] Gemini batch edit exception: {e}")
-        return None
-
-
-def prepare_tiktok_images(image_paths, prompt, api_key):
-    """
-    Builds the TikTok-only image set: a coherent set of AI-generated slides
-    built from ALL source images together, falling back to the original
-    images on any failure so the pipeline never breaks.
-    """
-    if not api_key:
-        print("  [!] GEMINI_API_KEY not set — TikTok will use the original images.")
-        return list(image_paths)
-
-    combined = ai_edit_images_gemini_batch(image_paths, prompt, api_key)
-    if combined:
-        print(f"  [+] Generated {len(combined)} AI slide(s) for TikTok from {len(image_paths)} source image(s).")
-        return combined
-
-    print("  [!] AI slide generation failed — falling back to original images for TikTok.")
-    return list(image_paths)
-
-
-# --- REELS GENERATION HELPERS ---
-def sanitize_filename(name):
-    if not name: return "reels_video"
-    cleaned = re.sub(r'[\/:*?"<>|\x00-\x1f]', '', name)
-    return cleaned.strip()[:100]
-
-def get_audio_duration(audio_path):
-    try:
-        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_path]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        return float(result.stdout.strip())
-    except Exception as e:
-        print(f"  [!] Error reading audio duration with ffprobe: {e}")
-        return 30.0
-
-def find_front_overlay_file():
-    if os.path.exists("Front.png"):
-        return "Front.png"
-    for filename in os.listdir("."):
-        if filename.lower() in ["front.png", "front.jpg", "front.jpeg", "front.webp"]:
-            return filename
-    return None
-
-def create_reels_video(image_paths, audio_path, output_path, fps=24):
-    print(f"  [~] Generating Reel Video: '{output_path}'")
-    if not image_paths: return False
-
-    valid_images = [p for p in image_paths if os.path.exists(p)]
-    if not valid_images: return False
-
-    audio_duration = get_audio_duration(audio_path)
-    total_frames = int(audio_duration * fps)
-    num_images = len(valid_images)
-    frames_per_image = total_frames // num_images
-    remainder = total_frames % num_images
-
-    temp_dir = f"_tmp_reels_frames_{random.randint(100000, 999999)}"
-    if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir)
-
-    try: resampling = Image.Resampling.LANCZOS
-    except AttributeError: resampling = Image.ANTIALIAS
-
-    front_overlay = None
-    overlay_filename = find_front_overlay_file()
-    if overlay_filename:
-        try:
-            overlay_raw = Image.open(overlay_filename).convert("RGBA")
-            ow, oh = overlay_raw.size
-            target_w = 230
-            if ow > target_w:
-                target_h = max(1, int(oh * (target_w / ow)))
-                front_overlay = overlay_raw.resize((target_w, target_h), resampling)
-            else:
-                front_overlay = overlay_raw
-            print(f"  [+] Floating Front overlay loaded successfully from '{overlay_filename}'!")
-        except Exception as e:
-            print(f"  [!] Failed to load Front overlay image: {e}")
-            front_overlay = None
-
-    frame_count = 0
-    
-    for idx, img_path in enumerate(valid_images):
-        try:
-            img = Image.open(img_path).convert('RGB')
-            w, h = img.size
-            if h == 0: continue
-            ratio = w / h
-            num_f = frames_per_image + (1 if idx < remainder else 0)
-
-            if ratio < (9 / 16):
-                new_w = 720
-                new_h = int(720 / ratio)
-                resized = img.resize((new_w, new_h), resampling)
-                max_y = new_h - 1280
-                for f in range(num_f):
-                    p = f / (num_f - 1) if num_f > 1 else 0.0
-                    y = int(p * max_y)
-                    crop_box = (0, y, 720, y + 1280)
-                    frame = resized.crop(crop_box)
-
-                    if front_overlay:
-                        ow, oh = front_overlay.size
-                        max_x = max(0, 720 - ow)
-                        max_y_f = max(0, 1280 - oh)
-                        progress = frame_count / max(1, total_frames)
-                        ox = int(((math.sin(progress * math.pi * 1.2) + 1) / 2) * max_x)
-                        oy = int(((math.cos(progress * math.pi * 0.8) + 1) / 2) * max_y_f)
-                        
-                        frame_rgba = frame.convert("RGBA")
-                        frame_rgba.paste(front_overlay, (ox, oy), front_overlay)
-                        frame = frame_rgba.convert("RGB")
-
-                    frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
-                    frame_count += 1
-            else:
-                new_w = 720
-                new_h = int(720 / ratio)
-                resized = img.resize((new_w, new_h), resampling)
-                y_offset = (1280 - new_h) // 2
-                
-                for f in range(num_f):
-                    bg_frame = Image.new("RGB", (720, 1280), (0, 0, 0))
-                    bg_frame.paste(resized, (0, y_offset))
-
-                    if front_overlay:
-                        ow, oh = front_overlay.size
-                        max_x = max(0, 720 - ow)
-                        max_y_f = max(0, 1280 - oh)
-                        progress = frame_count / max(1, total_frames)
-                        ox = int(((math.sin(progress * math.pi * 1.2) + 1) / 2) * max_x)
-                        oy = int(((math.cos(progress * math.pi * 0.8) + 1) / 2) * max_y_f)
-                        
-                        bg_rgba = bg_frame.convert("RGBA")
-                        bg_rgba.paste(front_overlay, (ox, oy), front_overlay)
-                        bg_frame = bg_rgba.convert("RGB")
-
-                    bg_frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=85)
-                    frame_count += 1
-        except Exception: pass
-
-    if frame_count == 0:
-        shutil.rmtree(temp_dir)
-        return False
-
-    if os.path.exists(output_path): os.remove(output_path)
-
-    ffmpeg_cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(temp_dir, "frame_%05d.jpg"), "-i", audio_path, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-shortest", output_path]
-
-    try:
-        res = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-    except subprocess.CalledProcessError as err:
-        print(f"  [!] FFmpeg generation error: {err.stderr[:200] if err.stderr else err}")
-        success = False
-
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    return success
-
-# --- FACEBOOK REELS & VIDEO UPLOADER ---
-def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
-    try:
-        url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
-        payload = {'upload_phase': 'start', 'access_token': page_token}
-        res = requests.post(url, data=payload, timeout=25)
-        if res.status_code != 200: return False
-        
-        data = res.json()
-        video_id, upload_url = data.get("video_id"), data.get("upload_url")
-        if not video_id or not upload_url: return False
-            
-        file_size = os.path.getsize(video_path)
-        headers = {"Authorization": f"OAuth {page_token}", "offset": "0", "file_size": str(file_size), "Content-Type": "application/octet-stream"}
-        with open(video_path, "rb") as f:
-            up_res = requests.post(upload_url, headers=headers, data=f, timeout=180)
-            
-        if up_res.status_code != 200: return False
-            
-        finish_payload = {"video_id": video_id, "upload_phase": "finish", "video_state": "PUBLISHED", "description": caption, "title": title, "access_token": page_token}
-        pub_res = requests.post(url, data=finish_payload, timeout=40)
-        if pub_res.status_code == 200:
-            print(f"  [+] FB Reel published successfully to page {page_id}!")
-            return True
-        else: return False
-    except Exception: return False
-
-def post_video_to_facebook(page_id, page_token, video_path, caption):
-    try:
-        url = f"https://graph.facebook.com/v20.0/{page_id}/videos"
-        files = {'file': open(video_path, 'rb')}
-        data = {'description': caption, 'access_token': page_token}
-        res = requests.post(url, data=data, files=files, timeout=120)
-        return res.status_code == 200
-    except Exception: return False
-
-def post_photo_to_facebook(page_id, page_token, photo_path, caption):
-    try: 
-        res = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'caption': caption, 'access_token': page_token}, files={'source': open(photo_path, 'rb')}, timeout=60)
-        return res.status_code == 200
-    except Exception: return False
-
-def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
-    try:
-        att = []
-        for path in photo_paths:
-            r = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/photos", data={'published': 'false', 'access_token': page_token}, files={'source': open(path, 'rb')}, timeout=45)
-            if r.status_code == 200: att.append({"media_fbid": r.json().get('id')})
-        if not att: return False
-        res = requests.post(f"https://graph.facebook.com/v20.0/{page_id}/feed", data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}, timeout=30)
-        if res.status_code == 200:
-            print(f"  [+] FB Multi-Photo Album published to page {page_id}!")
-            return True
-        return False
-    except Exception: return False
-
-# --- YOUTUBE SHORTS UPLOADER ---
-def get_youtube_access_token(client_id, client_secret, refresh_token):
-    if not client_id or not client_secret or not refresh_token: return None
-    url = "https://oauth2.googleapis.com/token"
-    payload = {"client_id": client_id, "client_secret": client_secret, "refresh_token": refresh_token, "grant_type": "refresh_token"}
-    try:
-        res = requests.post(url, data=payload, timeout=20)
-        if res.status_code == 200: return res.json().get("access_token")
-    except Exception: pass
-    return None
-
-def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path, title, description):
-    access_token = get_youtube_access_token(client_id, client_secret, refresh_token)
-    if not access_token: return False
-
-    try:
-        init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Length": str(os.path.getsize(video_path)), "X-Upload-Content-Type": "video/mp4"}
-        metadata = {"snippet": {"title": title[:80] + " #shorts", "description": description + "\n\n#shorts #reels", "categoryId": "22"}, "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}}
-        
-        res = requests.post(init_url, headers=headers, json=metadata, timeout=30)
-        if res.status_code != 200: return False
-            
-        upload_url = res.headers.get("Location")
-        if not upload_url: return False
-            
-        with open(video_path, "rb") as f:
-            up_res = requests.put(upload_url, headers={"Content-Length": str(os.path.getsize(video_path)), "Content-Type": "video/mp4"}, data=f, timeout=300)
-            
-        if up_res.status_code in [200, 201]:
-            print(f"  [+] YouTube Short uploaded successfully!")
-            return True
-        return False
-    except Exception: return False
-
-# --- MULTI-HOST CONTINUOUS RETRY VIDEO UPLOADER ENGINE ---
-def upload_to_public_host(video_path):
-    clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
-    
-    def try_catbox():
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-        return None
-
-    def try_litterbox():
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-        return None
-
-    def try_pixeldrain():
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://pixeldrain.com/api/file", files={"file": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
-            if r.status_code in [200, 201]:
-                fid = r.json().get("id")
-                if fid: return f"https://pixeldrain.com/api/file/{fid}"
-        return None
-
-    def try_filebin():
-        bid = uuid.uuid4().hex[:10]
-        furl = f"https://filebin.net/{bid}/{clean_filename}"
-        with open(video_path, 'rb') as f:
-            r = requests.post(furl, data=f, headers=HEADERS, timeout=45)
-            if r.status_code in [200, 201]:
-                return furl
-        return None
-
-    def try_envssh():
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://envs.sh", files={"file": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-        return None
-
-    def try_0x0st():
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://0x0.st", files={"file": (clean_filename, f, "video/mp4")}, headers=HEADERS, timeout=45)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-        return None
-
-    hosts = [
-        ("Catbox.moe", try_catbox),
-        ("Litterbox", try_litterbox),
-        ("Pixeldrain", try_pixeldrain),
-        ("Filebin.net", try_filebin),
-        ("Envs.sh", try_envssh),
-        ("0x0.st", try_0x0st)
-    ]
-
-    for name, host_func in hosts:
-        try:
-            print(f"  [~] Attempting video upload to '{name}'...")
-            res_url = host_func()
-            if res_url and str(res_url).startswith("http"):
-                print(f"  [+] Video uploaded successfully to '{name}': {res_url}")
-                return res_url
-            else:
-                print(f"  [!] '{name}' did not return a valid URL. Trying next host...")
-        except Exception as e:
-            print(f"  [!] '{name}' upload error: {e}. Trying next host...")
-
-    return None
-
-# --- TIKTOK BUFFER GRAPHQL UPLOADER ---
-def upload_video_to_tiktok(video_path, description, config=None):
-    if config is None: config = {}
-    buffer_profile_id = get_credential(config, "buffer_profile_id", "BUFFER_PROFILE_ID")
-    buffer_access_token = get_credential(config, "buffer_access_token", "BUFFER_ACCESS_TOKEN")
-    
-    if not buffer_profile_id or not buffer_access_token:
-        print("  [!] Buffer Credentials missing (BUFFER_PROFILE_ID / BUFFER_ACCESS_TOKEN). Skipping TikTok upload.")
-        return False
-
-    print("  [~] Uploading TikTok video via Buffer GraphQL API...")
-
-    # Clean description for TikTok to avoid Community Guidelines Violation for phone/whatsapp numbers
-    clean_desc = re.sub(r'whatsapp\s*\d+', '', description, flags=re.IGNORECASE)
-    clean_desc = re.sub(r'01\d{9}', '', clean_desc)
-    clean_desc = re.sub(r'আবেদন করতে যোগাযোগ করুন.*$', '', clean_desc, flags=re.DOTALL)
-    clean_desc = clean_desc.strip()[:100] + " #jobcircular #jobnews #bangladesh #jobs"
-    
-    video_url = upload_to_public_host(video_path)
-
-    if not video_url:
-        print("  [!] Failed to upload video to all public hosts for Buffer.")
-        return False
-
-    graphql_url = "https://api.buffer.com"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {buffer_access_token}"
-    }
-
-    mutation = """
-    mutation CreatePost($input: CreatePostInput!) {
-      createPost(input: $input) {
-        ... on PostActionSuccess {
-          post {
-            id
-          }
-        }
-        ... on MutationError {
-          message
-        }
-      }
-    }
-    """
-
-    for mode in ["shareNow", "addToQueue"]:
-        payload = {
-            "query": mutation,
-            "variables": {
-                "input": {
-                    "channelId": buffer_profile_id,
-                    "text": clean_desc,
-                    "schedulingType": "automatic",
-                    "mode": mode,
-                    "assets": [
-                        {
-                            "video": {
-                                "url": video_url
-                            }
-                        }
-                    ]
-                }
-            }
-        }
-
-        try:
-            res = requests.post(graphql_url, json=payload, headers=headers, timeout=60)
-            if res.status_code == 200:
-                res_data = res.json()
-                data = res_data.get("data", {}).get("createPost", {})
-                if "post" in data and data["post"]:
-                    print(f"  [+] TikTok video published successfully via Buffer GraphQL API ({mode})!")
-                    return True
-                elif "message" in data and data["message"]:
-                    print(f"  [!] Buffer GraphQL Mutation Warning ({mode}): {data['message']}")
-                elif "errors" in res_data:
-                    print(f"  [!] Buffer GraphQL API Errors: {res_data['errors']}")
-            else:
-                print(f"  [!] Buffer GraphQL API HTTP Error ({res.status_code}): {res.text}")
-        except Exception as e:
-            print(f"  [!] Exception during Buffer GraphQL request: {e}")
-
-    return False
-
-# --- WHATSAPP RENDER BACKEND MEDIA COMPILER / CHUNKER BASE64 MAKER BRIDGE SYSTEM---
-def warmup_render_server(render_url):
-    if not render_url: return
-    try: requests.get(f"{render_url.rstrip('/')}/qr", timeout=15)
-    except Exception: pass
-
-def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
-    if not render_url: return False
-    try:
-        clean_id = channel_id.split('/')[-1].replace('@newsletter', '').strip()
-        encoded_images = []
-        if image_paths and len(image_paths) > 0:
-            for p in image_paths[:5]:
-                if os.path.exists(p):
-                    with open(p, 'rb') as f: encoded_images.append(base64.b64encode(f.read()).decode('utf-8'))
-        
-        payload = {"channel_id": clean_id, "text": text, "images": encoded_images}
-        res = requests.post(f"{render_url.rstrip('/')}/send", json=payload, timeout=90)
-        if res.status_code == 200 and res.json().get("status") == "success":
-            print(f"  [+] Posted successfully (Media Array Sent: {len(encoded_images)}) to WhatsApp Channel '{clean_id}' via Render!")
-            return True
-        return False
-    except Exception: return False
-
-# --- FACEBOOK PAGE ACCESS HANDLER ---
-def get_page_access_token(master_user_token, page_id):
-    if not master_user_token: return None
-    try:
-        url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}&limit=100"
-        r = requests.get(url, timeout=20)
-        if r.status_code == 200:
-            for p in r.json().get('data', []):
-                if str(p.get('id')) == str(page_id): return p.get('access_token')
-    except Exception: pass
-    return master_user_token
-
-# --- MAIN CONTROLLER ALGORITHMIC PIPELINE STRUCTURE ---
 async def process_sync(config, memory):
-    credentials = config.get("credentials", {})
     rules = config.get("rules", [])
-    if not rules: return memory
+    if not rules:
+        print("[!] No sync rules found in automation_config.json")
+        return memory
 
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else ("WhatsApp" if "WhatsApp" in p_str else "Website")))
-    tg_session, tg_api_id, tg_api_hash = get_credential(config, "tg_session", "TG_SESSION"), get_credential(config, "tg_api_id", "TG_API_ID"), get_credential(config, "tg_api_hash", "TG_API_HASH")
+    
+    tg_session = get_credential(config, "tg_session", "TG_SESSION")
+    tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
+    tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
-    gemini_api_key = get_credential(config, "gemini_api_key", "GEMINI_API_KEY")
-    tiktok_ai_prompt = os.environ.get("TIKTOK_AI_PROMPT", "").strip() or config.get("tiktok_ai_prompt", DEFAULT_TIKTOK_AI_PROMPT)
+    yt_client_id = get_credential(config, "yt_client_id", "YT_CLIENT_ID")
+    yt_client_secret = get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET")
+    yt_refresh_token = get_credential(config, "yt_refresh_token", "YT_REFRESH_TOKEN")
 
-    if any(clean_platform(r['destination']) == "WhatsApp" for r in rules): warmup_render_server(render_wa_url)
     tg_client = None
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
         if tg_session and tg_api_id and tg_api_hash:
@@ -629,194 +48,133 @@ async def process_sync(config, memory):
                 tg_client = TelegramClient(StringSession(str(tg_session).strip()), int(tg_api_id), str(tg_api_hash))
                 await tg_client.start()
                 print("  [+] Telegram Client Authenticated!")
-            except Exception: tg_client = None
-
-    current_time = datetime.now(timezone.utc)
-    global_yt_tt_processed = set()
+            except Exception as e:
+                print(f"  [!] Telegram Client Error: {e}")
 
     for idx, rule in enumerate(rules):
         rule_key = f"route_{idx}_{rule['source']}_{rule['destination']}"
-        source_platform, dest_platform = clean_platform(rule['source']), clean_platform(rule['destination'])
+        source_platform = clean_platform(rule['source'])
+        dest_platform = clean_platform(rule['destination'])
         source_ids = [s.strip() for s in rule['source_id'].split(',') if s.strip()]
         dest_ids = [d.strip() for d in rule['dest_id'].split(',') if d.strip()]
         min_words = rule.get("min_words", 60)
-        lookback_threshold = current_time - timedelta(hours=rule.get("lookback_hours", 24.0))
 
         for source_id in source_ids:
-            target_feed_url = clean_feed_url(source_id)
-            print(f"\n[~] Checking Source Route ({source_platform} ➔ {dest_platform}): '{target_feed_url}'")
-            try:
-                if source_platform == "Website":
-                    feed = None
-                    try:
-                        rss_target = target_feed_url if target_feed_url.endswith(('/feed', '/feed/', '/rss', '/rss/')) else target_feed_url.rstrip('/') + '/feed/'
-                        resp = requests.get(rss_target, headers=HEADERS, timeout=12)
-                        if resp.status_code == 200:
-                            feed = feedparser.parse(resp.content)
-                        else:
-                            resp2 = requests.get(target_feed_url, headers=HEADERS, timeout=12)
-                            feed = feedparser.parse(resp2.content if resp2.status_code == 200 else target_feed_url)
-                    except Exception as fe:
-                        print(f"  [!] Feed fetch exception: {fe}")
-                        feed = feedparser.parse(target_feed_url)
+            print(f"\n========================================================")
+            print(f"[~] Checking Route ({source_platform} ➔ {dest_platform}): '{source_id}'")
+            print(f"========================================================")
 
-                    processed_links = memory.get(rule_key, [])
-                    if not isinstance(processed_links, list): processed_links = []
-                    new_processed_links = list(processed_links)
+            if source_platform == "Website":
+                feed = fetch_feed_entries(source_id)
+                processed_links = memory.get(rule_key, [])
+                if not isinstance(processed_links, list): processed_links = []
+                new_processed_links = list(processed_links)
 
-                    entries_found = len(feed.entries) if hasattr(feed, 'entries') else 0
-                    print(f"  [~] Total entries found in feed: {entries_found}")
+                for entry in reversed(feed.entries[:10]):
+                    entry_link = entry.get('link', '').strip()
+                    if not entry_link and 'links' in entry and entry.links:
+                        entry_link = entry.links[0].get('href', '').strip()
+                    if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
-                    for entry in reversed(feed.entries[:15]):
-                        entry_link = entry.get('link', '').strip()
-                        if not entry_link and 'links' in entry and entry.links: entry_link = entry.links[0].get('href', '').strip()
-                        if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
+                    if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
+                    if entry_link in processed_links: continue
 
-                        if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
-                        
-                        if entry_link in processed_links:
-                            print(f"  [~] Skipping entry (Already processed): '{entry.get('title', '')[:50]}...'")
-                            continue
+                    title = entry.get('title', '').strip()
+                    print(f"\n🔥 [NEW CIRCULAR] Found: '{title}'")
+                    new_processed_links.append(entry_link)
 
-                        print(f"\n[+] Processing New Article: '{entry.get('title', '')}'")
-                        new_processed_links.append(entry_link)
-                        
-                        target_keywords = ["চলমান", "সকল", "চাকরির", "নিয়োগ"]
-                        if all(kw in entry.get('title', '') for kw in target_keywords):
-                            print("  [~] Skipping due to generic keyword match.")
-                            continue
+                    raw_desc = entry.get('summary', '') or entry.get('description', '')
+                    raw_desc_clean = clean_text(raw_desc)
+                    if rule.get('txt', True) and len(clean_text(title + " " + raw_desc_clean).split()) < min_words:
+                        print(f"  [~] Skipping due to short word count (< {min_words} words).")
+                        continue
 
-                        raw_desc = strip_html(entry.summary if 'summary' in entry else entry.description if 'description' in entry else "")
-                        if rule['txt'] and len(clean_text(entry.get('title', '') + " " + raw_desc).split()) < min_words:
-                            print(f"  [~] Skipping due to short word count (< {min_words} words).")
-                            continue
-
-                        img_urls = []
-                        if 'enclosures' in entry and entry.enclosures: img_urls.extend([enc.get('href', '') for enc in entry.enclosures if enc.get('href', '').lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-                        if 'media_content' in entry and entry.media_content: img_urls.extend([mc.get('url') for mc in entry.media_content])
-                        img_urls.extend([url for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc, re.IGNORECASE)])
-
+                    # ১. ইমেজ ডাউনলোড
+                    img_urls = extract_article_images(entry, entry_link, raw_desc)
+                    downloaded_imgs = []
+                    for i_idx, u in enumerate(img_urls):
                         try:
-                            web_res = requests.get(entry_link, headers=HEADERS, timeout=12)
-                            if web_res.status_code == 200:
-                                scraped_imgs = [u for r in [re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE)] for u in r if not any(l in u.lower() for l in ['logo', 'icon', 'avatar'])]
-                                img_urls.extend([i for i in scraped_imgs if i not in img_urls])
-                        except Exception as e:
-                            print(f"  [!] Web scraping exception: {e}")
+                            ir = requests.get(u, headers=HEADERS, timeout=10)
+                            if ir.status_code == 200:
+                                p = f"tmp_raw_{hash(entry_link)}_{i_idx}.jpg"
+                                with open(p, 'wb') as f: f.write(ir.content)
+                                downloaded_imgs.append(p)
+                        except Exception: pass
 
-                        cleaned_img_urls = []
-                        seen_bases = set()
-                        for u in img_urls[:6]:
-                            u = urljoin(entry_link, u) if not u.startswith('http') else u
-                            b_url = u.split('?')[0]
-                            if b_url not in seen_bases:
-                                seen_bases.add(b_url)
-                                cleaned_img_urls.append(u)
+                    # ২. এআই দিয়ে স্ট্রাকচার্ড ডাটা ও ১-মিনিটের স্ক্রিপ্ট তৈরি
+                    job_data = generate_job_data_and_script(title, downloaded_imgs)
+                    voiceover_script = job_data.get("voiceover_script", "")
 
-                        print(f"  [+] Found {len(cleaned_img_urls)} unique image URL(s) for article.")
+                    # ৩. ElevenLabs দিয়ে একবারই অডিও জেনারেট
+                    gen_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
+                    audio_success = generate_voiceover_audio_pipeline(voiceover_script, gen_audio_path)
 
-                        contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
-                        final_post_text = f"{clean_text(entry.get('title', ''))}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(entry.get('title', ''))}\n\n{raw_desc[:250]}...{contact_sfx}"
+                    # ৪. TikTok / Reels এর জন্য ব্যাকগ্রাউন্ড + ফন্ট দিয়ে স্লাইড তৈরি
+                    slide_paths = prepare_tiktok_slides(job_data, output_prefix=f"slide_{hash(entry_link)}")
 
-                        raw_paths = []
-                        if cleaned_img_urls and rule.get('img', True):
-                            for idx, u in enumerate(cleaned_img_urls):
-                                try:
-                                    ir = requests.get(u, headers=HEADERS, timeout=10)
-                                    if ir.status_code == 200:
-                                        p = f"tmp_rss_{hash(entry_link)}_{idx}.jpg"
-                                        with open(p, 'wb') as f: f.write(ir.content)
-                                        try:
-                                            with Image.open(p) as img:
-                                                if img.size[1] > 0:
-                                                    raw_paths.append(p)
-                                        except Exception:
-                                            if os.path.exists(p): os.remove(p)
-                                except Exception: pass
+                    # ৫. টেক্সট পোস্ট ডেলিভারি (Telegram / Facebook Feed / WhatsApp)
+                    contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
+                    final_post_text = f"{clean_text(title)}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(title)}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
 
-                        print(f"  [+] Downloaded {len(raw_paths)} valid local image file(s).")
+                    for did in dest_ids:
+                        if dest_platform == "Telegram" and tg_client:
+                            clean_tg = clean_telegram_id(did)
+                            try:
+                                if downloaded_imgs: await tg_client.send_file(clean_tg, downloaded_imgs, caption=final_post_text)
+                                else: await tg_client.send_message(clean_tg, final_post_text)
+                            except Exception: pass
 
-                        # --- VIDEO IMAGES SELECTION LOGIC ---
-                        video_paths = []
-                        if raw_paths:
-                            if len(raw_paths) == 1:
-                                video_paths = list(raw_paths)
-                            else:
-                                skip_first = False
-                                try:
-                                    with Image.open(raw_paths[0]) as first_img:
-                                        w, h = first_img.size
-                                        if h > 0 and (w / h) >= (16 / 9):
-                                            skip_first = True
-                                except Exception:
-                                    pass
+                        elif dest_platform == "Facebook":
+                            token = get_page_access_token(fb_user_token, did)
+                            if token:
+                                if len(downloaded_imgs) > 1: post_multi_photo_to_facebook(did, token, downloaded_imgs, final_post_text)
+                                elif len(downloaded_imgs) == 1: post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
 
-                                if skip_first and len(raw_paths) > 1:
-                                    video_paths = list(raw_paths[1:])
-                                else:
-                                    video_paths = list(raw_paths)
+                        elif dest_platform == "WhatsApp":
+                            post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
 
-                        print(f"  [+] Selected {len(video_paths)} image(s) for Reels/Shorts/TikTok generation.")
-
-                        if rule['txt']:
-                            for did in dest_ids:
-                                if dest_platform == "Telegram" and tg_client:
-                                    clean_tg = clean_telegram_id(did)
-                                    try:
-                                        if raw_paths: await tg_client.send_file(clean_tg, raw_paths, caption=final_post_text)
-                                        else: await tg_client.send_message(clean_tg, final_post_text)
-                                    except Exception: pass
-                                elif dest_platform == "Facebook":
-                                    token = get_page_access_token(fb_user_token, did)
-                                    if token:
-                                        if len(raw_paths) > 1: post_multi_photo_to_facebook(did, token, raw_paths, final_post_text)
-                                        elif len(raw_paths) == 1: post_photo_to_facebook(did, token, raw_paths[0], final_post_text)
-                                elif dest_platform == "WhatsApp":
-                                    post_to_whatsapp_channel(render_wa_url, did, final_post_text, raw_paths)
-
-                        if video_paths:
+                    # ৬. ভিডিও রেন্ডারিং ও একক অডিও দিয়ে সর্বত্র আপলোড (FB Reel, YouTube Shorts, TikTok)
+                    if audio_success and os.path.exists(gen_audio_path) and slide_paths:
+                        video_out = f"final_reel_{hash(entry_link)}.mp4"
+                        if render_vertical_video(slide_paths, gen_audio_path, video_out):
+                            # Facebook Reel
                             if dest_platform == "Facebook":
                                 for did in dest_ids:
                                     token = get_page_access_token(fb_user_token, did)
-                                    audio = get_random_audio_file()
-                                    if token and audio:
-                                        pvf = f"reels_output/{sanitize_filename(entry.get('title', ''))}_{did}.mp4"
-                                        os.makedirs("reels_output", exist_ok=True)
-                                        if create_reels_video(video_paths, audio, pvf):
-                                            if not post_reel_to_facebook(did, token, pvf, entry.get('title', ''), final_post_text): post_video_to_facebook(did, token, pvf, final_post_text)
-                                        if os.path.exists(pvf): os.remove(pvf)
-                            if entry_link not in global_yt_tt_processed:
-                                audio_yt, audio_tt = get_random_audio_file(), get_random_audio_file()
-                                yt_done, tt_done = False, False
-                                if audio_yt:
-                                    yt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_yt_{random.randint(10, 99)}.mp4"
-                                    if create_reels_video(video_paths, audio_yt, yt_f):
-                                        yt_i, yt_s, yt_r = os.environ.get("YT_CLIENT_ID",""), os.environ.get("YT_CLIENT_SECRET",""), os.environ.get("YT_REFRESH_TOKEN","")
-                                        if yt_i and yt_s and yt_r:
-                                            yt_done = upload_video_to_youtube(yt_i, yt_s, yt_r, yt_f, entry.get('title', ''), final_post_text)
-                                        if os.path.exists(yt_f): os.remove(yt_f)
-                                if audio_tt:
-                                    tt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_tt_{random.randint(10, 99)}.mp4"
-                                    tt_image_paths = prepare_tiktok_images(video_paths, tiktok_ai_prompt, gemini_api_key)
-                                    if create_reels_video(tt_image_paths, audio_tt, tt_f):
-                                        if os.environ.get("BUFFER_ACCESS_TOKEN", "") or os.environ.get("BUFFER_PROFILE_ID", "") or config.get("credentials", {}).get("buffer_access_token"):
-                                            tt_done = upload_video_to_tiktok(tt_f, final_post_text, config)
-                                        if os.path.exists(tt_f): os.remove(tt_f)
-                                    for p in tt_image_paths:
-                                        if p not in video_paths and os.path.exists(p): os.remove(p)
-                                if yt_done or tt_done:
-                                    global_yt_tt_processed.add(entry_link)
+                                    if token:
+                                        if not post_reel_to_facebook(did, token, video_out, title, final_post_text):
+                                            post_video_to_facebook(did, token, video_out, final_post_text)
+                            
+                            # YouTube Shorts
+                            if yt_client_id and yt_client_secret and yt_refresh_token:
+                                upload_video_to_youtube(yt_client_id, yt_client_secret, yt_refresh_token, video_out, job_data.get("optimized_title", title), job_data.get("video_description", final_post_text))
+                                print(f"  [+] Published to YouTube Shorts!")
 
-                        for path in raw_paths:
-                            if os.path.exists(path): os.remove(path)
-                    memory[rule_key] = new_processed_links[-50:]
-            except Exception as e:
-                print(f"  [!] Route processing exception: {e}")
-    if tg_client: await tg_client.disconnect()
+                            # TikTok via Buffer
+                            upload_video_to_tiktok_buffer(video_out, final_post_text, config)
+
+                        # ক্লিনআপ
+                        if os.path.exists(video_out): os.remove(video_out)
+
+                    # টেম্প ফাইল ডিলিট
+                    if os.path.exists(gen_audio_path): os.remove(gen_audio_path)
+                    for sp in slide_paths:
+                        if os.path.exists(sp): os.remove(sp)
+                    for dp in downloaded_imgs:
+                        if os.path.exists(dp): os.remove(dp)
+
+                memory[rule_key] = new_processed_links[-50:]
+
+    if tg_client:
+        await tg_client.disconnect()
     return memory
 
 async def main():
-    save_json(MEMORY_FILE, await process_sync(load_json(CONFIG_FILE, {}), load_json(MEMORY_FILE, {})))
-    print("\n✅ Task Executed.")
+    config = load_json(CONFIG_FILE, {})
+    memory = load_json(MEMORY_FILE, {})
+    updated_memory = await process_sync(config, memory)
+    save_json(MEMORY_FILE, updated_memory)
+    print("\n✅ Task Executed Successfully.")
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
