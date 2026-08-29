@@ -32,9 +32,23 @@ COOKIES_FILE = "cookies.txt"
 # Override it per-run via the TIKTOK_AI_PROMPT env var, or set
 # "tiktok_ai_prompt" in automation_config.json to change it permanently.
 DEFAULT_TIKTOK_AI_PROMPT = (
-    "Subtly restyle this photo: adjust the color grading, lighting mood, "
-    "and slightly reframe the composition. Keep the same subject, people, "
-    "and meaning of the original image intact."
+    "তোমাকে একটি নিয়োগ বিজ্ঞপ্তির একাধিক ছবি একসাথে দেওয়া হয়েছে। এগুলো একই বিজ্ঞপ্তির "
+    "বিভিন্ন অংশ হতে পারে — যেমন একটি ছবিতে পদের নাম ও শিক্ষাগত যোগ্যতা, আরেকটি ছবিতে "
+    "আবেদন প্রক্রিয়া ও তারিখ থাকতে পারে। সব ছবি একসাথে পড়ে পুরো বিজ্ঞপ্তির সম্পূর্ণ তথ্য "
+    "আগে বুঝে নাও, তারপর সেই তথ্য দিয়ে সম্পূর্ণ নতুন, পরিষ্কার ও প্রফেশনাল ডিজাইনের এক বা "
+    "একাধিক ইনফোগ্রাফিক-স্টাইল স্লাইড তৈরি করো। প্রতিটি তথ্য শুধুমাত্র একবার দেখাও — কোনো "
+    "তথ্যের পুনরাবৃত্তি করো না এবং একই তথ্য একাধিক স্লাইডে বসিও না।\n\n"
+    "স্লাইডের বিষয়বস্তু এভাবে সাজাও:\n"
+    "১. প্রথম স্লাইডের উপরে বড় হেডলাইনে প্রতিষ্ঠান/মন্ত্রণালয়/অফিসের নাম সহ 'নিয়োগ বিজ্ঞপ্তি' লেখা "
+    "(যেমন: 'ডিসি অফিস নিয়োগ বিজ্ঞপ্তি', 'পল্লী বিদ্যুৎ নিয়োগ বিজ্ঞপ্তি'), তার নিচে দুই কলামে — "
+    "বাম কলামে শিরোনাম 'পদের নাম' দিয়ে পদগুলোর তালিকা, ডান কলামে শিরোনাম 'শিক্ষাগত যোগ্যতা' "
+    "দিয়ে সংশ্লিষ্ট যোগ্যতা।\n"
+    "২. বাকি স্লাইড(গুলো)-এ শুধু অবশিষ্ট তথ্য দাও — যেমন আবেদন প্রক্রিয়া, এবং সবার নিচে "
+    "স্পষ্টভাবে 'আবেদন শুরু' ও 'আবেদনের শেষ তারিখ'। যদি কোনো ছবিতে এই তথ্য না থাকে, "
+    "সেই অংশ খালি না রেখে সংশ্লিষ্ট স্লাইড বাদ দাও।\n\n"
+    "মূল ছবিগুলোর সব তথ্য ও সংখ্যা হুবহু অক্ষুণ্ণ রাখো, কোনো তথ্য বাদ দিও না বা বদলিও না — "
+    "শুধু রঙ, ফন্ট, লেআউট ও ভিজ্যুয়াল ডিজাইন সম্পূর্ণ নতুনভাবে সাজাও। "
+    "একটি পরিষ্কার, সহজপাঠ্য, সরকারি নোটিশ-ঘরানার ডিজাইন ব্যবহার করো।"
 )
 
 HEADERS = {
@@ -108,69 +122,68 @@ def get_random_audio_file():
     return None
 
 # --- TIKTOK AI IMAGE EDITOR (Gemini 2.5 Flash Image / "Nano Banana") ---
-def ai_edit_image_gemini(image_path, prompt, api_key, model="gemini-2.5-flash-image"):
+def ai_edit_images_gemini_batch(image_paths, prompt, api_key, model="gemini-2.5-flash-image"):
     """
-    Sends one image + a text prompt to Gemini's image-editing model and
-    saves the returned (edited) image next to the original.
-    Returns the new file path, or None if anything goes wrong.
+    Sends ALL of the article's images together in ONE request, so Gemini can
+    read the full notice (info that may be split across images) before
+    generating slides — avoiding missing or duplicated fields.
+    Returns a list of newly generated image paths, or None on failure.
     """
     try:
-        with open(image_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+        parts = [{"text": prompt}]
+        for p in image_paths:
+            with open(p, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode("utf-8")
+            mime_type = "image/png" if p.lower().endswith(".png") else "image/jpeg"
+            parts.append({"inline_data": {"mime_type": mime_type, "data": img_b64}})
 
-        mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime_type, "data": img_b64}}
-                ]
-            }]
-        }
+        payload = {"contents": [{"parts": parts}]}
 
-        resp = requests.post(url, json=payload, timeout=60)
+        resp = requests.post(url, json=payload, timeout=90)
         if resp.status_code != 200:
-            print(f"  [!] Gemini image edit failed ({resp.status_code}): {resp.text[:200]}")
+            print(f"  [!] Gemini batch edit failed ({resp.status_code}): {resp.text[:200]}")
             return None
 
         data = resp.json()
-        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        for part in parts:
+        out_parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        out_paths = []
+        base_name = os.path.splitext(image_paths[0])[0]
+        for idx, part in enumerate(out_parts):
             inline = part.get("inline_data") or part.get("inlineData")
             if inline and inline.get("data"):
                 out_bytes = base64.b64decode(inline["data"])
-                out_path = f"{os.path.splitext(image_path)[0]}_ai_tt.png"
+                out_path = f"{base_name}_ai_tt_{idx}.png"
                 with open(out_path, "wb") as out_f:
                     out_f.write(out_bytes)
-                return out_path
+                out_paths.append(out_path)
 
-        print("  [!] Gemini response contained no image data.")
-        return None
+        if not out_paths:
+            print("  [!] Gemini response contained no image data.")
+            return None
+        return out_paths
     except Exception as e:
-        print(f"  [!] Gemini image edit exception: {e}")
+        print(f"  [!] Gemini batch edit exception: {e}")
         return None
 
 
 def prepare_tiktok_images(image_paths, prompt, api_key):
     """
-    Builds the TikTok-only image set: AI-edited copies where possible,
-    silently falling back to the original image on any failure so a
-    single bad API call never breaks the whole run.
+    Builds the TikTok-only image set: a coherent set of AI-generated slides
+    built from ALL source images together, falling back to the original
+    images on any failure so the pipeline never breaks.
     """
     if not api_key:
         print("  [!] GEMINI_API_KEY not set — TikTok will use the original images.")
         return list(image_paths)
 
-    result = []
-    for p in image_paths:
-        edited = ai_edit_image_gemini(p, prompt, api_key)
-        if edited:
-            print(f"  [+] AI-edited image for TikTok: '{edited}'")
-            result.append(edited)
-        else:
-            result.append(p)
-    return result
+    combined = ai_edit_images_gemini_batch(image_paths, prompt, api_key)
+    if combined:
+        print(f"  [+] Generated {len(combined)} AI slide(s) for TikTok from {len(image_paths)} source image(s).")
+        return combined
+
+    print("  [!] AI slide generation failed — falling back to original images for TikTok.")
+    return list(image_paths)
 
 
 # --- REELS GENERATION HELPERS ---
