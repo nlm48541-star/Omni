@@ -43,7 +43,7 @@ def parse_json_safely(raw_text):
     except Exception:
         return None
 
-def generate_job_data_and_script(title, image_paths):
+def generate_job_data_and_multi_scripts(title, image_paths, num_scripts=1):
     cur_en, cur_bn = get_current_years()
     clean_title = re.sub(r'\s+', ' ', str(title)).strip()
 
@@ -51,28 +51,30 @@ def generate_job_data_and_script(title, image_paths):
 Context:
 - Circular Title: "{clean_title}"
 - Current Year Context: {cur_bn} ({cur_en})
+- Total Required Scripts: {num_scripts} (Generate {num_scripts} distinct voiceover scripts with slightly different intros, flow, and sentence structures so each Facebook page gets a unique script).
 
-Extract data from the circular images or title to construct a complete UI dataset and 1-minute voiceover script.
+Tasks:
+1. Extract or determine structured circular UI data:
+   - "org_name": Official organization name in Bengali (e.g., "মৎস্য ও প্রাণিসম্পদ তথ্য দপ্তর").
+   - "headline": Short catchy header (e.g., "নিয়োগ বিজ্ঞপ্তি").
+   - "circular_date": Date of circular publish (e.g., "২৭ জুলাই ২০২৬" or current date).
+   - "total_vacancies": Total posts count with suffix (e.g., "১৯ টি").
+   - "posts": Array of job posts (up to 8 posts). Each with:
+       - "post_name": Name of post (e.g. "সহকারী চিত্রশিল্পী", "অফিস সহায়ক")
+       - "grade": Grade info (e.g. "গ্রেড-১৩", "গ্রেড-২০")
+       - "vacancy": Vacancy number in Bengali digits (e.g. "১", "২", "১০")
+   - "start_date": Application start date (e.g., "০৩-০৭-২০২৬").
+   - "start_time": Start time (e.g., "সকাল ১০:০০").
+   - "end_date": Application deadline (e.g., "৩০-০৮-২০২৬").
+   - "end_time": Deadline time (e.g., "বিকাল ৫:০০").
+   - "cta_text": "Whatsapp: +8801540503092".
 
-Return strictly valid JSON with these EXACT keys:
-1. "org_name": Organization name in Bengali (e.g., "মৎস্য ও প্রাণিসম্পদ তথ্য দপ্তর", "বাংলাদেশ রেলওয়ে", "পল্লী বিদ্যুৎ সমিতি").
-2. "headline": Main headline (e.g., "নিয়োগ বিজ্ঞপ্তি").
-3. "circular_date": Date of circular publish (e.g., "২৭ জুলাই ২০২৬" or current date).
-4. "total_vacancies": Total posts count with suffix (e.g., "১৯ টি", "১২ টি").
-5. "posts": Array of job post objects (up to 8 posts). Each item MUST have:
-     - "post_name": Name of post (e.g. "সহকারী চিত্রশিল্পী", "অফিস সহায়ক")
-     - "grade": Grade info (e.g. "গ্রেড-১৩", "গ্রেড-২০")
-     - "vacancy": Vacancy number in Bengali digits (e.g. "১", "২", "১০")
-6. "start_date": Application start date (e.g. "০৩-০৭-২০২৬").
-7. "start_time": Start time (e.g. "সকাল ১০:০০").
-8. "end_date": Application deadline (e.g. "৩০-০৮-২০২৬").
-9. "end_time": Deadline time (e.g. "বিকাল ৫:০০").
-10. "cta_text": "Whatsapp: +8801540503092".
-11. "voiceover_script": A comprehensive, natural spoken Bengali voiceover script (around 140 to 180 words, exactly ~1 minute speaking duration) describing the job circular, positions, qualifications, deadlines, and a call-to-action to contact WhatsApp +8801540503092. (No emojis, no brackets, continuous spoken Bengali only).
-12. "optimized_title": Social media / YouTube video title under 90 characters.
-13. "video_description": Video description with job details, WhatsApp link wa.me/8801540503092 and relevant hashtags.
+2. "voiceover_scripts": An array of exactly {num_scripts} unique continuous spoken Bengali scripts (each around 140 to 180 words, exactly ~1 minute speaking duration). Each script should present the circular announcement, roles, eligibility, application deadline, and call-to-action in its own distinct engaging tone (No emojis, no brackets, continuous spoken Bengali only).
 
-Output format (JSON):
+3. "optimized_title": Social video title under 90 characters.
+4. "video_description": Description with job details, WhatsApp link wa.me/8801540503092, and hashtags.
+
+Output format (Strictly valid JSON):
 {{
   "org_name": "...",
   "headline": "নিয়োগ বিজ্ঞপ্তি",
@@ -86,7 +88,10 @@ Output format (JSON):
   "end_date": "...",
   "end_time": "বিকাল ৫:০০",
   "cta_text": "Whatsapp: +8801540503092",
-  "voiceover_script": "...",
+  "voiceover_scripts": [
+    "Script 1 here...",
+    "Script 2 here..."
+  ],
   "optimized_title": "...",
   "video_description": "..."
 }}"""
@@ -97,21 +102,21 @@ Output format (JSON):
     if OLLAMA_API_KEY:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OLLAMA_API_KEY}"}
         for model in OLLAMA_MODELS:
-            print(f"  [AI] Attempting Ollama model '{model}'...")
+            print(f"  [AI] Attempting Ollama model '{model}' for {num_scripts} script(s)...")
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt, "images": base64_imgs}],
                 "stream": False,
-                "options": {"temperature": 0.3}
+                "options": {"temperature": 0.5}
             }
             try:
-                resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=45)
+                resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=50)
                 if resp.status_code == 200:
                     content = resp.json().get("message", {}).get("content", "")
                     data = parse_json_safely(content)
-                    if data and data.get("voiceover_script"):
-                        print(f"  [+] Successfully extracted via Ollama ({model})!")
-                        return data
+                    if data and (data.get("voiceover_scripts") or data.get("voiceover_script")):
+                        print(f"  [+] Successfully generated via Ollama ({model})!")
+                        return normalize_scripts(data, num_scripts)
             except Exception as e:
                 print(f"  [!] Ollama ({model}) notice: {e}")
 
@@ -127,35 +132,47 @@ Output format (JSON):
                     {"role": "user", "content": prompt}
                 ],
                 "response_format": {"type": "json_object"},
-                "temperature": 0.3,
-                "max_tokens": 2200
+                "temperature": 0.5,
+                "max_tokens": 2500
             }
             try:
-                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30)
+                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=35)
                 if resp.status_code == 200:
                     content = resp.json()['choices'][0]['message']['content']
                     data = parse_json_safely(content)
-                    if data and data.get("voiceover_script"):
-                        print(f"  [+] Successfully extracted via Groq ({g_model})!")
-                        return data
+                    if data and (data.get("voiceover_scripts") or data.get("voiceover_script")):
+                        print(f"  [+] Successfully generated via Groq ({g_model})!")
+                        return normalize_scripts(data, num_scripts)
             except Exception as e:
                 print(f"  [!] Groq ({g_model}) notice: {e}")
 
     # ৩. ডিফল্ট ফলব্যাক
+    base_script = f"নতুন সরকারি ও বেসরকারি চাকরির খবর। {clean_title} প্রকাশিত হয়েছে। আগ্রহী প্রার্থীরা প্রয়োজনীয় শিক্ষাগত যোগ্যতা নিয়ে দ্রুত আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।"
     return {
         "org_name": clean_title[:45],
         "headline": "নিয়োগ বিজ্ঞপ্তি",
         "circular_date": f"{cur_bn} সার্কুলার",
         "total_vacancies": "একাধিক পদ",
-        "posts": [
-            {"post_name": "নিয়োগ সংক্রান্ত পদসমূহ", "grade": "বিজ্ঞপ্তি অনুযায়ী", "vacancy": "১"}
-        ],
+        "posts": [{"post_name": "নিয়োগ সংক্রান্ত পদসমূহ", "grade": "বিজ্ঞপ্তি অনুযায়ী", "vacancy": "১"}],
         "start_date": "চলমান",
         "start_time": "সকাল ১০:০০",
         "end_date": "শীঘ্রই শেষ হবে",
         "end_time": "বিকাল ৫:০০",
         "cta_text": "Whatsapp: +8801540503092",
-        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean_title} এর জন্য আগ্রহী প্রার্থীরা দ্রুত আবেদন করতে পারেন। ঘরে বসে নির্ভুলভাবে অনলাইনে আবেদন সম্পন্ন করতে আজই যোগাযোগ করুন হোয়াটসঅ্যাপে।",
+        "voiceover_scripts": [base_script for _ in range(num_scripts)],
         "optimized_title": clean_title[:90],
         "video_description": f"{clean_title}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
     }
+
+def normalize_scripts(data, target_count):
+    scripts = data.get("voiceover_scripts")
+    if not scripts or not isinstance(scripts, list):
+        single = data.get("voiceover_script", "")
+        scripts = [single] if single else []
+
+    while len(scripts) < target_count:
+        base = scripts[0] if scripts else "নতুন সরকারি চাকরির নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। বিস্তারিত জানতে স্ক্রিনে লক্ষ্য করুন এবং আবেদন করতে হোয়াটসঅ্যাপে যোগাযোগ করুন।"
+        scripts.append(f"বিশেষ চাকরির সংবাদ! {base}")
+
+    data["voiceover_scripts"] = scripts[:target_count]
+    return data
