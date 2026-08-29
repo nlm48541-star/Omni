@@ -27,6 +27,16 @@ CONFIG_FILE = "automation_config.json"
 MEMORY_FILE = "bot_memory.json"
 COOKIES_FILE = "cookies.txt"
 
+# --- TIKTOK-ONLY AI IMAGE EDITING ---
+# This prompt is applied to every image before a TikTok video is built.
+# Override it per-run via the TIKTOK_AI_PROMPT env var, or set
+# "tiktok_ai_prompt" in automation_config.json to change it permanently.
+DEFAULT_TIKTOK_AI_PROMPT = (
+    "Subtly restyle this photo: adjust the color grading, lighting mood, "
+    "and slightly reframe the composition. Keep the same subject, people, "
+    "and meaning of the original image intact."
+)
+
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -96,6 +106,72 @@ def get_random_audio_file():
         print(f"  [+] Selected random background audio: '{chosen}'")
         return chosen
     return None
+
+# --- TIKTOK AI IMAGE EDITOR (Gemini 2.5 Flash Image / "Nano Banana") ---
+def ai_edit_image_gemini(image_path, prompt, api_key, model="gemini-2.5-flash-image"):
+    """
+    Sends one image + a text prompt to Gemini's image-editing model and
+    saves the returned (edited) image next to the original.
+    Returns the new file path, or None if anything goes wrong.
+    """
+    try:
+        with open(image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type, "data": img_b64}}
+                ]
+            }]
+        }
+
+        resp = requests.post(url, json=payload, timeout=60)
+        if resp.status_code != 200:
+            print(f"  [!] Gemini image edit failed ({resp.status_code}): {resp.text[:200]}")
+            return None
+
+        data = resp.json()
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        for part in parts:
+            inline = part.get("inline_data") or part.get("inlineData")
+            if inline and inline.get("data"):
+                out_bytes = base64.b64decode(inline["data"])
+                out_path = f"{os.path.splitext(image_path)[0]}_ai_tt.png"
+                with open(out_path, "wb") as out_f:
+                    out_f.write(out_bytes)
+                return out_path
+
+        print("  [!] Gemini response contained no image data.")
+        return None
+    except Exception as e:
+        print(f"  [!] Gemini image edit exception: {e}")
+        return None
+
+
+def prepare_tiktok_images(image_paths, prompt, api_key):
+    """
+    Builds the TikTok-only image set: AI-edited copies where possible,
+    silently falling back to the original image on any failure so a
+    single bad API call never breaks the whole run.
+    """
+    if not api_key:
+        print("  [!] GEMINI_API_KEY not set — TikTok will use the original images.")
+        return list(image_paths)
+
+    result = []
+    for p in image_paths:
+        edited = ai_edit_image_gemini(p, prompt, api_key)
+        if edited:
+            print(f"  [+] AI-edited image for TikTok: '{edited}'")
+            result.append(edited)
+        else:
+            result.append(p)
+    return result
+
 
 # --- REELS GENERATION HELPERS ---
 def sanitize_filename(name):
@@ -529,6 +605,8 @@ async def process_sync(config, memory):
     tg_session, tg_api_id, tg_api_hash = get_credential(config, "tg_session", "TG_SESSION"), get_credential(config, "tg_api_id", "TG_API_ID"), get_credential(config, "tg_api_hash", "TG_API_HASH")
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
+    gemini_api_key = get_credential(config, "gemini_api_key", "GEMINI_API_KEY")
+    tiktok_ai_prompt = os.environ.get("TIKTOK_AI_PROMPT", "").strip() or config.get("tiktok_ai_prompt", DEFAULT_TIKTOK_AI_PROMPT)
 
     if any(clean_platform(r['destination']) == "WhatsApp" for r in rules): warmup_render_server(render_wa_url)
     tg_client = None
@@ -706,10 +784,13 @@ async def process_sync(config, memory):
                                         if os.path.exists(yt_f): os.remove(yt_f)
                                 if audio_tt:
                                     tt_f = f"reels_output/{sanitize_filename(entry.get('title', ''))}_tt_{random.randint(10, 99)}.mp4"
-                                    if create_reels_video(video_paths, audio_tt, tt_f):
+                                    tt_image_paths = prepare_tiktok_images(video_paths, tiktok_ai_prompt, gemini_api_key)
+                                    if create_reels_video(tt_image_paths, audio_tt, tt_f):
                                         if os.environ.get("BUFFER_ACCESS_TOKEN", "") or os.environ.get("BUFFER_PROFILE_ID", "") or config.get("credentials", {}).get("buffer_access_token"):
                                             tt_done = upload_video_to_tiktok(tt_f, final_post_text, config)
                                         if os.path.exists(tt_f): os.remove(tt_f)
+                                    for p in tt_image_paths:
+                                        if p not in video_paths and os.path.exists(p): os.remove(p)
                                 if yt_done or tt_done:
                                     global_yt_tt_processed.add(entry_link)
 
