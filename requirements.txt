@@ -5,4 +5,7 @@ feedparser
 Pillow
 yt-dlp
 beautifulsoup4
-quickjs
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+fonttools
