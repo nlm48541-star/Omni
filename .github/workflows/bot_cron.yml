@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [run-sync]
+  schedule:
+    - cron: '0 * * * *'
 
 permissions:
   contents: write
@@ -21,15 +23,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Setup Node.js Environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install FFmpeg & FFprobe
+      - name: Install System Dependencies & Fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg libraqm-dev fonts-beng
 
       - name: Install Python Requirements
         run: |
@@ -47,7 +44,10 @@ jobs:
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           BUFFER_PROFILE_ID: ${{ secrets.BUFFER_PROFILE_ID }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_API_URL: ${{ secrets.OLLAMA_API_URL }}
+          GROQ_API: ${{ secrets.GROQ_API }}
+          ELEVENLABS_API_KEYS: ${{ secrets.ELEVENLABS_API_KEYS }}
         run: python run_on_github.py
 
       - name: Commit & Save Sync Progress State
@@ -55,5 +55,5 @@ jobs:
           git config --local user.email "engine@omnisync.io"
           git config --local user.name "OmniSync Master Engine"
           git add bot_memory.json
-          git commit -m "Auto-Update: Visual & Multi-Output checkpoint [skip-ci]" || echo "No new updates to save"
+          git commit -m "Auto-Update: OmniSync Video & Audio sync state [skip-ci]" || echo "No new updates to save"
           git push
