@@ -71,8 +71,8 @@ def get_random_background(target_w=1080, target_h=1920):
             return resized.crop((x_offset, y_offset, x_offset + target_w, y_offset + target_h))
         except Exception: pass
 
-    # ব্যাকগ্রাউন্ড না থাকলে স্বয়ংক্রিয় ক্লিন সফট ব্যাকগ্রাউন্ড
-    bg = Image.new("RGBA", (target_w, target_h), (240, 244, 248, 255))
+    # ডিফল্ট ব্যাকগ্রাউন্ড
+    bg = Image.new("RGBA", (target_w, target_h), (245, 247, 250, 255))
     return bg
 
 def render_circular_slide(job_data, bg_img, slide_idx=1, total_slides=1):
@@ -82,10 +82,10 @@ def render_circular_slide(job_data, bg_img, slide_idx=1, total_slides=1):
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # মডার্ন ডার্ক ফ্রস্টেড কার্ড (#181d26)
-    card_x1, card_y1 = 40, 50
-    card_x2, card_y2 = W - 40, H - 50
-    draw.rounded_rectangle([card_x1, card_y1, card_x2, card_y2], radius=32, fill=(24, 29, 38, 242), outline=(55, 65, 81, 190), width=2)
+    # হালকা ব্যাকগ্রাউন্ডের ওপর টেক্সট স্পষ্ট করার জন্য ফ্রস্টেড গ্লাস কনটেইনার
+    card_x1, card_y1 = 45, 55
+    card_x2, card_y2 = W - 45, H - 55
+    draw.rounded_rectangle([card_x1, card_y1, card_x2, card_y2], radius=32, fill=(255, 255, 255, 230), outline=(203, 213, 225, 240), width=2)
 
     org_name = job_data.get("org_name", "মৎস্য ও প্রাণিসম্পদ তথ্য দপ্তর")
     headline = job_data.get("headline", "নিয়োগ বিজ্ঞপ্তি")
@@ -99,21 +99,21 @@ def render_circular_slide(job_data, bg_img, slide_idx=1, total_slides=1):
     cta_text = job_data.get("cta_text", "Whatsapp: +8801540503092")
 
     # ১. হেডার সেকশন (Shokuntola UNICODE)
-    draw.text((75, 90), org_name, font=get_header_font(34), fill="#94A3B8", anchor="la")
-    draw.text((75, 135), headline, font=get_header_font(56), fill="#FFFFFF", anchor="la")
+    draw.text((80, 95), org_name, font=get_header_font(34), fill="#0F766E", anchor="la")
+    draw.text((80, 140), headline, font=get_header_font(56), fill="#0F172A", anchor="la")
 
     # সার্কুলার ডেট পিল ব্যাজ (ডানপাশে নীল ব্যাজ)
-    draw.rounded_rectangle([W - 325, 100, W - 75, 155], radius=24, fill=(30, 58, 138, 230), outline=(59, 130, 246, 150), width=1)
-    draw.text((W - 200, 127), circular_date, font=get_dates_font(26), fill="#60A5FA", anchor="mm")
+    draw.rounded_rectangle([W - 325, 105, W - 80, 160], radius=24, fill=(30, 58, 138, 240), outline=(59, 130, 246, 200), width=1)
+    draw.text((W - 202, 132), circular_date, font=get_dates_font(26), fill="#FFFFFF", anchor="mm")
 
-    # ২. মোট শূন্য পদ সামারি কার্ড
-    summary_y1, summary_y2 = 215, 305
-    draw.rounded_rectangle([75, summary_y1, W - 75, summary_y2], radius=18, fill=(15, 20, 28, 255), outline=(39, 47, 61, 200), width=1)
-    draw.text((105, summary_y1 + 45), "মোট শূন্য পদ", font=get_table_font(36), fill="#CBD5E1", anchor="lm")
-    draw.text((W - 105, summary_y1 + 45), str(total_vacancies), font=get_table_font(52), fill="#F8FAFC", anchor="rm")
+    # ২. মোট শূন্য পদ কার্ড
+    summary_y1, summary_y2 = 220, 310
+    draw.rounded_rectangle([80, summary_y1, W - 80, summary_y2], radius=18, fill=(241, 245, 249, 240), outline=(226, 232, 240, 255), width=2)
+    draw.text((115, summary_y1 + 45), "মোট শূন্য পদ", font=get_table_font(36), fill="#334155", anchor="lm")
+    draw.text((W - 115, summary_y1 + 45), str(total_vacancies), font=get_table_font(52), fill="#047857", anchor="rm")
 
     # ৩. পদের তালিকা হেডার
-    draw.text((75, 335), "পদের নাম ও সংখ্যা", font=get_table_font(30), fill="#94A3B8", anchor="la")
+    draw.text((80, 335), "পদের নাম ও সংখ্যা", font=get_table_font(30), fill="#64748B", anchor="la")
 
     # ৪. পদের তালিকা (kalpurush)
     list_top = 380
@@ -135,48 +135,48 @@ def render_circular_slide(job_data, bg_img, slide_idx=1, total_slides=1):
         p_grade = p.get("grade", "")
         p_vac = str(p.get("vacancy", "১"))
 
-        draw.text((75, cur_y + 12), p_name, font=p_name_font, fill="#FFFFFF", anchor="la")
+        draw.text((80, cur_y + 12), p_name, font=p_name_font, fill="#0F172A", anchor="la")
         if p_grade:
-            draw.text((75, cur_y + 52), p_grade, font=p_grade_font, fill="#64748B", anchor="la")
+            draw.text((80, cur_y + 52), p_grade, font=p_grade_font, fill="#64748B", anchor="la")
 
-        # ডানপাশের সার্কুলার পিল ব্যাজ
-        badge_cx = W - 110
+        # ডানপাশের পদ সংখ্যার ব্যাজ
+        badge_cx = W - 115
         badge_cy = cur_y + (row_h // 2) - 5
-        draw.rounded_rectangle([badge_cx - 24, badge_cy - 22, badge_cx + 24, badge_cy + 22], radius=16, fill=(30, 41, 59, 220), outline=(71, 85, 105, 120), width=1)
-        draw.text((badge_cx, badge_cy), p_vac, font=badge_font, fill="#F1F5F9", anchor="mm")
+        draw.rounded_rectangle([badge_cx - 24, badge_cy - 22, badge_cx + 24, badge_cy + 22], radius=16, fill=(15, 23, 42, 230), outline=(51, 65, 85, 120), width=1)
+        draw.text((badge_cx, badge_cy), p_vac, font=badge_font, fill="#FFFFFF", anchor="mm")
 
         # ডিভাইডার লাইন
-        draw.line([(75, cur_y + row_h - 4), (W - 75, cur_y + row_h - 4)], fill=(39, 47, 61, 140), width=1)
+        draw.line([(80, cur_y + row_h - 4), (W - 80, cur_y + row_h - 4)], fill=(226, 232, 240, 200), width=1)
         cur_y += row_h
 
     # ৫. আবেদনের সময়সীমা কার্ড (Li Ador Noirrit Bold)
-    draw.text((75, 1450), "আবেদনের সময়সীমা", font=get_dates_font(30), fill="#94A3B8", anchor="la")
+    draw.text((80, 1450), "আবেদনের সময়সীমা", font=get_dates_font(30), fill="#64748B", anchor="la")
 
     card_h = 160
-    card_w = (W - 150 - 25) // 2
+    card_w = (W - 160 - 25) // 2
     c_top = 1495
     c_bot = c_top + card_h
 
-    # শুরু কার্ড (সবুজ)
-    left_x1 = 75
+    # শুরু কার্ড (সবুজ টোন)
+    left_x1 = 80
     left_x2 = left_x1 + card_w
-    draw.rounded_rectangle([left_x1, c_top, left_x2, c_bot], radius=20, fill=(6, 78, 59, 160), outline=(16, 185, 129, 120), width=2)
-    draw.text((left_x1 + 25, c_top + 30), "▷ শুরু", font=get_dates_font(26), fill="#34D399", anchor="la")
-    draw.text((left_x1 + 25, c_top + 70), str(start_date), font=get_dates_font(36), fill="#FFFFFF", anchor="la")
-    draw.text((left_x1 + 25, c_top + 115), str(start_time), font=get_dates_font(24), fill="#A7F3D0", anchor="la")
+    draw.rounded_rectangle([left_x1, c_top, left_x2, c_bot], radius=20, fill=(220, 252, 231, 240), outline=(34, 197, 94, 200), width=2)
+    draw.text((left_x1 + 25, c_top + 30), "▷ শুরু", font=get_dates_font(26), fill="#15803D", anchor="la")
+    draw.text((left_x1 + 25, c_top + 70), str(start_date), font=get_dates_font(36), fill="#064E3B", anchor="la")
+    draw.text((left_x1 + 25, c_top + 115), str(start_time), font=get_dates_font(24), fill="#166534", anchor="la")
 
-    # শেষ কার্ড (লাল/মেরুন)
+    # শেষ কার্ড (লাল টোন)
     right_x1 = left_x2 + 25
-    right_x2 = W - 75
-    draw.rounded_rectangle([right_x1, c_top, right_x2, c_bot], radius=20, fill=(127, 29, 29, 160), outline=(239, 68, 68, 120), width=2)
-    draw.text((right_x1 + 25, c_top + 30), "⚑ শেষ", font=get_dates_font(26), fill="#F87171", anchor="la")
-    draw.text((right_x1 + 25, c_top + 70), str(end_date), font=get_dates_font(36), fill="#FFFFFF", anchor="la")
-    draw.text((right_x1 + 25, c_top + 115), str(end_time), font=get_dates_font(24), fill="#FECACA", anchor="la")
+    right_x2 = W - 80
+    draw.rounded_rectangle([right_x1, c_top, right_x2, c_bot], radius=20, fill=(254, 226, 226, 240), outline=(239, 68, 68, 200), width=2)
+    draw.text((right_x1 + 25, c_top + 30), "⚑ শেষ", font=get_dates_font(26), fill="#B91C1C", anchor="la")
+    draw.text((right_x1 + 25, c_top + 70), str(end_date), font=get_dates_font(36), fill="#991B1B", anchor="la")
+    draw.text((right_x1 + 25, c_top + 115), str(end_time), font=get_dates_font(24), fill="#7F1D1D", anchor="la")
 
     # ৬. হোয়াটসঅ্যাপ যোগাযোগ সেকশন (AkhandBengali-Extrabold)
     cta_y1 = 1680
     cta_y2 = 1815
-    draw.rounded_rectangle([75, cta_y1, W - 75, cta_y2], radius=22, fill=(22, 163, 74, 230), outline=(34, 197, 94, 255), width=2)
+    draw.rounded_rectangle([80, cta_y1, W - 80, cta_y2], radius=22, fill=(22, 163, 74, 245), outline=(21, 128, 61, 255), width=2)
     draw.text((W//2, cta_y1 + 40), "ঘরে বসে অনলাইনে আবেদন সম্পন্ন করতে যোগাযোগ করুন:", font=get_cta_font(28), fill="#F0FDF4", anchor="mm")
     draw.text((W//2, cta_y1 + 88), f"💬 {cta_text}", font=get_cta_font(38), fill="#FFFFFF", anchor="mm")
 
@@ -191,24 +191,23 @@ def prepare_tiktok_slides(job_data, output_prefix="slide"):
     bg_img = get_random_background()
     out_paths = []
     
-    # ৮টির বেশি পদ থাকলে ২টি স্লাইডে ভাগ হবে
     if len(posts) > 8:
         d1 = dict(job_data); d1["posts"] = posts[:8]
         d2 = dict(job_data); d2["posts"] = posts[8:16]
         
         s1 = render_circular_slide(d1, bg_img, slide_idx=1, total_slides=2)
         p1 = f"{output_prefix}_1.jpg"
-        s1.save(p1, "JPEG", quality=92)
+        s1.save(p1, "JPEG", quality=95)
         out_paths.append(p1)
         
         s2 = render_circular_slide(d2, bg_img, slide_idx=2, total_slides=2)
         p2 = f"{output_prefix}_2.jpg"
-        s2.save(p2, "JPEG", quality=92)
+        s2.save(p2, "JPEG", quality=95)
         out_paths.append(p2)
     else:
         s = render_circular_slide(job_data, bg_img, slide_idx=1, total_slides=1)
         p = f"{output_prefix}_1.jpg"
-        s.save(p, "JPEG", quality=92)
+        s.save(p, "JPEG", quality=95)
         out_paths.append(p)
         
     return out_paths
