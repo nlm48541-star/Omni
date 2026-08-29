@@ -44,9 +44,16 @@ async def process_sync(config, memory):
     tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
-    yt_client_id = get_credential(config, "yt_client_id", "YT_CLIENT_ID")
-    yt_client_secret = get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET")
-    yt_refresh_token = get_credential(config, "yt_refresh_token", "YT_REFRESH_TOKEN")
+    
+    # ১ম ইউটিউব চ্যানেলের ক্রেডেনশিয়াল
+    yt_client_id = get_credential(config, "yt_client_id", "YT_CLIENT_ID") or get_credential(config, "yt_client_id", "CLIENT_ID")
+    yt_client_secret = get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET") or get_credential(config, "yt_client_secret", "CLIENT_SECRET")
+    yt_refresh_token = get_credential(config, "yt_refresh_token", "YT_REFRESH_TOKEN") or get_credential(config, "yt_refresh_token", "REFRESH_TOKEN")
+
+    # ২য় ইউটিউব চ্যানেলের ক্রেডেনশিয়াল (TikTok স্লাইড ভিডিওর জন্য)
+    yt2_client_id = get_credential(config, "yt2_client_id", "YT_CLIENT_ID_2") or get_credential(config, "yt2_client_id", "CLIENT_ID_2")
+    yt2_client_secret = get_credential(config, "yt2_client_secret", "YT_CLIENT_SECRET_2") or get_credential(config, "yt2_client_secret", "CLIENT_SECRET_2")
+    yt2_refresh_token = get_credential(config, "yt2_refresh_token", "YT_REFRESH_TOKEN_2") or get_credential(config, "yt2_refresh_token", "REFRESH_TOKEN_2")
 
     tg_client = None
     if any(clean_platform(r['source']) == "Telegram" or clean_platform(r['destination']) == "Telegram" for r in rules):
@@ -88,7 +95,7 @@ async def process_sync(config, memory):
 
                     title = entry.get('title', '').strip()
 
-                    # ১. টাইটেল ফিল্টার: এনজিও / ব্যাংক থাকলে সাথে সাথে স্কিপ
+                    # ১. টাইটেল ফিল্টার (এনজিও / ব্যাংক বাদ দেওয়া)
                     if is_forbidden_title(title):
                         print(f"🚫 [FILTERED] Skipping '{title}' (Title contains forbidden keyword: NGO / Bank).")
                         new_processed_links.append(entry_link)
@@ -119,7 +126,7 @@ async def process_sync(config, memory):
                     job_data = generate_job_data_and_script(title, downloaded_imgs)
                     voiceover_script = job_data.get("voiceover_script", "")
 
-                    # ৪. ElevenLabs দিয়ে শুধুমাত্র একটি অডিও তৈরি
+                    # ৪. ElevenLabs দিয়ে একক অডিও তৈরি
                     single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
                     audio_success = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path)
 
@@ -127,7 +134,7 @@ async def process_sync(config, memory):
                     contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
                     final_post_text = f"{clean_text(title)}{contact_sfx}" if rule.get('title_only', False) else f"{clean_text(title)}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
 
-                    # ৬. Facebook ও YouTube Shorts-এর জন্য মূল বিজ্ঞপ্তির ছবি দিয়ে একক ভিডিও তৈরি
+                    # ৬. Facebook ও ১ম YouTube চ্যানেলের জন্য মূল সার্কুলারের ছবি দিয়ে ১ম ভিডিও তৈরি
                     fb_video_path = f"tmp_fb_yt_{hash(entry_link)}.mp4"
                     fb_source_imgs = downloaded_imgs if downloaded_imgs else prepare_tiktok_slides(job_data, f"fallback_{hash(entry_link)}")
                     
@@ -135,7 +142,7 @@ async def process_sync(config, memory):
                     if audio_success and os.path.exists(single_audio_path):
                         video_ready = render_vertical_video(fb_source_imgs, single_audio_path, fb_video_path)
 
-                    # ৭. সবগুলো ফেসবুক পেজে একই ভিডিও আপলোড
+                    # ৭. ফেসবুক পেজগুলোতে ১ম ভিডিও আপলোড
                     if dest_platform == "Facebook" and video_ready:
                         for did in dest_ids:
                             token = get_page_access_token(fb_user_token, did)
@@ -144,9 +151,9 @@ async def process_sync(config, memory):
                                 if not post_reel_to_facebook(did, token, fb_video_path, title, final_post_text):
                                     post_video_to_facebook(did, token, fb_video_path, final_post_text)
 
-                    # ৮. YouTube Shorts আপলোড (একই ভিডিও সরাসরি আপলোড হবে)
+                    # ৮. ১ম YouTube চ্যানেলে (Shorts 1) ১ম ভিডিও আপলোড
                     if video_ready and yt_client_id and yt_client_secret and yt_refresh_token:
-                        print("  [+] Uploading Video to YouTube Shorts...")
+                        print("  [+] Uploading Video to Primary YouTube Channel (Shorts 1)...")
                         upload_video_to_youtube(
                             yt_client_id, yt_client_secret, yt_refresh_token,
                             fb_video_path,
@@ -154,17 +161,28 @@ async def process_sync(config, memory):
                             job_data.get("video_description", final_post_text)
                         )
 
-                    # ৯. TikTok-এর জন্য সেই একই অডিও + কাস্টম ইনফোগ্রাফিক স্লাইড দিয়ে ভিডিও তৈরি ও আপলোড
+                    # ৯. TikTok এবং ২য় YouTube চ্যানেলের জন্য কাস্টম স্লাইড দিয়ে ২য় ভিডিও তৈরি ও আপলোড
                     if audio_success and os.path.exists(single_audio_path):
-                        print("  [~] Rendering Custom TikTok Infographic Video...")
+                        print("  [~] Rendering Custom Infographic Video for TikTok & 2nd YouTube Channel...")
                         tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tiktok_slide_{hash(entry_link)}")
                         tiktok_video_path = f"tmp_tiktok_{hash(entry_link)}.mp4"
 
                         if render_vertical_video(tiktok_slides, single_audio_path, tiktok_video_path):
-                            print("  [+] Uploading Video to TikTok via Buffer...")
+                            # ক) TikTok-এ আপলোড
+                            print("  [+] Uploading Custom Video to TikTok via Buffer...")
                             upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
 
-                        # টিকটকের টেম্প ফাইল ক্লিনআপ
+                            # খ) ২য় YouTube চ্যানেলে (Shorts 2) আপলোড
+                            if yt2_client_id and yt2_client_secret and yt2_refresh_token:
+                                print("  [+] Uploading Custom Infographic Video to 2nd YouTube Channel (Shorts 2)...")
+                                upload_video_to_youtube(
+                                    yt2_client_id, yt2_client_secret, yt2_refresh_token,
+                                    tiktok_video_path,
+                                    job_data.get("optimized_title", title),
+                                    job_data.get("video_description", final_post_text)
+                                )
+
+                        # টিকটক ও ২য় ইউটিউবের টেম্প ফাইল ক্লিনআপ
                         if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
                         for sp in tiktok_slides:
                             if os.path.exists(sp): os.remove(sp)
@@ -181,7 +199,7 @@ async def process_sync(config, memory):
                         elif dest_platform == "WhatsApp":
                             post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
 
-                    # ১১. ক্লিনআপ (সার্কুলার ছবি, মেইন ভিডিও ও অডিও ফাইল মুছে ফেলা)
+                    # ১১. ক্লিনআপ
                     if os.path.exists(fb_video_path): os.remove(fb_video_path)
                     if os.path.exists(single_audio_path): os.remove(single_audio_path)
                     for dp in downloaded_imgs:
@@ -198,7 +216,7 @@ async def main():
     memory = load_json(MEMORY_FILE, {})
     updated_memory = await process_sync(config, memory)
     save_json(MEMORY_FILE, updated_memory)
-    print("\n✅ Task Executed Successfully.")
+    print("\n✅ Multi-Platform Task Executed Successfully.")
 
 if __name__ == "__main__":
     asyncio.run(main())
