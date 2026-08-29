@@ -43,7 +43,7 @@ def parse_json_safely(raw_text):
     except Exception:
         return None
 
-def generate_job_data_and_multi_scripts(title, image_paths, num_scripts=1):
+def generate_job_data_and_script(title, image_paths):
     cur_en, cur_bn = get_current_years()
     clean_title = re.sub(r'\s+', ' ', str(title)).strip()
 
@@ -51,17 +51,20 @@ def generate_job_data_and_multi_scripts(title, image_paths, num_scripts=1):
 Context:
 - Circular Title: "{clean_title}"
 - Current Year Context: {cur_bn} ({cur_en})
-- Total Required Scripts: {num_scripts}
 
-CRITICAL RULE FOR SCRIPT:
-- In "voiceover_scripts", write ALL NUMBERS strictly in full Bengali words (কথায় লেখা).
-  Example: Do NOT write "2026" or "২০২৬", write "দুই হাজার ছাব্বিশ". Do NOT write "150", write "একশত পঞ্চাশ". Do NOT write digits for dates, write "তিন জুলাই", "ত্রিশ আগস্ট". Do NOT write phone numbers in digits, write words ("শূন্য এক পাঁচ চার...").
+CRITICAL RULES FOR "voiceover_script":
+1. Write a continuous, spoken Bengali voiceover script of around 140 to 180 words (exactly ~1 minute duration).
+2. ALL NUMBERS in the script MUST be written in words (কথায় লেখা):
+   - Years/Dates: "২০২৬" ➔ "দুই হাজার ছাব্বিশ", "০৩ জুলাই" ➔ "তিন জুলাই", "৩০ আগস্ট" ➔ "ত্রিশ আগস্ট"
+   - Vacancies/Counts: "১৫০" ➔ "একশত পঞ্চাশ", "১২" ➔ "বারো", "১০" ➔ "দশ"
+   - Phone Number: Pronounce in English phonetic words in Bengali: "জিরো ওয়ান ফাইভ ফোর জিরো ফাইভ জিরো থ্রি জিরো নাইন টু"
+3. Do NOT use emojis or brackets in the script.
 
 Return strictly valid JSON:
 {{
-  "org_name": "...",
+  "org_name": "Official organization name in Bengali",
   "headline": "নিয়োগ বিজ্ঞপ্তি",
-  "circular_date": "...",
+  "circular_date": "Date of publish",
   "total_vacancies": "... টি",
   "posts": [
     {{"post_name": "...", "grade": "গ্রেড-...", "vacancy": "..."}}
@@ -71,12 +74,9 @@ Return strictly valid JSON:
   "end_date": "...",
   "end_time": "বিকাল ৫:০০",
   "cta_text": "Whatsapp: +8801540503092",
-  "voiceover_scripts": [
-    "Script 1 (all numbers in Bengali words)...",
-    "Script 2 (all numbers in Bengali words)..."
-  ],
-  "optimized_title": "...",
-  "video_description": "..."
+  "voiceover_script": "Comprehensive ~1-minute spoken Bengali script with numbers in words...",
+  "optimized_title": "Social title under 90 chars",
+  "video_description": "Description with contact link and hashtags..."
 }}"""
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
@@ -84,21 +84,21 @@ Return strictly valid JSON:
     if OLLAMA_API_KEY:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OLLAMA_API_KEY}"}
         for model in OLLAMA_MODELS:
-            print(f"  [AI] Attempting Ollama model '{model}' for {num_scripts} script(s)...")
+            print(f"  [AI] Attempting Ollama model '{model}'...")
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt, "images": base64_imgs}],
                 "stream": False,
-                "options": {"temperature": 0.5}
+                "options": {"temperature": 0.4}
             }
             try:
-                resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=50)
+                resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=45)
                 if resp.status_code == 200:
                     content = resp.json().get("message", {}).get("content", "")
                     data = parse_json_safely(content)
-                    if data and (data.get("voiceover_scripts") or data.get("voiceover_script")):
+                    if data and data.get("voiceover_script"):
                         print(f"  [+] Successfully generated via Ollama ({model})!")
-                        return normalize_scripts(data, num_scripts)
+                        return data
             except Exception as e:
                 print(f"  [!] Ollama ({model}) notice: {e}")
 
@@ -113,21 +113,20 @@ Return strictly valid JSON:
                     {"role": "user", "content": prompt}
                 ],
                 "response_format": {"type": "json_object"},
-                "temperature": 0.5,
-                "max_tokens": 2500
+                "temperature": 0.4,
+                "max_tokens": 2200
             }
             try:
-                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=35)
+                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30)
                 if resp.status_code == 200:
                     content = resp.json()['choices'][0]['message']['content']
                     data = parse_json_safely(content)
-                    if data and (data.get("voiceover_scripts") or data.get("voiceover_script")):
+                    if data and data.get("voiceover_script"):
                         print(f"  [+] Successfully generated via Groq ({g_model})!")
-                        return normalize_scripts(data, num_scripts)
+                        return data
             except Exception as e:
                 print(f"  [!] Groq ({g_model}) notice: {e}")
 
-    base_script = f"নতুন সরকারি ও বেসরকারি চাকরির খবর। {clean_title} প্রকাশিত হয়েছে। আগ্রহী প্রার্থীরা প্রয়োজনীয় শিক্ষাগত যোগ্যতা নিয়ে দ্রুত আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।"
     return {
         "org_name": clean_title[:45],
         "headline": "নিয়োগ বিজ্ঞপ্তি",
@@ -139,20 +138,7 @@ Return strictly valid JSON:
         "end_date": "শীঘ্রই শেষ হবে",
         "end_time": "বিকাল ৫:০০",
         "cta_text": "Whatsapp: +8801540503092",
-        "voiceover_scripts": [base_script for _ in range(num_scripts)],
+        "voiceover_script": f"নতুন সরকারি ও বেসরকারি চাকরির খবর। {clean_title} প্রকাশিত হয়েছে। আগ্রহী প্রার্থীরা প্রয়োজনীয় শিক্ষাগত যোগ্যতা নিয়ে দ্রুত আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন হোয়াটসঅ্যাপে জিরো ওয়ান ফাইভ ফোর জিরো ফাইভ জিরো থ্রি জিরো নাইন টু নাম্বারে।",
         "optimized_title": clean_title[:90],
         "video_description": f"{clean_title}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
     }
-
-def normalize_scripts(data, target_count):
-    scripts = data.get("voiceover_scripts")
-    if not scripts or not isinstance(scripts, list):
-        single = data.get("voiceover_script", "")
-        scripts = [single] if single else []
-
-    while len(scripts) < target_count:
-        base = scripts[0] if scripts else "নতুন সরকারি চাকরির নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে।"
-        scripts.append(f"বিশেষ চাকরির সংবাদ! {base}")
-
-    data["voiceover_scripts"] = scripts[:target_count]
-    return data
