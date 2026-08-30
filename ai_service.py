@@ -85,6 +85,8 @@ def convert_all_numbers_in_script(text):
             return num_str
 
     text = re.sub(r'[0-9০-৯]+', num_repl, text)
+    # 🌟 'ঘরে বসে' কথাটি স্ক্রিপ্ট থেকে স্বয়ংক্রিয়ভাবে মুছে ফেলা
+    text = re.sub(r'ঘরে\s*বসে\s*', '', text)
     return text
 
 def get_current_years():
@@ -98,6 +100,7 @@ def normalize_outdated_years(text):
     cur_en, cur_bn = get_current_years()
     text = re.sub(r'\b202[0-5]\b', cur_en, str(text))
     text = re.sub(r'২০২[০-৫]', cur_bn, text)
+    text = re.sub(r'ঘরে\s*বসে\s*', '', text)
     return text
 
 def sanitize_youtube_tags(raw_tags, max_total_chars=400):
@@ -172,7 +175,7 @@ CRITICAL SCRIPT RULES:
 1. SCRIPT LENGTH: Exactly 4 minutes long (550 to 650 words). Continuous spoken natural Bengali.
 2. YEAR RULE: Mention the year AT MOST ONCE during the initial announcement. DO NOT repeatedly mention or force the year across paragraphs.
 3. NUMBERS IN WORDS: Every number, vacancy count, salary scale, and date MUST be written in Bengali words (কথায় লেখা). Never use raw digits (0-9).
-4. CALL TO ACTION: You MUST clearly tell the audience that if they want to apply for this job from home accurately, they should contact our application service via the WhatsApp number shown on the screen or in the description (01540503092 -> 'জিরো ওয়ান ফাইভ ফোর জিরো ফাইভ জিরো থ্রি জিরো নাইন টু').
+4. CALL TO ACTION: You MUST clearly tell the audience that if they want to apply for this job accurately and safely, they should contact our application service via the WhatsApp number shown on the screen or in the description (01540503092 -> 'জিরো ওয়ান ফাইভ ফোর জিরো ফাইভ জিরো থ্রি জিরো নাইন টু'). Do NOT use the phrase 'ঘরে বসে'.
 
 Return a strictly valid JSON object:
 1. "optimized_title": A UNIQUE, high-CTR YouTube Video Title under 95 characters (Use symbols like 🔥, 🚨, ⚡, 📢, |).
@@ -181,8 +184,8 @@ Return a strictly valid JSON object:
 ---
 [Circular Summary & Post Highlights here]
 
-আমারা চাকরিপ্রার্থীদের জন্য সরকারি ও বেসরকারি সব ধরনের চাকরির আবেদন প্রক্রিয়াটি সহজ ও নিয়মতান্ত্রিক করতে কাজ করে থাকি।
-আমাদের মাধ্যমে যেকোনো চাকরির আবেদন ঘরে বসে সম্পন্ন করতে আজই যোগাযোগ করুন:
+আমরা চাকরিপ্রার্থীদের জন্য সরকারি ও বেসরকারি সব ধরনের চাকরির আবেদন প্রক্রিয়াটি সহজ ও নিয়মতান্ত্রিক করতে কাজ করে থাকি।
+আমাদের মাধ্যমে যেকোনো চাকরির আবেদন নির্ভুল ও সঠিক নিয়মে সম্পন্ন করতে আজই যোগাযোগ করুন:
 💬 হোয়াটসঅ্যাপ (WhatsApp): wa.me/8801540503092
 🌐 ফেসবুক পেজ (Facebook Page): https://www.facebook.com/profile.php?id=61583625958904
 
