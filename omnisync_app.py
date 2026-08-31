@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import json
 import customtkinter as ctk
@@ -15,18 +16,20 @@ def load_config():
                 "wp_username": "",
                 "wp_app_password": "",
                 "buffer_profile_id": "",
-                "buffer_access_token": ""
+                "buffer_access_token": "",
+                "gdrive_folder_id": "",
+                "save_to_gdrive": "false"
             },
             "rules": []
         }
-    with open(CONFIG_FILE, 'r') as f:
+    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 def save_config(config_data):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f, indent=4)
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config_data, f, indent=4, ensure_ascii=False)
 
-PLATFORMS = ["📢 Telegram", "👥 Facebook", "🌐 Website", "🎥 YouTube"]
+PLATFORMS = ["📢 Telegram", "👥 Facebook", "🌐 Website", "🎥 YouTube", "💬 WhatsApp"]
 
 class OmniSyncApp(ctk.CTk):
     def __init__(self):
@@ -37,8 +40,8 @@ class OmniSyncApp(ctk.CTk):
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
         
-        self.title("OmniSync Studio v8.0 - Dynamic Rules Editor & Hashtags")
-        self.geometry("1020x730")
+        self.title("OmniSync Studio v9.0 - Multi-Platform & Drive Sync")
+        self.geometry("1040x750")
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -71,7 +74,7 @@ class OmniSyncApp(ctk.CTk):
             btn = ctk.CTkButton(self.sidebar_frame, text=txt, command=lambda f=frm: self.show_frame(f))
             btn.grid(row=idx+1, column=0, padx=20, pady=10, sticky="ew")
 
-        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="v8.0 Live Editor", text_color="green")
+        self.status_label = ctk.CTkLabel(self.sidebar_frame, text="v9.0 GDrive Ready", text_color="#10B981")
         self.status_label.grid(row=6, column=0, pady=(0, 20))
 
     def show_frame(self, frame_name):
@@ -85,19 +88,20 @@ class DashboardFrame(ctk.CTkFrame):
     def __init__(self, parent, config, controller):
         super().__init__(parent)
         
-        ctk.CTkLabel(self, text="OmniSync Dashboard v8.0", font=("Arial", 26, "bold")).pack(pady=20)
+        ctk.CTkLabel(self, text="OmniSync Dashboard v9.0", font=("Arial", 26, "bold")).pack(pady=20)
         
         info_text = (
-            "What's New in OmniSync Studio v8.0:\n\n"
-            "- Live Rules Editor: Click 'Edit' on any active pipeline to load and modify its inputs, outputs, and parameters dynamically.\n"
-            "- Granular Hashtag Control: Toggle 'Keep Hashtags' on or off.\n"
-            "  * If checked: Only '#' hashtags will be published.\n"
-            "  * If unchecked: All hashtags are removed.\n"
-            "  * '@' mentions are always stripped out automatically.\n"
-            "- Reverted to fixed 1-Hour schedule run for stability."
+            "What's New in OmniSync Studio v9.0:\n\n"
+            "- Save to Google Drive Toggle:\n"
+            "  * If ON: TikTok video bypasses TikTok & 2nd YouTube and saves directly to Google Drive.\n"
+            "  * If OFF: Uploads to TikTok and 2nd YouTube Channel as normal.\n\n"
+            "- Unified Video Engine:\n"
+            "  * Single voice synthesis across all platforms.\n"
+            "  * Facebook Page Feed gets Photo Album + Reels.\n"
+            "  * Zero duplicate video uploads on YouTube Shorts."
         )
         
-        self.info_box = ctk.CTkTextbox(self, height=300, width=600, font=("Arial", 14))
+        self.info_box = ctk.CTkTextbox(self, height=320, width=620, font=("Arial", 14))
         self.info_box.insert("0.0", info_text)
         self.info_box.configure(state="disabled")
         self.info_box.pack(pady=20, padx=20, fill="both", expand=True)
@@ -111,24 +115,33 @@ class CredentialsFrame(ctk.CTkFrame):
         self.scroll_area = ctk.CTkScrollableFrame(self)
         self.scroll_area.pack(expand=True, fill="both", padx=10, pady=10)
 
-        ctk.CTkLabel(self.scroll_area, text="API Master Keychains", font=("Arial", 22, "bold")).pack(pady=10, anchor="w")
+        ctk.CTkLabel(self.scroll_area, text="API Master Keychains & Drive Settings", font=("Arial", 22, "bold")).pack(pady=10, anchor="w")
         
+        # 🌟 গুগল ড্রাইভ সেভ মোড টগল সুইচ বাটন
+        gdrive_val = str(self.config.get("credentials", {}).get("save_to_gdrive", "false")).lower() in ["true", "1", "yes"]
+        self.chk_gdrive_save = ctk.CTkCheckBox(self.scroll_area, text="📁 Save TikTok Video to Google Drive (Disables TikTok & 2nd YT)", font=("Arial", 13, "bold"), text_color="#38BDF8")
+        if gdrive_val: self.chk_gdrive_save.select()
+        else: self.chk_gdrive_save.deselect()
+        self.chk_gdrive_save.pack(anchor="w", pady=(10, 15))
+
         self.entries = {}
-        for key, value in self.config["credentials"].items():
+        for key, value in self.config.get("credentials", {}).items():
+            if key == "save_to_gdrive": continue
             label_text = key.replace("_", " ").upper()
-            ctk.CTkLabel(self.scroll_area, text=label_text, font=("Arial", 11, "bold")).pack(anchor="w", pady=(10, 2))
+            ctk.CTkLabel(self.scroll_area, text=label_text, font=("Arial", 11, "bold")).pack(anchor="w", pady=(8, 2))
             
             ent = ctk.CTkEntry(self.scroll_area, width=500, placeholder_text=f"Enter {label_text}...")
-            ent.insert(0, value)
-            ent.pack(pady=(0, 10), anchor="w")
+            ent.insert(0, str(value))
+            ent.pack(pady=(0, 8), anchor="w")
             self.entries[key] = ent
             
-        save_btn = ctk.CTkButton(self, text="Save Keys Locally", fg_color="green", hover_color="#006400", command=self.save_keys)
-        save_btn.pack(pady=20)
+        save_btn = ctk.CTkButton(self, text="Save Settings Locally", fg_color="green", hover_color="#006400", command=self.save_keys)
+        save_btn.pack(pady=15)
 
     def save_keys(self):
         for key, input_box in self.entries.items():
             self.config["credentials"][key] = input_box.get()
+        self.config["credentials"]["save_to_gdrive"] = "true" if self.chk_gdrive_save.get() else "false"
         save_config(self.config)
         ctk.CTkLabel(self, text="Saved to automation_config.json!", text_color="green").pack()
 
@@ -144,19 +157,19 @@ class RulesFrame(ctk.CTkFrame):
         
         ctk.CTkLabel(top_frame, text="Create & Modify Pipelines", font=("Arial", 18, "bold")).grid(row=0, column=0, padx=10, pady=10, columnspan=3, sticky="w")
         
-        self.src_var = ctk.StringVar(value=PLATFORMS[0])
+        self.src_var = ctk.StringVar(value=PLATFORMS[2])
         self.dest_var = ctk.StringVar(value=PLATFORMS[1])
         
         ctk.CTkLabel(top_frame, text="Source Platform:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.opt_src = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.src_var)
         self.opt_src.grid(row=1, column=1, padx=10, pady=5)
-        self.entry_src_id = ctk.CTkEntry(top_frame, placeholder_text="Source ID(s) (Comma-separated, e.g. chan1, UCxxxx)")
+        self.entry_src_id = ctk.CTkEntry(top_frame, placeholder_text="Source ID(s) (Comma-separated URL/Channel)")
         self.entry_src_id.grid(row=1, column=2, padx=10, pady=5, ipadx=100)
 
         ctk.CTkLabel(top_frame, text="Destination Platform:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.opt_dest = ctk.CTkOptionMenu(top_frame, values=PLATFORMS, variable=self.dest_var)
         self.opt_dest.grid(row=2, column=1, padx=10, pady=5)
-        self.entry_dest_id = ctk.CTkEntry(top_frame, placeholder_text="Destination ID(s) (Comma-separated, e.g. id1, id2)")
+        self.entry_dest_id = ctk.CTkEntry(top_frame, placeholder_text="Destination ID(s) (Comma-separated)")
         self.entry_dest_id.grid(row=2, column=2, padx=10, pady=5, ipadx=100)
 
         filters_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
@@ -185,9 +198,9 @@ class RulesFrame(ctk.CTkFrame):
         self.entry_min_words.insert(0, "60")
         self.entry_min_words.pack(side="left", padx=10)
 
-        ctk.CTkLabel(timing_frame, text="Past Lookback Period (Hours):").pack(side="left", padx=5)
+        ctk.CTkLabel(timing_frame, text="Lookback Hours:").pack(side="left", padx=5)
         self.entry_lookback = ctk.CTkEntry(timing_frame, width=80)
-        self.entry_lookback.insert(0, "1")
+        self.entry_lookback.insert(0, "24")
         self.entry_lookback.pack(side="left", padx=10)
         
         self.btn_submit = ctk.CTkButton(top_frame, text="+ Add Connection Route", command=self.add_rule)
@@ -207,8 +220,8 @@ class RulesFrame(ctk.CTkFrame):
             
             title_sync_status = "YES" if rule.get('title_only', False) else "NO"
             tag_sync_status = "YES" if rule.get('keep_hashtags', False) else "NO"
-            summary = f" {rule['source']} ➔ {rule['destination']}   |   T: {rule['txt']}  |  I: {rule.get('img', True)}  |  V: {rule['vid']}  |  Title Only: {title_sync_status}  |  Hashtags: {tag_sync_status}  |  Words: {rule.get('min_words', 60)}"
-            desc = f"Mapping: {rule['source_id']} ➔ {rule['dest_id']}"
+            summary = f" {rule['source']} ➔ {rule['destination']}   |   T: {rule['txt']}  |  I: {rule.get('img', True)}  |  V: {rule['vid']}  |  Title Only: {title_sync_status}"
+            desc = f"Mapping: {rule['source_id'][:40]}... ➔ {rule['dest_id'][:40]}..."
             
             ctk.CTkLabel(card, text=summary, font=("Arial", 11, "bold")).pack(anchor="w", padx=10, pady=(5,0))
             ctk.CTkLabel(card, text=desc, text_color="gray", font=("Arial", 10)).pack(anchor="w", padx=10, pady=(0, 5))
@@ -219,41 +232,25 @@ class RulesFrame(ctk.CTkFrame):
     def start_edit(self, index):
         self.editing_index = index
         rule = self.config["rules"][index]
-        
-        self.src_var.set(rule.get('source', PLATFORMS[0]))
+        self.src_var.set(rule.get('source', PLATFORMS[2]))
         self.dest_var.set(rule.get('destination', PLATFORMS[1]))
-        
-        self.entry_src_id.delete(0, 'end')
-        self.entry_src_id.insert(0, rule.get('source_id', ''))
-        
-        self.entry_dest_id.delete(0, 'end')
-        self.entry_dest_id.insert(0, rule.get('dest_id', ''))
-        
-        self.toggle_checkbox(self.chk_txt, rule.get('txt', True))
-        self.toggle_checkbox(self.chk_img, rule.get('img', True))
-        self.toggle_checkbox(self.chk_vid, rule.get('vid', True))
-        self.toggle_checkbox(self.chk_title_only, rule.get('title_only', False))
-        self.toggle_checkbox(self.chk_hashtags, rule.get('keep_hashtags', False))
-        
-        self.entry_min_words.delete(0, 'end')
-        self.entry_min_words.insert(0, str(rule.get('min_words', 60)))
-        
-        self.entry_lookback.delete(0, 'end')
-        self.entry_lookback.insert(0, str(rule.get('lookback_hours', 1.0)))
-        
-        self.btn_submit.configure(text="💾 Update Connection Route", fg_color="#D4AF37", hover_color="#996515")
-
-    def toggle_checkbox(self, checkbox, val):
-        if val: checkbox.select()
-        else: checkbox.deselect()
+        self.entry_src_id.delete(0, 'end'); self.entry_src_id.insert(0, rule.get('source_id', ''))
+        self.entry_dest_id.delete(0, 'end'); self.entry_dest_id.insert(0, rule.get('dest_id', ''))
+        self.chk_txt.select() if rule.get('txt', True) else self.chk_txt.deselect()
+        self.chk_img.select() if rule.get('img', True) else self.chk_img.deselect()
+        self.chk_vid.select() if rule.get('vid', True) else self.chk_vid.deselect()
+        self.chk_title_only.select() if rule.get('title_only', False) else self.chk_title_only.deselect()
+        self.chk_hashtags.select() if rule.get('keep_hashtags', False) else self.chk_hashtags.deselect()
+        self.entry_min_words.delete(0, 'end'); self.entry_min_words.insert(0, str(rule.get('min_words', 60)))
+        self.entry_lookback.delete(0, 'end'); self.entry_lookback.insert(0, str(rule.get('lookback_hours', 24.0)))
+        self.btn_submit.configure(text="💾 Update Route", fg_color="#D4AF37", hover_color="#996515")
 
     def add_rule(self):
         try:
             min_words_limit = int(self.entry_min_words.get() or 60)
-            lookback_hours = float(self.entry_lookback.get() or 1)
+            lookback_hours = float(self.entry_lookback.get() or 24)
         except ValueError:
-            min_words_limit = 60
-            lookback_hours = 1.0
+            min_words_limit, lookback_hours = 60, 24.0
 
         r = {
             "source": self.src_var.get(), 
