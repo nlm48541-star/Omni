@@ -1,43 +1,48 @@
 # -*- coding: utf-8 -*-
 import os
+import re
 import json
 import uuid
 import random
+import subprocess
 import requests
 from config_manager import HEADERS, get_credential
 
-# --- GOOGLE DRIVE HANDLER ---
-def upload_video_to_gdrive(client_id, client_secret, refresh_token, file_path, folder_id=None, file_title=None):
-    """ভিডিও সরাসরি গুগল ড্রাইভ ফোল্ডারে আপলোড করে"""
-    if not client_id or not client_secret or not refresh_token:
-        print("  [!] Google Drive credentials missing. Cannot upload to Drive.")
+# --- RCLONE GOOGLE DRIVE HANDLER ---
+def upload_video_via_rclone(file_path, rclone_conf_str, folder_id=""):
+    """Rclone ব্যবহার করে ভিডিও সরাসরি গুগল ড্রাইভ ফোল্ডারে আপলোড করে"""
+    if not rclone_conf_str:
+        print("  [!] RCLONE_CONF secret is missing or empty. Cannot upload to Drive.")
         return False
+
+    conf_path = "_tmp_rclone.conf"
     try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        from googleapiclient.http import MediaFileUpload
+        # টেম্পোরারি rclone config ফাইল তৈরি
+        with open(conf_path, "w", encoding="utf-8") as f:
+            f.write(rclone_conf_str.strip())
 
-        creds = Credentials(
-            None,
-            refresh_token=refresh_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            token_uri="https://oauth2.googleapis.com/token"
-        )
-        service = build('drive', 'v3', credentials=creds)
+        # কনফিগ থেকে রিমোটের নাম (যেমন [gdrive]) বের করা
+        match = re.search(r'\[(.*?)\]', rclone_conf_str)
+        remote_name = match.group(1).strip() if match else "gdrive"
 
-        file_name = file_title if file_title else os.path.basename(file_path)
-        file_metadata = {'name': file_name}
-        if folder_id:
-            file_metadata['parents'] = [folder_id]
+        dest = f"{remote_name}:{folder_id}" if folder_id else f"{remote_name}:"
 
-        media = MediaFileUpload(file_path, mimetype='video/mp4', resumable=True)
-        created_file = service.files().create(body=file_metadata, media_body=media, fields='id, name').execute()
-        print(f"  ✅ [GDRIVE SUCCESS] Video saved to Google Drive! File: '{created_file.get('name')}' (ID: {created_file.get('id')})")
-        return True
+        print(f"  [~] Uploading via Rclone to destination: '{dest}'...")
+        cmd = ["rclone", "--config", conf_path, "copy", file_path, dest]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        if res.returncode == 0:
+            print(f"  ✅ [RCLONE SUCCESS] Video successfully saved to Google Drive ({dest})!")
+            return True
+        else:
+            print(f"  ❌ [RCLONE ERROR] Upload failed: {res.stderr[:250]}")
+            return False
     except Exception as e:
-        print(f"  ❌ [GDRIVE ERROR] Failed to upload to Google Drive: {e}")
+        print(f"  ❌ [RCLONE EXCEPTION] {e}")
         return False
+    finally:
+        if os.path.exists(conf_path):
+            os.remove(conf_path)
 
 # --- FACEBOOK HANDLERS ---
 def get_page_access_token(master_user_token, page_id):
