@@ -67,16 +67,16 @@ async def process_sync(config, memory):
     yt2_client_secret = get_credential(config, "yt2_client_secret", "YT_CLIENT_SECRET_2") or get_credential(config, "yt2_client_secret", "CLIENT_SECRET_2")
     yt2_refresh_token = get_credential(config, "yt2_refresh_token", "YT_REFRESH_TOKEN_2") or get_credential(config, "yt2_refresh_token", "REFRESH_TOKEN_2")
 
-    # গুগল ড্রাইভ ফোল্ডার আইডি ও টগল সেটিংস
+    # গুগল ড্রাইভ ফোল্ডার আইডি ও স্বাধীন টগল সেটিংস
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
     enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
     use_local_music = str(get_credential(config, "use_local_music", "USE_LOCAL_MUSIC")).lower() in ["true", "1", "yes", "on"]
 
-    print(f"⚙️ [Configuration Status]")
-    print(f"   ├─ Save TikTok Video to GDrive: {'ENABLED (ON - No TikTok/YT2 Upload)' if save_to_gdrive else 'DISABLED (OFF - Normal Upload)'}")
-    print(f"   ├─ TikTok & 2nd YouTube Sync  : {'ENABLED' if enable_tiktok else 'DISABLED'}")
-    print(f"   └─ Audio Engine Mode         : {'MUSIC FOLDER ONLY' if use_local_music else 'AI SCRIPT + ELEVENLABS'}")
+    print(f"\n⚙️ [Master Settings Status]")
+    print(f"   ├─ Google Drive Save Mode : {'ON (Save Copy to GDrive)' if save_to_gdrive else 'OFF'}")
+    print(f"   ├─ TikTok & 2nd YT Sync   : {'ON (Publish to TikTok & YT2)' if enable_tiktok else 'OFF'}")
+    print(f"   └─ Audio Engine Source    : {'LOCAL MUSIC FOLDER (ElevenLabs Bypassed)' if use_local_music else 'AI SCRIPT + ELEVENLABS'}")
 
     # টেলিগ্রাম ক্লায়েন্ট চালু
     tg_client = None
@@ -87,7 +87,6 @@ async def process_sync(config, memory):
             print("  [+] Telegram Client Authenticated!")
         except Exception: pass
 
-    # সব ডেস্টিনেশন আইডি আলাদা করা
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else ("WhatsApp" if "WhatsApp" in p_str else "Website")))
     
     fb_dest_ids = []
@@ -157,22 +156,23 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # ৩. এআই ডাটা ও স্ক্রিপ্ট
+            # ৩. এআই দিয়ে ডাটা এক্সট্রাকশন (স্লাইড তৈরিতে এটি সর্বদা কার্যকর থাকবে)
             job_data = generate_job_data_and_script(title, downloaded_imgs)
             voiceover_script = job_data.get("voiceover_script", "")
 
-            # ৪. অডিও তৈরি
+            # ৪. অডিও প্রস্তুত (Music ফোল্ডার অথবা ElevenLabs)
             single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
             audio_ready = False
 
             if use_local_music:
-                print("  [🎵 Audio Mode] Using local music from 'Music/' folder...")
+                print("  [🎵 Audio Mode: Local Music] Loading background audio from 'Music/' folder...")
                 fallback_music = get_fallback_music_file()
                 if fallback_music and os.path.exists(fallback_music):
                     import shutil
                     shutil.copyfile(fallback_music, single_audio_path)
                     audio_ready = True
             else:
+                print("  [🎙️ Audio Mode: AI Voiceover] Synthesizing speech via ElevenLabs...")
                 audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path)
 
             # ৫. পোস্ট ক্যাপশন টেক্সট
@@ -188,11 +188,11 @@ async def process_sync(config, memory):
             if audio_ready and os.path.exists(single_audio_path):
                 main_video_ready = render_vertical_video(fb_yt_source, single_audio_path, main_video_path)
 
-            # ৭. ফেসবুক পেজে পোস্ট (ফটো অ্যালবাম পোস্ট এবং রিলস ভিডিও)
+            # ক) ফেসবুক পেজগুলোতে পোস্ট (ফটো অ্যালবাম + রিলস ভিডিও)
             for did in fb_dest_ids:
                 token = get_page_access_token(fb_user_token, did)
                 if token:
-                    # ক) ছবি ও টেক্সট পোস্ট
+                    # ছবি ও টেক্সট পোস্ট
                     if downloaded_imgs:
                         print(f"  [+] Posting Photos & Caption to Facebook Page '{did}'...")
                         if len(downloaded_imgs) > 1:
@@ -200,13 +200,13 @@ async def process_sync(config, memory):
                         else:
                             post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
 
-                    # খ) রিলস ভিডিও আপলোড
+                    # রিলস ভিডিও আপলোড
                     if main_video_ready:
                         print(f"  [+] Uploading Video Reel to Facebook Page '{did}'...")
                         if not post_reel_to_facebook(did, token, main_video_path, title, final_post_text):
                             post_video_to_facebook(did, token, main_video_path, final_post_text)
 
-            # ৮. ১ম YouTube চ্যানেলে (Shorts 1) আপলোড
+            # খ) ১ম YouTube চ্যানেলে (Shorts 1) আপলোড
             if main_video_ready and yt1_client_id and yt1_client_secret and yt1_refresh_token:
                 print("  [+] Uploading Video to 1st YouTube Channel (Shorts 1)...")
                 upload_video_to_youtube(
@@ -216,16 +216,17 @@ async def process_sync(config, memory):
                     job_data.get("video_description", final_post_text)
                 )
 
-            # ৯. ২য় ভিডিও হ্যান্ডলিং (Google Drive Save Mode অথবা TikTok/YouTube 2 Upload)
+            # ৭. ২য় ভিডিও (কাস্টম ইনফোগ্রাফিক স্লাইড + অডিও) ➔ TikTok, YouTube 2 এবং Google Drive
             if audio_ready and os.path.exists(single_audio_path):
-                print("  [~] Rendering Custom Infographic Video...")
+                print("  [~] Rendering Custom Infographic Video (AI Data + Background + Audio)...")
                 tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tt_slide_{hash(entry_link)}")
                 tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
 
                 if render_vertical_video(tiktok_slides, single_audio_path, tiktok_video_path):
-                    # 🌟 গুগল ড্রাইভ সেভ মোড চেক
+                    
+                    # 🌟 গুগল ড্রাইভ সেভ (অন থাকলে ড্রাইভে সেভ হবে)
                     if save_to_gdrive:
-                        print("  [📁 GDrive Mode ACTIVE] Saving video to Google Drive (TikTok & 2nd YT upload bypassed)...")
+                        print("  [📁 Google Drive Save] Saving video copy to Google Drive...")
                         safe_title_name = f"{sanitize_filename(title)}.mp4"
                         upload_video_to_gdrive(
                             yt1_client_id, yt1_client_secret, yt1_refresh_token,
@@ -233,29 +234,29 @@ async def process_sync(config, memory):
                             folder_id=gdrive_folder_id,
                             file_title=safe_title_name
                         )
-                    else:
-                        # স্বাভাবিক মোড: TikTok ও ২য় YouTube চ্যানেলে আপলোড
-                        if enable_tiktok:
-                            print("  [+] Uploading Custom Video to TikTok via Buffer...")
-                            upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
 
-                            if yt2_client_id and yt2_client_secret and yt2_refresh_token:
-                                print("  [+] Uploading Custom Video to 2nd YouTube Channel (Shorts 2)...")
-                                upload_video_to_youtube(
-                                    yt2_client_id, yt2_client_secret, yt2_refresh_token,
-                                    tiktok_video_path,
-                                    job_data.get("optimized_title", title),
-                                    job_data.get("video_description", final_post_text)
-                                )
-                            else:
-                                print("  [~] 2nd YouTube credentials not configured. Skipping cleanly.")
+                    # 🌟 TikTok ও ২য় YouTube আপলোড (অন থাকলে আপলোড হবে)
+                    if enable_tiktok:
+                        print("  [+] Uploading Custom Video to TikTok via Buffer...")
+                        upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
+
+                        if yt2_client_id and yt2_client_secret and yt2_refresh_token:
+                            print("  [+] Uploading Custom Video to 2nd YouTube Channel (Shorts 2)...")
+                            upload_video_to_youtube(
+                                yt2_client_id, yt2_client_secret, yt2_refresh_token,
+                                tiktok_video_path,
+                                job_data.get("optimized_title", title),
+                                job_data.get("video_description", final_post_text)
+                            )
+                        else:
+                            print("  [~] 2nd YouTube credentials not configured. Skipping cleanly.")
 
                 # টিকটক টেম্প ক্লিনআপ
                 if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
                 for sp in tiktok_slides:
                     if os.path.exists(sp): os.remove(sp)
 
-            # ১০. Telegram ও WhatsApp চ্যানেলে পোস্ট ডেলিভারি
+            # ৮. Telegram ও WhatsApp চ্যানেলে পোস্ট ডেলিভারি
             for did in tg_dest_ids:
                 if tg_client:
                     clean_tg = clean_telegram_id(did)
@@ -267,7 +268,7 @@ async def process_sync(config, memory):
             for did in wa_dest_ids:
                 post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
 
-            # ১১. ক্লিনআপ
+            # ৯. ক্লিনআপ
             if os.path.exists(main_video_path): os.remove(main_video_path)
             if os.path.exists(single_audio_path): os.remove(single_audio_path)
             for dp in downloaded_imgs:
