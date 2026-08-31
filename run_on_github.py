@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import os
 import re
+import random
+import shutil
 import asyncio
 import requests
 from PIL import Image
@@ -13,7 +15,7 @@ from config_manager import (
     clean_text, clean_telegram_id, sanitize_filename
 )
 from ai_service import generate_job_data_and_script
-from audio_engine import generate_voiceover_audio_pipeline, get_fallback_music_file
+from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
 from video_engine import render_vertical_video
 from feed_manager import fetch_feed_entries, extract_article_images
@@ -45,6 +47,43 @@ def filter_banner_first_image(downloaded_imgs):
     except Exception: pass
     return list(downloaded_imgs)
 
+def is_local_music_enabled(config):
+    """লোকাল মিউজিক অন আছে কিনা তা যেকোনো সোর্স (Secrets বা Config) থেকে নিশ্চিত করে"""
+    triggers = [
+        os.environ.get("USE_LOCAL_MUSIC", ""),
+        os.environ.get("USE_MUSIC", ""),
+        os.environ.get("LOCAL_MUSIC", ""),
+        os.environ.get("USE_LOCAL_AUDIO", ""),
+        os.environ.get("AUDIO_MODE", ""),
+        config.get("credentials", {}).get("use_local_music", ""),
+        config.get("credentials", {}).get("audio_mode", ""),
+        config.get("use_local_music", "")
+    ]
+    for t in triggers:
+        if str(t).strip().lower() in ["true", "1", "yes", "on", "music", "local"]:
+            return True
+    return False
+
+def get_local_music_file():
+    """Music ফোল্ডার বা রুট থেকে অডিও ফাইল খুঁজে বের করে"""
+    candidates = []
+    for m_dir in ["Music", "music", "MUSIC"]:
+        if os.path.exists(m_dir) and os.path.isdir(m_dir):
+            for f in os.listdir(m_dir):
+                if f.lower().endswith(('.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac')):
+                    candidates.append(os.path.join(m_dir, f))
+    
+    # রুটে কোনো অডিও ফাইল থাকলে
+    for f in os.listdir('.'):
+        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.aac', '.ogg')) and not f.startswith('tmp_'):
+            candidates.append(f)
+            
+    if candidates:
+        chosen = random.choice(list(set(candidates)))
+        print(f"  [🎵 Local Music Found] Selected: '{chosen}'")
+        return chosen
+    return None
+
 async def process_sync(config, memory):
     rules = config.get("rules", [])
     if not rules:
@@ -67,16 +106,16 @@ async def process_sync(config, memory):
     yt2_client_secret = get_credential(config, "yt2_client_secret", "YT_CLIENT_SECRET_2") or get_credential(config, "yt2_client_secret", "CLIENT_SECRET_2")
     yt2_refresh_token = get_credential(config, "yt2_refresh_token", "YT_REFRESH_TOKEN_2") or get_credential(config, "yt2_refresh_token", "REFRESH_TOKEN_2")
 
-    # গুগল ড্রাইভ ফোল্ডার আইডি ও স্বাধীন টগল সেটিংস
+    # টগল সেটিংস
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
     enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
-    use_local_music = str(get_credential(config, "use_local_music", "USE_LOCAL_MUSIC")).lower() in ["true", "1", "yes", "on"]
+    use_local_music = is_local_music_enabled(config)
 
-    print(f"\n⚙️ [Master Settings Status]")
-    print(f"   ├─ Google Drive Save Mode : {'ON (Save Copy to GDrive)' if save_to_gdrive else 'OFF'}")
-    print(f"   ├─ TikTok & 2nd YT Sync   : {'ON (Publish to TikTok & YT2)' if enable_tiktok else 'OFF'}")
-    print(f"   └─ Audio Engine Source    : {'LOCAL MUSIC FOLDER (ElevenLabs Bypassed)' if use_local_music else 'AI SCRIPT + ELEVENLABS'}")
+    print(f"\n⚙️ [Master Automation Settings]")
+    print(f"   ├─ Audio Mode               : {'🎵 LOCAL MUSIC FOLDER ONLY' if use_local_music else '🎙️ AI SCRIPT + ELEVENLABS'}")
+    print(f"   ├─ Google Drive Save Mode   : {'📁 ENABLED (ON)' if save_to_gdrive else 'DISABLED (OFF)'}")
+    print(f"   └─ TikTok & 2nd YouTube Sync: {'⚡ ENABLED (ON)' if enable_tiktok else 'DISABLED (OFF)'}")
 
     # টেলিগ্রাম ক্লায়েন্ট চালু
     tg_client = None
@@ -87,6 +126,7 @@ async def process_sync(config, memory):
             print("  [+] Telegram Client Authenticated!")
         except Exception: pass
 
+    # সব ডেস্টিনেশন ও সোর্স আইডি আলাদা করা
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else ("WhatsApp" if "WhatsApp" in p_str else "Website")))
     
     fb_dest_ids = []
@@ -110,14 +150,15 @@ async def process_sync(config, memory):
         elif d_plat == "WhatsApp":
             wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
-    # গ্লোবাল প্রসেসড মেমরি
-    processed_links = memory.get("processed_articles", [])
-    if not isinstance(processed_links, list): processed_links = []
-    new_processed_links = list(processed_links)
+    # গ্লোবাল প্রসেসড মেমরি লোড
+    processed_set = set(memory.get("processed_articles", []))
+    for k, v in memory.items():
+        if isinstance(v, list) and k.startswith("route_"):
+            processed_set.update(v)
 
     for feed_url in source_feed_urls:
         print(f"\n========================================================")
-        print(f"[~] Checking Website Feed: '{feed_url}'")
+        print(f"[~] Checking Feed Source: '{feed_url}'")
         print(f"========================================================")
 
         feed = fetch_feed_entries(feed_url)
@@ -128,23 +169,28 @@ async def process_sync(config, memory):
             if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
             if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
-            if entry_link in new_processed_links: continue
-
-            title = entry.get('title', '').strip()
-
-            # ১. টাইটেল ফিল্টার (এনজিও/ব্যাংক বাদ)
-            if is_forbidden_title(title):
-                print(f"🚫 [FILTERED] Skipping '{title}' (Title contains NGO / Bank).")
-                new_processed_links.append(entry_link)
+            
+            # মেমরি চেক: ইতিমধ্যে প্রসেস হয়ে থাকলে স্কিপ
+            if entry_link in processed_set:
                 continue
 
-            print(f"\n🔥 [NEW ARTICLE DETECTED] '{title}'")
-            new_processed_links.append(entry_link)
+            raw_title = entry.get('title', '').strip()
+            article_title = clean_text(re.sub(r'[\r\n\t]+', ' ', raw_title))
+
+            # ১. টাইটেল ফিল্টার (এনজিও/ব্যাংক বাদ)
+            if is_forbidden_title(article_title):
+                print(f"🚫 [FILTERED] Skipping '{article_title}' (Title contains NGO / Bank).")
+                processed_set.add(entry_link)
+                memory["processed_articles"] = list(processed_set)[-200:]
+                save_json(MEMORY_FILE, memory)
+                continue
+
+            print(f"\n🔥 [NEW ARTICLE PROCESSING] '{article_title}'")
 
             raw_desc = entry.get('summary', '') or entry.get('description', '')
             raw_desc_clean = clean_text(raw_desc)
 
-            # ২. মূল বিজ্ঞপ্তির ছবি ডাউনলোড
+            # ২. মূল বিজ্ঞপ্তির ছবি সংগ্রহ
             img_urls = extract_article_images(entry, entry_link, raw_desc)
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
@@ -156,28 +202,31 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # ৩. এআই দিয়ে ডাটা এক্সট্রাকশন (স্লাইড তৈরিতে এটি সর্বদা কার্যকর থাকবে)
-            job_data = generate_job_data_and_script(title, downloaded_imgs)
+            # ৩. এআই দিয়ে শুধুমাত্র ভিজ্যুয়াল ডাটা এক্সট্রাক্ট করা (স্লাইড তৈরির জন্য)
+            job_data = generate_job_data_and_script(article_title, downloaded_imgs)
             voiceover_script = job_data.get("voiceover_script", "")
 
-            # ৪. অডিও প্রস্তুত (Music ফোল্ডার অথবা ElevenLabs)
+            # ৪. অডিও প্রস্তুত (লোকাল মিউজিক বা ElevenLabs)
             single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
             audio_ready = False
 
             if use_local_music:
-                print("  [🎵 Audio Mode: Local Music] Loading background audio from 'Music/' folder...")
-                fallback_music = get_fallback_music_file()
-                if fallback_music and os.path.exists(fallback_music):
-                    import shutil
-                    shutil.copyfile(fallback_music, single_audio_path)
+                print("  [🎵 Local Music Mode] Fetching audio from 'Music/' folder (ElevenLabs Bypassed)...")
+                local_music = get_local_music_file()
+                if local_music and os.path.exists(local_music):
+                    shutil.copyfile(local_music, single_audio_path)
                     audio_ready = True
+                else:
+                    print("  ⚠️ [WARNING] No audio files found in 'Music/' folder! Falling back to ElevenLabs...")
+                    audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path)
             else:
-                print("  [🎙️ Audio Mode: AI Voiceover] Synthesizing speech via ElevenLabs...")
+                print("  [🎙️ AI Voiceover Mode] Generating speech via ElevenLabs...")
                 audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path)
 
-            # ৫. পোস্ট ক্যাপশন টেক্সট
+            # ৫. পোস্টের আসল ক্যাপশন টেক্সট (আর্টিকেলের আসল টাইটেল ব্যবহার)
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
-            final_post_text = f"{clean_text(title)}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
+            final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
+            video_final_title = article_title[:95].strip()
 
             # ৬. ১ম ভিডিও (মূল বিজ্ঞপ্তির ছবি + অডিও) ➔ Facebook & YouTube Shorts 1
             main_video_path = f"tmp_main_video_{hash(entry_link)}.mp4"
@@ -188,75 +237,71 @@ async def process_sync(config, memory):
             if audio_ready and os.path.exists(single_audio_path):
                 main_video_ready = render_vertical_video(fb_yt_source, single_audio_path, main_video_path)
 
-            # ক) ফেসবুক পেজগুলোতে পোস্ট (ফটো অ্যালবাম + রিলস ভিডিও)
+            # ক) ফেসবুক পেজগুলোতে পোস্ট (ফটো পোস্ট এবং রিলস ভিডিও)
             for did in fb_dest_ids:
                 token = get_page_access_token(fb_user_token, did)
                 if token:
-                    # ছবি ও টেক্সট পোস্ট
                     if downloaded_imgs:
-                        print(f"  [+] Posting Photos & Caption to Facebook Page '{did}'...")
+                        print(f"  [+] Posting Photos & Title to Facebook Page '{did}'...")
                         if len(downloaded_imgs) > 1:
                             post_multi_photo_to_facebook(did, token, downloaded_imgs, final_post_text)
                         else:
                             post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
 
-                    # রিলস ভিডিও আপলোড
                     if main_video_ready:
                         print(f"  [+] Uploading Video Reel to Facebook Page '{did}'...")
-                        if not post_reel_to_facebook(did, token, main_video_path, title, final_post_text):
+                        if not post_reel_to_facebook(did, token, main_video_path, video_final_title, final_post_text):
                             post_video_to_facebook(did, token, main_video_path, final_post_text)
 
-            # খ) ১ম YouTube চ্যানেলে (Shorts 1) আপলোড
+            # খ) ১ম YouTube চ্যানেলে (Shorts 1) আপলোড (আসল টাইটেলসহ)
             if main_video_ready and yt1_client_id and yt1_client_secret and yt1_refresh_token:
-                print("  [+] Uploading Video to 1st YouTube Channel (Shorts 1)...")
+                print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
                 upload_video_to_youtube(
                     yt1_client_id, yt1_client_secret, yt1_refresh_token,
                     main_video_path,
-                    job_data.get("optimized_title", title),
-                    job_data.get("video_description", final_post_text)
+                    video_final_title,
+                    final_post_text
                 )
 
             # ৭. ২য় ভিডিও (কাস্টম ইনফোগ্রাফিক স্লাইড + অডিও) ➔ TikTok, YouTube 2 এবং Google Drive
             if audio_ready and os.path.exists(single_audio_path):
-                print("  [~] Rendering Custom Infographic Video (AI Data + Background + Audio)...")
+                print("  [~] Rendering Custom Infographic Video (TikTok / Drive)...")
                 tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tt_slide_{hash(entry_link)}")
                 tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
 
                 if render_vertical_video(tiktok_slides, single_audio_path, tiktok_video_path):
                     
-                    # 🌟 গুগল ড্রাইভ সেভ (অন থাকলে ড্রাইভে সেভ হবে)
+                    # 🌟 গুগল ড্রাইভ সেভ মোড
                     if save_to_gdrive:
-                        print("  [📁 Google Drive Save] Saving video copy to Google Drive...")
-                        safe_title_name = f"{sanitize_filename(title)}.mp4"
+                        print("  [📁 Google Drive Save] Saving video to Google Drive...")
                         upload_video_to_gdrive(
                             yt1_client_id, yt1_client_secret, yt1_refresh_token,
                             tiktok_video_path,
                             folder_id=gdrive_folder_id,
-                            file_title=safe_title_name
+                            file_title=f"{sanitize_filename(article_title)}.mp4"
                         )
 
-                    # 🌟 TikTok ও ২য় YouTube আপলোড (অন থাকলে আপলোড হবে)
+                    # 🌟 TikTok ও ২য় YouTube আপলোড
                     if enable_tiktok:
                         print("  [+] Uploading Custom Video to TikTok via Buffer...")
                         upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
 
                         if yt2_client_id and yt2_client_secret and yt2_refresh_token:
-                            print("  [+] Uploading Custom Video to 2nd YouTube Channel (Shorts 2)...")
+                            print(f"  [+] Uploading Custom Video to 2nd YouTube with Title: '{video_final_title}'...")
                             upload_video_to_youtube(
                                 yt2_client_id, yt2_client_secret, yt2_refresh_token,
                                 tiktok_video_path,
-                                job_data.get("optimized_title", title),
-                                job_data.get("video_description", final_post_text)
+                                video_final_title,
+                                final_post_text
                             )
                         else:
                             print("  [~] 2nd YouTube credentials not configured. Skipping cleanly.")
 
-                # টিকটক টেম্প ক্লিনআপ
                 if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
                 for sp in tiktok_slides:
                     if os.path.exists(sp): os.remove(sp)
 
-            # ৮. Telegram ও WhatsApp চ্যানেলে পোস্ট ডেলিভারি
+            # ৮. Telegram ও WhatsApp চ্যানেলে পোস্ট
             for did in tg_dest_ids:
                 if tg_client:
                     clean_tg = clean_telegram_id(did)
@@ -274,8 +319,11 @@ async def process_sync(config, memory):
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
-    # মেমরিতে শেষ ১০০টি প্রসেসড লিঙ্ক সংরক্ষণ
-    memory["processed_articles"] = new_processed_links[-100:]
+            # 🌟 ১০. ইনস্ট্যান্ট মেমরি সেভ (রিয়েল-টাইম সেভ যাতে ক্যানসেল করলেও ডাটা অক্ষুণ্ণ থাকে)
+            processed_set.add(entry_link)
+            memory["processed_articles"] = list(processed_set)[-200:]
+            save_json(MEMORY_FILE, memory)
+            print(f"  💾 [INSTANT MEMORY SAVED] '{article_title[:40]}' saved to {MEMORY_FILE}.")
 
     if tg_client:
         await tg_client.disconnect()
@@ -286,7 +334,7 @@ async def main():
     memory = load_json(MEMORY_FILE, {})
     updated_memory = await process_sync(config, memory)
     save_json(MEMORY_FILE, updated_memory)
-    print("\n✅ Execution Finished Perfectly.")
+    print("\n✅ Task Executed & All Memory Checkpoints Finalized.")
 
 if __name__ == "__main__":
     asyncio.run(main())
