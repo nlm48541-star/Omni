@@ -155,7 +155,7 @@ async def process_sync(config, memory):
             if entry_link in processed_set: continue
 
             raw_title = entry.get('title', '').strip()
-            article_title = clean_text(re.sub(r'[\r\n\t]+', ' ', raw_title))
+            article_title = clean_text(raw_title)
 
             if is_forbidden_title(article_title):
                 print(f"🚫 [FILTERED] Skipping '{article_title}' (Title contains NGO / Bank).")
@@ -166,6 +166,7 @@ async def process_sync(config, memory):
 
             print(f"\n🔥 [NEW ARTICLE DETECTED] '{article_title}'")
 
+            # বিবরণ থেকে HTML কোড পুরোপুরি মুছে ফেলা
             raw_desc = entry.get('summary', '') or entry.get('description', '')
             raw_desc_clean = clean_text(raw_desc)
 
@@ -180,7 +181,6 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # এআই দিয়ে স্মার্ট ডাটা সংগ্রহ
             job_data = generate_job_data_and_script(article_title, downloaded_imgs, memory=memory)
             voiceover_script = job_data.get("voiceover_script", "")
 
@@ -199,8 +199,13 @@ async def process_sync(config, memory):
                 print("  [🎙️ AI Voiceover Mode] Synthesizing speech via ElevenLabs...")
                 audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path, memory=memory)
 
+            # পরিচ্ছন্ন পোস্ট টেক্সট (কোনো HTML কোড ছাড়া)
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
-            final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
+            if raw_desc_clean and len(raw_desc_clean) > 20:
+                final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
+            else:
+                final_post_text = f"{article_title}{contact_sfx}"
+
             video_final_title = article_title[:85].strip()
 
             # ১ নম্বর ভিডিও (Facebook & YouTube 1)
