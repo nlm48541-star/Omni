@@ -2,47 +2,94 @@
 import os
 import re
 import json
-import uuid
 import random
 import subprocess
 import requests
 from config_manager import HEADERS, get_credential
 
+# --- YOUTUBE SHORTS UPLOADER WITH STRICT LINK VERIFICATION ---
+def get_youtube_access_token(client_id, client_secret, refresh_token):
+    if not client_id or not client_secret or not refresh_token: return None
+    url = "https://oauth2.googleapis.com/token"
+    payload = {"client_id": client_id, "client_secret": client_secret, "refresh_token": refresh_token, "grant_type": "refresh_token"}
+    try:
+        res = requests.post(url, data=payload, timeout=20)
+        if res.status_code == 200: return res.json().get("access_token")
+    except Exception: pass
+    return None
+
+def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path, title, description):
+    access_token = get_youtube_access_token(client_id, client_secret, refresh_token)
+    if not access_token:
+        print("  ❌ [YOUTUBE ERROR] Could not refresh Access Token. Check CLIENT_ID / REFRESH_TOKEN.")
+        return False
+
+    try:
+        init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Length": str(os.path.getsize(video_path)),
+            "X-Upload-Content-Type": "video/mp4"
+        }
+        
+        safe_title = re.sub(r'[\<\>]', '', str(title)).strip()[:80]
+        if not safe_title.lower().endswith('#shorts'):
+            safe_title = f"{safe_title} #shorts"
+
+        metadata = {
+            "snippet": {
+                "title": safe_title,
+                "description": f"{description}\n\n#shorts #reels #jobcircular",
+                "categoryId": "22"
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False
+            }
+        }
+
+        res = requests.post(init_url, headers=headers, json=metadata, timeout=30)
+        if res.status_code != 200:
+            print(f"  ❌ [YOUTUBE INIT ERROR] HTTP {res.status_code}: {res.text[:200]}")
+            return False
+
+        upload_url = res.headers.get("Location")
+        if not upload_url: return False
+
+        with open(video_path, "rb") as f:
+            up_res = requests.put(upload_url, headers={"Content-Length": str(os.path.getsize(video_path)), "Content-Type": "video/mp4"}, data=f, timeout=300)
+
+        if up_res.status_code in [200, 201]:
+            video_id = up_res.json().get("id")
+            if video_id:
+                print(f"  ✅ [YOUTUBE SUCCESS] Video Published! Live Link: https://youtu.be/{video_id}")
+                return True
+        else:
+            print(f"  ❌ [YOUTUBE UPLOAD ERROR] HTTP {up_res.status_code}: {up_res.text[:200]}")
+            return False
+
+    except Exception as e:
+        print(f"  ❌ [YOUTUBE EXCEPTION] {e}")
+        return False
+    return False
+
 # --- RCLONE GOOGLE DRIVE HANDLER ---
 def upload_video_via_rclone(file_path, rclone_conf_str, folder_id=""):
-    """Rclone ব্যবহার করে ভিডিও সরাসরি গুগল ড্রাইভ ফোল্ডারে আপলোড করে"""
-    if not rclone_conf_str:
-        print("  [!] RCLONE_CONF secret is missing or empty. Cannot upload to Drive.")
-        return False
-
+    if not rclone_conf_str: return False
     conf_path = "_tmp_rclone.conf"
     try:
-        # টেম্পোরারি rclone config ফাইল তৈরি
-        with open(conf_path, "w", encoding="utf-8") as f:
-            f.write(rclone_conf_str.strip())
-
-        # কনফিগ থেকে রিমোটের নাম (যেমন [gdrive]) বের করা
+        with open(conf_path, "w", encoding="utf-8") as f: f.write(rclone_conf_str.strip())
         match = re.search(r'\[(.*?)\]', rclone_conf_str)
         remote_name = match.group(1).strip() if match else "gdrive"
-
         dest = f"{remote_name}:{folder_id}" if folder_id else f"{remote_name}:"
 
-        print(f"  [~] Uploading via Rclone to destination: '{dest}'...")
         cmd = ["rclone", "--config", conf_path, "copy", file_path, dest]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        if res.returncode == 0:
-            print(f"  ✅ [RCLONE SUCCESS] Video successfully saved to Google Drive ({dest})!")
-            return True
-        else:
-            print(f"  ❌ [RCLONE ERROR] Upload failed: {res.stderr[:250]}")
-            return False
-    except Exception as e:
-        print(f"  ❌ [RCLONE EXCEPTION] {e}")
-        return False
+        return res.returncode == 0
+    except Exception: return False
     finally:
-        if os.path.exists(conf_path):
-            os.remove(conf_path)
+        if os.path.exists(conf_path): os.remove(conf_path)
 
 # --- FACEBOOK HANDLERS ---
 def get_page_access_token(master_user_token, page_id):
@@ -102,33 +149,6 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         return res.status_code == 200
     except Exception: return False
 
-# --- YOUTUBE SHORTS HANDLER ---
-def get_youtube_access_token(client_id, client_secret, refresh_token):
-    if not client_id or not client_secret or not refresh_token: return None
-    url = "https://oauth2.googleapis.com/token"
-    payload = {"client_id": client_id, "client_secret": client_secret, "refresh_token": refresh_token, "grant_type": "refresh_token"}
-    try:
-        res = requests.post(url, data=payload, timeout=20)
-        if res.status_code == 200: return res.json().get("access_token")
-    except Exception: pass
-    return None
-
-def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path, title, description):
-    access_token = get_youtube_access_token(client_id, client_secret, refresh_token)
-    if not access_token: return False
-    try:
-        init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Length": str(os.path.getsize(video_path)), "X-Upload-Content-Type": "video/mp4"}
-        metadata = {"snippet": {"title": title[:80] + " #shorts", "description": description + "\n\n#shorts #reels", "categoryId": "22"}, "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}}
-        res = requests.post(init_url, headers=headers, json=metadata, timeout=30)
-        upload_url = res.headers.get("Location")
-        if not upload_url: return False
-            
-        with open(video_path, "rb") as f:
-            up_res = requests.put(upload_url, headers={"Content-Length": str(os.path.getsize(video_path)), "Content-Type": "video/mp4"}, data=f, timeout=300)
-        return up_res.status_code in [200, 201]
-    except Exception: return False
-
 # --- TIKTOK BUFFER HANDLER ---
 def upload_to_public_host(video_path):
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
@@ -144,8 +164,7 @@ def upload_to_public_host(video_path):
                 if name == "Pixeldrain":
                     fid = r.json().get("id")
                     if fid: return f"https://pixeldrain.com/api/file/{fid}"
-                elif r.text.strip().startswith("http"):
-                    return r.text.strip()
+                elif r.text.strip().startswith("http"): return r.text.strip()
         except Exception: pass
     return None
 
@@ -173,9 +192,7 @@ def upload_video_to_tiktok_buffer(video_path, description, config=None):
         payload = {"query": mutation, "variables": {"input": {"channelId": buffer_profile_id, "text": clean_desc, "schedulingType": "automatic", "mode": mode, "assets": [{"video": {"url": video_url}}]}}}
         try:
             res = requests.post(graphql_url, json=payload, headers=headers, timeout=60)
-            if res.status_code == 200 and "post" in res.json().get("data", {}).get("createPost", {}):
-                print(f"  [+] TikTok posted via Buffer ({mode})!")
-                return True
+            if res.status_code == 200 and "post" in res.json().get("data", {}).get("createPost", {}): return True
         except Exception: pass
     return False
 
