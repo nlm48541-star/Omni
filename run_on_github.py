@@ -28,13 +28,11 @@ from uploader_service import (
 )
 
 def is_forbidden_title(title):
-    """টাইটেলে এনজিও বা ব্যাংক থাকলে তা বাদ দেবে"""
     if not title: return False
     title_lower = str(title).lower()
     return any(k in title_lower for k in ['এনজিও', 'ngo', 'ব্যাংক', 'bank'])
 
 def filter_banner_first_image(downloaded_imgs):
-    """একাধিক ছবি থাকলে এবং প্রথম ছবিটি ১৬:৯ ব্যানার সাইজ হলে তা বাদ দেবে"""
     if not downloaded_imgs or len(downloaded_imgs) == 1:
         return list(downloaded_imgs)
 
@@ -86,14 +84,12 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # ক্রেডেনশিয়াল লোড
     tg_session = get_credential(config, "tg_session", "TG_SESSION")
     tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
     tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
 
-    # ১ ও ২ নম্বর ইউটিউব চ্যানেল
     yt1_client_id = get_credential(config, "yt_client_id", "YT_CLIENT_ID") or get_credential(config, "yt_client_id", "CLIENT_ID")
     yt1_client_secret = get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET") or get_credential(config, "yt_client_secret", "CLIENT_SECRET")
     yt1_refresh_token = get_credential(config, "yt_refresh_token", "YT_REFRESH_TOKEN") or get_credential(config, "yt_refresh_token", "REFRESH_TOKEN")
@@ -102,7 +98,6 @@ async def process_sync(config, memory):
     yt2_client_secret = get_credential(config, "yt2_client_secret", "YT_CLIENT_SECRET_2") or get_credential(config, "yt2_client_secret", "CLIENT_SECRET_2")
     yt2_refresh_token = get_credential(config, "yt2_refresh_token", "YT_REFRESH_TOKEN_2") or get_credential(config, "yt2_refresh_token", "REFRESH_TOKEN_2")
 
-    # Rclone ও টগল সেটিংস
     rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
@@ -114,7 +109,6 @@ async def process_sync(config, memory):
     print(f"   ├─ Google Drive (Rclone)    : {'📁 ENABLED (ON)' if save_to_gdrive else 'DISABLED (OFF)'}")
     print(f"   └─ TikTok & 2nd YouTube Sync: {'⚡ ENABLED (ON)' if enable_tiktok else 'DISABLED (OFF)'}")
 
-    # টেলিগ্রাম ক্লায়েন্ট চালু
     tg_client = None
     if tg_session and tg_api_id and tg_api_hash:
         try:
@@ -136,17 +130,11 @@ async def process_sync(config, memory):
         s_ids = [s.strip() for s in r['source_id'].split(',') if s.strip()]
         d_ids = [d.strip() for d in r['dest_id'].split(',') if d.strip()]
 
-        if s_plat == "Website":
-            source_feed_urls.update(s_ids)
+        if s_plat == "Website": source_feed_urls.update(s_ids)
+        if d_plat == "Facebook": fb_dest_ids.extend([d for d in d_ids if d not in fb_dest_ids])
+        elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
+        elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
-        if d_plat == "Facebook":
-            fb_dest_ids.extend([d for d in d_ids if d not in fb_dest_ids])
-        elif d_plat == "Telegram":
-            tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
-        elif d_plat == "WhatsApp":
-            wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
-
-    # গ্লোবাল প্রসেসড মেমরি
     processed_set = set(memory.get("processed_articles", []))
     for k, v in memory.items():
         if isinstance(v, list) and k.startswith("route_"):
@@ -160,8 +148,7 @@ async def process_sync(config, memory):
         feed = fetch_feed_entries(feed_url)
         for entry in reversed(feed.entries[:10]):
             entry_link = entry.get('link', '').strip()
-            if not entry_link and 'links' in entry and entry.links:
-                entry_link = entry.links[0].get('href', '').strip()
+            if not entry_link and 'links' in entry and entry.links: entry_link = entry.links[0].get('href', '').strip()
             if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
             if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
@@ -170,7 +157,6 @@ async def process_sync(config, memory):
             raw_title = entry.get('title', '').strip()
             article_title = clean_text(re.sub(r'[\r\n\t]+', ' ', raw_title))
 
-            # ১. টাইটেল ফিল্টার (এনজিও/ব্যাংক বাদ)
             if is_forbidden_title(article_title):
                 print(f"🚫 [FILTERED] Skipping '{article_title}' (Title contains NGO / Bank).")
                 processed_set.add(entry_link)
@@ -183,7 +169,6 @@ async def process_sync(config, memory):
             raw_desc = entry.get('summary', '') or entry.get('description', '')
             raw_desc_clean = clean_text(raw_desc)
 
-            # ২. ছবি ডাউনলোড
             img_urls = extract_article_images(entry, entry_link, raw_desc)
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
@@ -195,11 +180,10 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # ৩. এআই দিয়ে শুধুমাত্র ভিজ্যুয়াল ডাটা এক্সট্রাক্ট করা (স্লাইড তৈরির জন্য)
-            job_data = generate_job_data_and_script(article_title, downloaded_imgs)
+            # এআই দিয়ে স্মার্ট ডাটা সংগ্রহ
+            job_data = generate_job_data_and_script(article_title, downloaded_imgs, memory=memory)
             voiceover_script = job_data.get("voiceover_script", "")
 
-            # ৪. অডিও প্রস্তুত
             single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
             audio_ready = False
 
@@ -210,18 +194,16 @@ async def process_sync(config, memory):
                     shutil.copyfile(local_music, single_audio_path)
                     audio_ready = True
                 else:
-                    print("  ⚠️ [WARNING] No music found in 'Music/' folder! Using ElevenLabs...")
-                    audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path)
+                    audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path, memory=memory)
             else:
                 print("  [🎙️ AI Voiceover Mode] Synthesizing speech via ElevenLabs...")
-                audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path)
+                audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path, memory=memory)
 
-            # ৫. পোস্ট ক্যাপশন ও আসল টাইটেল
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
             final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
-            video_final_title = article_title[:95].strip()
+            video_final_title = article_title[:85].strip()
 
-            # ৬. ১ম ভিডিও (মূল বিজ্ঞপ্তির ছবি + অডিও) ➔ Facebook & YouTube Shorts 1
+            # ১ নম্বর ভিডিও (Facebook & YouTube 1)
             main_video_path = f"tmp_main_video_{hash(entry_link)}.mp4"
             valid_source_imgs = filter_banner_first_image(downloaded_imgs)
             fb_yt_source = valid_source_imgs if valid_source_imgs else prepare_tiktok_slides(job_data, f"fb_fallback_{hash(entry_link)}")
@@ -230,66 +212,44 @@ async def process_sync(config, memory):
             if audio_ready and os.path.exists(single_audio_path):
                 main_video_ready = render_vertical_video(fb_yt_source, single_audio_path, main_video_path)
 
-            # ক) ফেসবুক পেজে পোস্ট (ফটো পোস্ট এবং রিলস ভিডিও)
             for did in fb_dest_ids:
                 token = get_page_access_token(fb_user_token, did)
                 if token:
                     if downloaded_imgs:
-                        print(f"  [+] Posting Photos & Title to Facebook Page '{did}'...")
-                        if len(downloaded_imgs) > 1:
-                            post_multi_photo_to_facebook(did, token, downloaded_imgs, final_post_text)
-                        else:
-                            post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
+                        if len(downloaded_imgs) > 1: post_multi_photo_to_facebook(did, token, downloaded_imgs, final_post_text)
+                        else: post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
 
                     if main_video_ready:
-                        print(f"  [+] Uploading Video Reel to Facebook Page '{did}'...")
                         if not post_reel_to_facebook(did, token, main_video_path, video_final_title, final_post_text):
                             post_video_to_facebook(did, token, main_video_path, final_post_text)
 
-            # খ) ১ম YouTube চ্যানেলে (Shorts 1) আপলোড
             if main_video_ready and yt1_client_id and yt1_client_secret and yt1_refresh_token:
                 print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
-                upload_video_to_youtube(
-                    yt1_client_id, yt1_client_secret, yt1_refresh_token,
-                    main_video_path,
-                    video_final_title,
-                    final_post_text
-                )
+                upload_video_to_youtube(yt1_client_id, yt1_client_secret, yt1_refresh_token, main_video_path, video_final_title, final_post_text)
 
-            # ৭. ২য় ভিডিও (কাস্টম ইনফোগ্রাফিক স্লাইড + অডিও) ➔ Google Drive (Rclone), TikTok & YouTube 2
+            # ২ নম্বর ভিডিও (TikTok, Drive, YouTube 2)
             if audio_ready and os.path.exists(single_audio_path):
                 print("  [~] Rendering Custom Infographic Video (TikTok / Drive)...")
                 tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tt_slide_{hash(entry_link)}")
                 tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
 
                 if render_vertical_video(tiktok_slides, single_audio_path, tiktok_video_path):
-                    
-                    # 🌟 গুগল ড্রাইভ সেভ (Rclone দিয়ে সরাসরি ড্রাইভ ফোল্ডারে কপি হবে)
                     if save_to_gdrive:
-                        print("  [📁 Rclone Drive Mode ACTIVE] Uploading to Google Drive...")
+                        print("  [📁 Google Drive Save] Saving video to Google Drive...")
                         upload_video_via_rclone(tiktok_video_path, rclone_conf, folder_id=gdrive_folder_id)
 
-                    # 🌟 TikTok ও ২য় YouTube আপলোড
                     if enable_tiktok:
                         print("  [+] Uploading Custom Video to TikTok via Buffer...")
                         upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
 
                         if yt2_client_id and yt2_client_secret and yt2_refresh_token:
                             print(f"  [+] Uploading Custom Video to 2nd YouTube with Title: '{video_final_title}'...")
-                            upload_video_to_youtube(
-                                yt2_client_id, yt2_client_secret, yt2_refresh_token,
-                                tiktok_video_path,
-                                video_final_title,
-                                final_post_text
-                            )
-                        else:
-                            print("  [~] 2nd YouTube credentials not configured. Skipping cleanly.")
+                            upload_video_to_youtube(yt2_client_id, yt2_client_secret, yt2_refresh_token, tiktok_video_path, video_final_title, final_post_text)
 
                 if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
                 for sp in tiktok_slides:
                     if os.path.exists(sp): os.remove(sp)
 
-            # ৮. Telegram ও WhatsApp চ্যানেলে পোস্ট
             for did in tg_dest_ids:
                 if tg_client:
                     clean_tg = clean_telegram_id(did)
@@ -301,13 +261,11 @@ async def process_sync(config, memory):
             for did in wa_dest_ids:
                 post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
 
-            # ৯. ক্লিনআপ
             if os.path.exists(main_video_path): os.remove(main_video_path)
             if os.path.exists(single_audio_path): os.remove(single_audio_path)
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
-            # ১০. ইনস্ট্যান্ট মেমরি সেভ
             processed_set.add(entry_link)
             memory["processed_articles"] = list(processed_set)[-200:]
             save_json(MEMORY_FILE, memory)
