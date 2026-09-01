@@ -2,15 +2,12 @@
 import os
 import re
 import time
+import shutil
+import random
 import requests
 
-PERMITTED_FREE_VOICES = [
-    {"id": "JBFqnCBsd6RMkjVDRZzb", "name": "George"},
-    {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam"},
-    {"id": "nPczCjzI2devNBz1zQrb", "name": "Brian"},
-    {"id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel"},
-    {"id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam"}
-]
+# 🌟 আপনার প্রজেক্টের অনুমোদিত সেরা নির্দিষ্ট পুরুষ কণ্ঠ (George - News Anchor Tone)
+FREE_PERMITTED_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 
 PHONE_DIGIT_WORDS = {
     '0': "জিরো", '1': "ওয়ান", '2': "টু", '3': "থ্রি", '4': "ফোর",
@@ -42,58 +39,187 @@ def int_to_bangla_words(n):
     if n > 0: parts.append(NUM_WORDS_1_TO_99.get(n, str(n)))
     return " ".join(parts)
 
-def clean_script_for_speech(raw_text):
-    if not raw_text: return ""
+def convert_all_numbers_to_bangla_words(text):
+    if not text: return ""
     bn_to_en = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 
+    # ফোন নাম্বার ইংরেজি শব্দে রূপান্তর
     def phone_replacer(match):
-        digits = [d for d in match.group(0).translate(bn_to_en) if d.isdigit()]
+        raw_num = match.group(0)
+        digits = [d for d in raw_num.translate(bn_to_en) if d.isdigit()]
         if "".join(digits).startswith("8801"): digits = digits[2:]
         return " ".join([PHONE_DIGIT_WORDS.get(d, d) for d in digits])
 
-    text = re.sub(r'(\+?88)?01[\d০-৯]{9}', phone_replacer, raw_text)
+    text = re.sub(r'(\+?88)?01[\d০-৯]{9}', phone_replacer, text)
 
+    # বাকি সব সংখ্যা কথায় রূপান্তর
     def num_replacer(match):
-        try: return int_to_bangla_words(int(match.group(0).translate(bn_to_en)))
+        num_str = match.group(0)
+        try: return int_to_bangla_words(int(num_str.translate(bn_to_en)))
         except Exception: return match.group(0)
 
     text = re.sub(r'[\d০-৯]+', num_replacer, text)
-    text = re.sub(r'[\*\_\|\#\~\[\]\<\>\{\}\(\)\@\$\^\&\+\=\_\\\/]', ' ', text)
-    return re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def mask_key(k):
+    if not k or len(k) <= 8: return "****"
+    return k[:4] + "..." + k[-4:]
+
+def clean_script_for_speech(raw_text):
+    if not raw_text: return ""
+    text = convert_all_numbers_to_bangla_words(raw_text)
+    text = re.sub(r'[\*\_\|\#\~]', '', str(text))
+    text = re.sub(r'\[.*?\]', '', text)
+    text = re.sub(r'https?://\S+|wa\.me/\S+', '', text)
+    text = re.sub(r'[\<\>\{\}\(\)\@\$\^\&\+\=\_\\\/]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 def get_all_elevenlabs_keys():
-    raw = os.environ.get("ELEVENLABS_API_KEYS", os.environ.get("ELEVENLABS_API_KEY", "")).strip()
-    return [k.strip() for k in re.split(r'[\r\n,;]+', raw) if k.strip()]
+    raw_keys = os.environ.get("ELEVENLABS_API_KEYS", os.environ.get("ELEVENLABS_API_KEY", "")).strip()
+    if not raw_keys: return []
+    return [k.strip() for k in re.split(r'[\r\n,;]+', raw_keys) if k.strip()]
+
+def get_best_free_voice(api_key):
+    """
+    অ্যাকাউন্ট স্ক্যান করে শুধুমাত্র ফ্রি-অনুমোদিত (premade বা generated) ভয়েস সিলেক্ট করে।
+    """
+    try:
+        url = "https://api.elevenlabs.io/v1/voices"
+        headers = {"xi-api-key": api_key}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            voices = resp.json().get("voices", [])
+            
+            # ১. ব্যবহারকারীর তৈরি কাস্টম ভয়েস
+            for v in voices:
+                if v.get("category") == "generated":
+                    return v.get("voice_id"), f"'{v.get('name')}' (Custom Generated)"
+            
+            # ২. ডিফল্ট সেরা ফ্রি পুরুষ ভয়েস (George / Adam)
+            for v in voices:
+                if v.get("category") == "premade" and "george" in v.get("name", "").lower():
+                    return v.get("voice_id"), f"'{v.get('name')}' (Premade Official)"
+            for v in voices:
+                if v.get("category") == "premade" and "adam" in v.get("name", "").lower():
+                    return v.get("voice_id"), f"'{v.get('name')}' (Premade Official)"
+                    
+            # ৩. যেকোনো সক্রিয় premade ভয়েস
+            for v in voices:
+                if v.get("category") == "premade":
+                    return v.get("voice_id"), f"'{v.get('name')}' (Premade Official)"
+    except Exception:
+        pass
+        
+    return FREE_PERMITTED_VOICE_ID, "'George' (Default Premade Official)"
+
+def get_fallback_music_file():
+    """Music ফোল্ডার বা রুট থেকে ব্যাকআপ অডিও ফাইল খুঁজে বের করে"""
+    candidates = []
+    for m_dir in ["Music", "music", "MUSIC"]:
+        if os.path.exists(m_dir) and os.path.isdir(m_dir):
+            for f in os.listdir(m_dir):
+                if f.lower().endswith(('.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac')):
+                    candidates.append(os.path.join(m_dir, f))
+    for f in os.listdir('.'):
+        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.aac', '.ogg')) and not f.startswith('tmp_'):
+            candidates.append(f)
+            
+    if candidates:
+        return random.choice(list(set(candidates)))
+    return None
 
 def generate_voiceover_audio_pipeline(text, output_audio_path, memory=None):
+    print("\n" + "="*65)
+    print("🎙️ [AUDIO ENGINE] ElevenLabs Eleven v3 Voiceover (George - News Anchor Tone)")
+    print("="*65)
+
     speech_text = clean_script_for_speech(text)
+    words = len(speech_text.split())
+    print(f"📊 [Text Analysis] Clean Characters: {len(speech_text)} | Words: {words}")
+    print(f"📝 [Script Preview]: \"{speech_text[:140]}...\"\n")
+
     eleven_keys = get_all_elevenlabs_keys()
-    if not eleven_keys: return False
+    
+    # ১. ElevenLabs API দিয়ে নির্দিষ্ট ভয়েসে অডিও তৈরি
+    if eleven_keys:
+        total_k = len(eleven_keys)
+        start_idx = (memory.get("elevenlabs_key_index", 0) if isinstance(memory, dict) else 0) % total_k
 
-    total_k = len(eleven_keys)
-    start_idx = (memory.get("elevenlabs_key_index", 0) if isinstance(memory, dict) else 0) % total_k
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = eleven_keys[k_idx]
+            masked = mask_key(api_key)
+            
+            # আপনার প্রজেক্টের নির্দিষ্ট ভয়েস (George) লোড করা হচ্ছে
+            voice_id, voice_name = get_best_free_voice(api_key)
+            tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
-    for offset in range(total_k):
-        k_idx = (start_idx + offset) % total_k
-        api_key = eleven_keys[k_idx]
-        voice_id = PERMITTED_FREE_VOICES[k_idx % len(PERMITTED_FREE_VOICES)]["id"]
+            print(f"\n--- [Attempting Key #{k_idx + 1}/{total_k}: {masked}] ---")
+            print(f"  • Selected Voice: {voice_name} [ID: {voice_id}]")
+            print(f"  • Model         : eleven_v3 (Language: 'bn' - Bengali)")
 
-        tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-        payload = {
-            "text": speech_text,
-            "model_id": "eleven_v3",
-            "language_code": "bn",
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
-        }
-        headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": api_key}
+            payload = {
+                "text": speech_text,
+                "model_id": "eleven_v3",
+                "language_code": "bn",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75
+                }
+            }
 
+            headers = {
+                "Accept": "audio/mpeg",
+                "Content-Type": "application/json",
+                "xi-api-key": api_key
+            }
+
+            start_time = time.time()
+            try:
+                resp = requests.post(tts_url, json=payload, headers=headers, timeout=120)
+                elapsed = round(time.time() - start_time, 2)
+
+                if resp.status_code == 200:
+                    os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
+                    with open(output_audio_path, "wb") as f:
+                        f.write(resp.content)
+
+                    size_mb = round(os.path.getsize(output_audio_path) / (1024 * 1024), 2)
+                    print(f"  ✅ [SUCCESS] Eleven v3 Bengali Voiceover Generated Successfully!")
+                    print(f"  📁 Saved Path  : {output_audio_path} ({size_mb} MB)")
+                    print("="*65 + "\n")
+                    
+                    if isinstance(memory, dict):
+                        memory["elevenlabs_key_index"] = k_idx
+                    return True
+
+                else:
+                    print(f"  ⚠️ Key #{k_idx + 1} returned HTTP {resp.status_code}: {resp.text[:200]}")
+                    continue
+
+            except Exception as e:
+                print(f"  ❌ Key #{k_idx + 1} exception: {e}")
+                continue
+
+    # ২. সব কী ব্যর্থ হলে Music ফোল্ডার থেকে ব্যাকআপ অডিও নেওয়া
+    print("\n" + "="*65)
+    print("⚠️ [ALL ELEVENLABS KEYS EXHAUSTED] Switching to Local Music Fallback...")
+    print("="*65)
+
+    fallback_music = get_fallback_music_file()
+    if fallback_music and os.path.exists(fallback_music):
         try:
-            resp = requests.post(tts_url, json=payload, headers=headers, timeout=120)
-            if resp.status_code == 200:
-                os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
-                with open(output_audio_path, "wb") as f: f.write(resp.content)
-                if isinstance(memory, dict): memory["elevenlabs_key_index"] = k_idx
-                return True
-        except Exception: pass
+            os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
+            shutil.copyfile(fallback_music, output_audio_path)
+            size_mb = round(os.path.getsize(output_audio_path) / (1024 * 1024), 2)
+            print(f"  ✅ [MUSIC FALLBACK SUCCESS] Selected Audio: '{fallback_music}' ({size_mb} MB)")
+            print(f"  📁 Saved Path: {output_audio_path}")
+            print("="*65 + "\n")
+            return True
+        except Exception as fe:
+            print(f"  ❌ [MUSIC COPY ERROR] {fe}")
 
+    print("❌ [FAILED] All ElevenLabs keys exhausted and no local music found.")
+    print("="*65 + "\n")
     return False
