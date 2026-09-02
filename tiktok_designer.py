@@ -126,7 +126,6 @@ def wrap_mixed_text(draw, text, bn_font, font_size, max_width):
     return lines
 
 def clean_org_name(org_name):
-    """প্রতিষ্ঠানের নাম থেকে ডুপ্লিকেট নিয়োগ বিজ্ঞপ্তি বা সাল রিমুভ করে"""
     if not org_name: return "নিয়োগ বিজ্ঞপ্তি"
     clean = re.sub(r'[\r\n\t]+', ' ', str(org_name)).strip()
     clean = re.sub(r'(?:নতুন\s*)?নিয়োগ\s*বিজ্ঞপ্তি.*$', '', clean, flags=re.IGNORECASE)
@@ -166,31 +165,31 @@ def render_template_slide(job_data, template_img, slide_posts):
     start_date = job_data.get("start_date", "চলমান")
     end_date = job_data.get("end_date", "শীঘ্রই শেষ হবে")
 
-    # 🌟 ১. প্রতিষ্ঠানের নাম (১ লাইন হলে বড় ৫৮ পিক্সেল, ২ লাইন হলে ৪৬ পিক্সেল)
-    test_fs = 58
+    # 🌟 ১. প্রতিষ্ঠানের নাম (১ লাইন হলে বড় ৬৮ পিক্সেল, ২ লাইন হলে ৪৮ পিক্সেল)
+    test_fs = 68
     test_font = get_header_font(test_fs)
     test_lines = wrap_mixed_text(draw, org_name, test_font, test_fs, max_width=920)
 
     if len(test_lines) == 1:
         draw_mixed_text(draw, W // 2, 310, test_lines[0], test_font, test_fs, "#047857", anchor="mm")
     else:
-        org_fs = 46
+        org_fs = 48
         org_font = get_header_font(org_fs)
         org_lines = wrap_mixed_text(draw, org_name, org_font, org_fs, max_width=920)
         oy = 285
         for ol in org_lines[:2]:
             draw_mixed_text(draw, W // 2, oy, ol, org_font, org_fs, "#047857", anchor="mm")
-            oy += 52
+            oy += 56
 
-    # 🌟 ২. আবেদন শুরু ও আবেদন শেষ তারিখ (সাল ছাড়া সঠিক তারিখ ও মাস)
-    dates_font = get_dates_font(36)
-    draw_mixed_text(draw, 305, 685, str(start_date), dates_font, 36, "#0F172A", anchor="mm")
-    draw_mixed_text(draw, 765, 685, str(end_date), dates_font, 36, "#C00000", anchor="mm")
+    # 🌟 ২. আবেদন শুরু ও আবেদন শেষ তারিখ (সঠিক পজিশন ও ডিপ কালো #000000)
+    dates_font = get_dates_font(38)
+    draw_mixed_text(draw, 305, 685, str(start_date), dates_font, 38, "#000000", anchor="mm")
+    draw_mixed_text(draw, 765, 685, str(end_date), dates_font, 38, "#000000", anchor="mm")
 
-    # 🌟 ৩. আটটি ঘরের টেবিল (Fixed 8 Rows Mapping)
-    p_name_fs = 32
-    p_vac_fs = 36
-    p_qual_fs = 28
+    # 🌟 ৩. আটটি ঘরের টেবিল (ডিপ কালো #000000 ও বড় সাইজে)
+    p_name_fs = 36
+    p_vac_fs = 42
+    p_qual_fs = 32
 
     p_name_font = get_table_font(p_name_fs)
     p_vac_font = get_table_font(p_vac_fs)
@@ -206,7 +205,7 @@ def render_template_slide(job_data, template_img, slide_posts):
             p_vac = str(p.get("vacancy", "০১"))
             p_qual = p.get("qualification", "")
 
-            # একক সংখ্যার আগে শূন্য যোগ করা (যেমন: ০১, ০২)
+            # একক সংখ্যার আগে শূন্য যোগ (০১, ০২)
             if len(p_vac) == 1 and p_vac in "১২৩৪৫৬৭৮৯123456789":
                 bn_map = {"1":"০১","2":"০২","3":"০৩","4":"০৪","5":"০৫","6":"০৬","7":"০৭","8":"০৮","9":"০৯",
                           "১":"০১","২":"০২","৩":"০৩","৪":"০৪","৫":"০৫","৬":"০৬","৭":"০৭","৮":"০৮","৯":"০৯"}
@@ -214,28 +213,28 @@ def render_template_slide(job_data, template_img, slide_posts):
 
             cy = row_starts_y[i] + (row_height // 2)
 
-            # কলাম ১: পদের নাম (Left X = 120, Width max = 390)
-            name_lines = wrap_mixed_text(draw, p_name, p_name_font, p_name_fs, max_width=390)
+            # কলাম ১: পদের নাম (Left X = 110, ডিপ কালো #000000)
+            name_lines = wrap_mixed_text(draw, p_name, p_name_font, p_name_fs, max_width=400)
             if len(name_lines) == 1:
-                draw_mixed_text(draw, 120, cy, name_lines[0], p_name_font, p_name_fs, "#0F172A", anchor="lm")
+                draw_mixed_text(draw, 110, cy, name_lines[0], p_name_font, p_name_fs, "#000000", anchor="lm")
             else:
-                ny = cy - 18
+                ny = cy - 20
                 for nl in name_lines[:2]:
-                    draw_mixed_text(draw, 120, ny, nl, p_name_font, p_name_fs - 2, "#0F172A", anchor="lm")
-                    ny += 34
+                    draw_mixed_text(draw, 110, ny, nl, p_name_font, p_name_fs - 4, "#000000", anchor="lm")
+                    ny += 38
 
-            # কলাম ২: পদ সংখ্যা (Center X = 590)
-            draw_mixed_text(draw, 590, cy, p_vac, p_vac_font, p_vac_fs, "#0F172A", anchor="mm")
+            # কলাম ২: পদ সংখ্যা (Center X = 590, ডিপ কালো #000000)
+            draw_mixed_text(draw, 590, cy, p_vac, p_vac_font, p_vac_fs, "#000000", anchor="mm")
 
-            # কলাম ৩: শিক্ষাগত যোগ্যতা (Center X = 825, Width max = 290)
-            qual_lines = wrap_mixed_text(draw, p_qual, p_qual_font, p_qual_fs, max_width=290)
+            # কলাম ৩: শিক্ষাগত যোগ্যতা (Center X = 825, ডিপ কালো #000000)
+            qual_lines = wrap_mixed_text(draw, p_qual, p_qual_font, p_qual_fs, max_width=300)
             if len(qual_lines) == 1:
-                draw_mixed_text(draw, 825, cy, qual_lines[0], p_qual_font, p_qual_fs, "#1E293B", anchor="mm")
+                draw_mixed_text(draw, 825, cy, qual_lines[0], p_qual_font, p_qual_fs, "#000000", anchor="mm")
             else:
-                qy = cy - 16
+                qy = cy - 18
                 for ql in qual_lines[:2]:
-                    draw_mixed_text(draw, 825, qy, ql, p_qual_font, p_qual_fs - 2, "#1E293B", anchor="mm")
-                    qy += 32
+                    draw_mixed_text(draw, 825, qy, ql, p_qual_font, p_qual_fs - 4, "#000000", anchor="mm")
+                    qy += 36
 
     return slide.convert("RGB")
 
