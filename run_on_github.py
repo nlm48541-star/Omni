@@ -18,7 +18,7 @@ from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
 from video_engine import render_vertical_video
-from feed_manager import fetch_feed_entries, extract_article_images
+from feed_manager import fetch_feed_entries, extract_article_images, scrape_full_webpage_content
 from uploader_service import (
     get_page_access_token, post_photo_to_facebook,
     post_multi_photo_to_facebook, post_reel_to_facebook,
@@ -166,7 +166,9 @@ async def process_sync(config, memory):
 
             print(f"\n🔥 [NEW ARTICLE DETECTED] '{article_title}'")
 
-            raw_desc = entry.get('summary', '') or entry.get('description', '')
+            # 🌟 সরাসরি লাইভ ওয়েবপেজ থেকে পূর্ণ বিবরণ ও এইচটিএমএল টেবিল স্ক্র্যাপ করা
+            web_text, web_html = scrape_full_webpage_content(entry_link)
+            raw_desc = entry.get('summary', '') or entry.get('description', '') or web_text
             raw_desc_clean = clean_text(raw_desc)
 
             # মূল ছবি ডাউনলোড
@@ -181,8 +183,8 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # 🌟 সম্পূর্ণ আর্টিকেল টেক্সটসহ এআই ডাটা এক্সট্রাক্ট করা
-            job_data = generate_job_data_and_script(article_title, raw_desc_clean, downloaded_imgs, memory=memory)
+            # 🌟 সম্পূর্ণ ওয়েবপেজ কনটেন্টসহ এআই ডাটা এক্সট্রাক্ট করা
+            job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
             voiceover_script = job_data.get("voiceover_script", "")
 
             # অডিও তৈরি
@@ -233,7 +235,7 @@ async def process_sync(config, memory):
                 print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
                 upload_video_to_youtube(yt1_client_id, yt1_client_secret, yt1_refresh_token, main_video_path, video_final_title, final_post_text)
 
-            # ২ নম্বর ভিডিও (TikTok, Drive, YouTube 2)
+            # ২ নম্বর ভিডিও (৮-ঘরের টেমপ্লেট স্লাইড + অডিও) ➔ Google Drive, TikTok & YouTube 2
             if audio_ready and os.path.exists(single_audio_path):
                 print("  [~] Rendering 8-Row Template Slide Video (TikTok / Drive)...")
                 tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tt_slide_{hash(entry_link)}")
