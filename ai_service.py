@@ -45,16 +45,24 @@ def remove_years(text):
     text = re.sub(r'২০২[০-৯]', '', text)
     return re.sub(r'\s+', ' ', text).strip()
 
-def find_demo_image():
-    """রিপোজিটরিতে সেভ থাকা demo.png / demo.jpg খুঁজে বের করে"""
-    for d in [".", "Backgrounds"]:
-        for name in ["demo.png", "demo.jpg", "Demo.png", "Demo.jpg", "input_file_1.png"]:
-            p = os.path.join(d, name)
-            if os.path.exists(p): return p
-    return None
+def extract_dates_from_text(text):
+    """টেক্সট থেকে বাংলা মাসের নামসহ সঠিক শুরুর ও শেষ তারিখ বের করে"""
+    months = r'(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগষ্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)'
+    date_pat = rf'([০-৯\d]{{1,2}}\s*{months})'
+    
+    st_date, ed_date = "চলমান", "শীঘ্রই শেষ হবে"
+    st_m = re.search(rf'(?:শুরু|থেকে|প্রকাশ)\s*[:\-\—]?\s*{date_pat}', text, re.I)
+    if st_m: st_date = st_m.group(1).strip()
+    
+    ed_m = re.search(rf'(?:শেষ|পর্যন্ত|সময়সীমা)\s*[:\-\—]?\s*{date_pat}', text, re.I)
+    if ed_m: ed_date = ed_m.group(1).strip()
+    
+    return st_date, ed_date
 
-def smart_fallback_data(title):
+def smart_fallback_data(title, article_text=""):
     clean = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
+    st_d, ed_d = extract_dates_from_text(f"{title} {article_text}")
+    
     vac_match = re.search(r'(\d+|[০-৯]+)\s*(?:টি\s*)?পদে', clean)
     vac_str = (vac_match.group(1)) if vac_match else "০১"
     
@@ -69,33 +77,37 @@ def smart_fallback_data(title):
     return {
         "org_name": org_candidate,
         "headline": "নিয়োগ বিজ্ঞপ্তি",
-        "start_date": "চলমান",
-        "end_date": "শীঘ্রই শেষ হবে",
+        "start_date": st_d,
+        "end_date": ed_d,
         "posts": [
-            {"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদসমূহ", "vacancy": vac_str, "qualification": "বিজ্ঞপ্তি অনুযায়ী"}
+            {"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": vac_str, "qualification": "বিজ্ঞপ্তি অনুযায়ী"}
         ],
         "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।",
         "optimized_title": clean[:90],
         "video_description": f"{clean}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
     }
 
-def generate_job_data_and_script(title, image_paths, memory=None):
-    clean_title = remove_years(re.sub(r'\s+', ' ', str(title)).strip())
+def generate_job_data_and_script(title, article_text, image_paths, memory=None):
+    clean_title = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
+    full_content = f"Job Title: {clean_title}\n\nArticle Details:\n{article_text[:2500]}"
 
     prompt = f"""You are a professional Bengali Job Circular Analyst.
-Context Title: "{clean_title}"
+Analyze the following circular details and images, and extract the EXACT fields for our 8-row table template:
 
-Look at the attached job circular image and extract the exact fields for our 8-row template:
-1. "org_name": Official organization name in Bengali (e.g. "মৎস্য ও প্রাণিসম্পদ তথ্য দপ্তর").
-2. "start_date": Application start date without year (e.g. "২৭ জুলাই").
-3. "end_date": Application deadline without year (e.g. "২১ আগস্ট").
-4. "posts": Array of actual job positions (up to 16 positions). Each post object MUST have:
-   - "post_name": Exact name of the post (e.g. "সহকারী চিত্রশিল্পী", "গাড়ী চালক", "অফিস সহায়ক")
-   - "vacancy": Vacancy number in Bengali digits (e.g. "০১", "০২", "১০")
-   - "qualification": Short educational requirement (e.g. "স্নাতক/সম্মান", "অষ্টম শ্রেণি পাশ", "এইচএসসি পাশ")
-5. "voiceover_script": ~1 minute continuous spoken Bengali script (No phone digits spoken, no years mentioned).
+Content:
+{full_content}
 
-Return strictly valid JSON:
+CRITICAL RULES:
+1. "org_name": Extract ONLY the official company/ministry/institution name (e.g. "পাবনা বিজ্ঞান ও প্রযুক্তি বিশ্ববিদ্যালয়", "কর্ণফুলী ফার্টিলাইজার কোম্পানি লিমিটেড"). Do NOT include words like "নিয়োগ বিজ্ঞপ্তি" or "2026".
+2. "start_date": Extract exact start date with Bengali month, WITHOUT YEAR (e.g. "২৭ জুলাই" or "০১ আগস্ট").
+3. "end_date": Extract exact deadline date with Bengali month, WITHOUT YEAR (e.g. "২১ আগস্ট" or "৩০ সেপ্টেম্বর").
+4. "posts": Extract up to 16 actual post items from the text. Each object MUST contain:
+   - "post_name": Actual position name (e.g. "সহকারী চিত্রশিল্পী", "কম্পিউটার অপারেটর", "অফিস সহায়ক")
+   - "vacancy": Vacancy count in Bengali digits (e.g. "০১", "০২", "১০")
+   - "qualification": Educational requirement (e.g. "স্নাতক/সম্মান", "এইচএসসি পাশ", "অষ্টম শ্রেণি পাশ")
+5. "voiceover_script": ~1 minute spoken Bengali script without mentioning phone numbers or years.
+
+Return strictly valid JSON only:
 {{
   "org_name": "...",
   "start_date": "...",
@@ -110,13 +122,7 @@ Return strictly valid JSON:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ডেমো ইমেজ থাকলে রেফারেন্স হিসেবে এআই-কে পাঠানো
-    demo_p = find_demo_image()
-    if demo_p:
-        demo_b64 = encode_image_base64(demo_p)
-        if demo_b64: base64_imgs.append(demo_b64)
-
-    # ১. Ollama Cloud মেমরি-ভিত্তিক লুপ
+    # ১. Ollama Cloud
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -138,7 +144,7 @@ Return strictly valid JSON:
                     resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=45)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
-                        if data and data.get("org_name") and data.get("posts"):
+                        if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
                             if isinstance(memory, dict): memory["ollama_key_index"] = k_idx
                             return data
                 except Exception: pass
@@ -150,7 +156,7 @@ Return strictly valid JSON:
             payload = {
                 "model": g_model,
                 "messages": [
-                    {"role": "system", "content": "You are a professional Bengali job circular analyzer. Output valid JSON matching the 3-column template format."},
+                    {"role": "system", "content": "You are a professional Bengali job circular analyzer. Extract exact post names, counts, qualifications, and dates from text."},
                     {"role": "user", "content": prompt}
                 ],
                 "response_format": {"type": "json_object"},
@@ -161,7 +167,8 @@ Return strictly valid JSON:
                 resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30)
                 if resp.status_code == 200:
                     data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                    if data and data.get("org_name") and data.get("posts"): return data
+                    if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
+                        return data
             except Exception: pass
 
-    return smart_fallback_data(title)
+    return smart_fallback_data(title, article_text)
