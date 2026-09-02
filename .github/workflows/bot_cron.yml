@@ -1,11 +1,9 @@
-name: Fixed 1-Hour OmniSync Bot
+name: OmniSync Bot
 
 on:
   workflow_dispatch:
   repository_dispatch:
     types: [run-sync]
-  schedule:
-    - cron: '0 * * * *'
 
 permissions:
   contents: write
@@ -52,7 +50,7 @@ jobs:
           GROQ_API: ${{ secrets.GROQ_API }}
           ELEVENLABS_API_KEYS: ${{ secrets.ELEVENLABS_API_KEYS }}
           
-          # 🌟 Rclone & Google Drive
+          # Rclone & Google Drive
           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
           SAVE_TO_GDRIVE: ${{ secrets.SAVE_TO_GDRIVE }}
