@@ -2,6 +2,7 @@
 import re
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from config_manager import HEADERS, clean_feed_url
 
@@ -30,6 +31,26 @@ def extract_article_images(entry, entry_link, raw_desc=""):
             seen_bases.add(base_u)
             cleaned.append(u)
     return cleaned
+
+def scrape_full_webpage_content(page_url):
+    """সরাসরি লাইভ আর্টিকেল ওয়েবপেজ থেকে টেবিল ও ভেতরের সম্পূর্ণ টেক্সট সংগ্রহ করে"""
+    try:
+        resp = requests.get(page_url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            # মূল কনটেন্ট এরিয়া খুঁজে বের করা
+            container = soup.find(['div', 'article', 'section'], class_=re.compile(r'(entry-content|post-content|article-body|main-content)', re.I))
+            element = container if container else soup
+            
+            # অপ্রয়োজনীয় স্ক্রিপ্ট বাদ দেওয়া
+            for tag in element(['script', 'style', 'nav', 'header', 'footer']):
+                tag.decompose()
+                
+            return element.get_text(separator=' ', strip=True), resp.text
+    except Exception as e:
+        print(f"  [!] Webpage full scrape notice for {page_url}: {e}")
+    return "", ""
 
 def fetch_feed_entries(source_url):
     target_feed_url = clean_feed_url(source_url)
