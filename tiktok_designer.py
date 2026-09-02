@@ -125,8 +125,17 @@ def wrap_mixed_text(draw, text, bn_font, font_size, max_width):
     if cur: lines.append(' '.join(cur))
     return lines
 
+def clean_org_name(org_name):
+    """প্রতিষ্ঠানের নাম থেকে ডুপ্লিকেট নিয়োগ বিজ্ঞপ্তি বা সাল রিমুভ করে"""
+    if not org_name: return "নিয়োগ বিজ্ঞপ্তি"
+    clean = re.sub(r'[\r\n\t]+', ' ', str(org_name)).strip()
+    clean = re.sub(r'(?:নতুন\s*)?নিয়োগ\s*বিজ্ঞপ্তি.*$', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'Job\s*Circular.*$', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'সার্কুলার.*$', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'202[0-9]|২০২[০-৯]', '', clean).strip(" -|,")
+    return clean if len(clean) > 2 else org_name
+
 def get_blank_template(target_w=1080, target_h=1920):
-    """ব্ল্যাঙ্ক টেমপ্লেট খুঁজে বের করে"""
     possible_names = ["Template.png", "template.png", "Template.jpg", "template.jpg", "input_file_0.png", "blank.png"]
     search_dirs = [BACKGROUNDS_DIR, ".", "Backgrounds"]
     for d in search_dirs:
@@ -138,7 +147,6 @@ def get_blank_template(target_w=1080, target_h=1920):
                     return img.resize((target_w, target_h), Image.LANCZOS)
                 except Exception: pass
 
-    # যদি না থাকে তবে Backgrounds ফোল্ডারের যেকোনো ছবি
     if os.path.exists(BACKGROUNDS_DIR):
         for f in os.listdir(BACKGROUNDS_DIR):
             if f.lower().endswith(('.png', '.jpg', '.jpeg')):
@@ -154,24 +162,27 @@ def render_template_slide(job_data, template_img, slide_posts):
     slide = template_img.copy().convert("RGBA")
     draw = ImageDraw.Draw(slide)
 
-    org_name = job_data.get("org_name", "নিয়োগ বিজ্ঞপ্তি")
+    org_name = clean_org_name(job_data.get("org_name", "নিয়োগ বিজ্ঞপ্তি"))
     start_date = job_data.get("start_date", "চলমান")
     end_date = job_data.get("end_date", "শীঘ্রই শেষ হবে")
 
-    # 🌟 ১. প্রতিষ্ঠানের নাম (নিয়োগ বিজ্ঞপ্তি ব্যানারের উপরে বড় করে)
-    org_fs = 48
-    org_font = get_header_font(org_fs)
-    org_lines = wrap_mixed_text(draw, org_name, org_font, org_fs, max_width=920)
-    
-    if len(org_lines) == 1:
-        draw_mixed_text(draw, W // 2, 310, org_lines[0], org_font, org_fs, "#047857", anchor="mm")
+    # 🌟 ১. প্রতিষ্ঠানের নাম (১ লাইন হলে বড় ৫৮ পিক্সেল, ২ লাইন হলে ৪৬ পিক্সেল)
+    test_fs = 58
+    test_font = get_header_font(test_fs)
+    test_lines = wrap_mixed_text(draw, org_name, test_font, test_fs, max_width=920)
+
+    if len(test_lines) == 1:
+        draw_mixed_text(draw, W // 2, 310, test_lines[0], test_font, test_fs, "#047857", anchor="mm")
     else:
+        org_fs = 46
+        org_font = get_header_font(org_fs)
+        org_lines = wrap_mixed_text(draw, org_name, org_font, org_fs, max_width=920)
         oy = 285
         for ol in org_lines[:2]:
             draw_mixed_text(draw, W // 2, oy, ol, org_font, org_fs, "#047857", anchor="mm")
-            oy += 54
+            oy += 52
 
-    # 🌟 ২. আবেদন শুরু ও আবেদন শেষ তারিখ (সাল ছাড়া)
+    # 🌟 ২. আবেদন শুরু ও আবেদন শেষ তারিখ (সাল ছাড়া সঠিক তারিখ ও মাস)
     dates_font = get_dates_font(36)
     draw_mixed_text(draw, 305, 685, str(start_date), dates_font, 36, "#0F172A", anchor="mm")
     draw_mixed_text(draw, 765, 685, str(end_date), dates_font, 36, "#C00000", anchor="mm")
@@ -195,7 +206,7 @@ def render_template_slide(job_data, template_img, slide_posts):
             p_vac = str(p.get("vacancy", "০১"))
             p_qual = p.get("qualification", "")
 
-            # যদি একক সংখ্যা হয় তবে আগে '০' যোগ করা (যেমন: ০১, ০২)
+            # একক সংখ্যার আগে শূন্য যোগ করা (যেমন: ০১, ০২)
             if len(p_vac) == 1 and p_vac in "১২৩৪৫৬৭৮৯123456789":
                 bn_map = {"1":"০১","2":"০২","3":"০৩","4":"০৪","5":"০৫","6":"০৬","7":"০৭","8":"০৮","9":"০৯",
                           "১":"০১","২":"০২","৩":"০৩","৪":"০৪","৫":"০৫","৬":"০৬","৭":"০৭","৮":"০৮","৯":"০৯"}
@@ -225,9 +236,6 @@ def render_template_slide(job_data, template_img, slide_posts):
                 for ql in qual_lines[:2]:
                     draw_mixed_text(draw, 825, qy, ql, p_qual_font, p_qual_fs - 2, "#1E293B", anchor="mm")
                     qy += 32
-        else:
-            # বাকি ঘরগুলো ব্ল্যাঙ্ক থাকবে (টেমপ্লেটের লাইন অপরিবর্তিত থাকবে)
-            pass
 
     return slide.convert("RGB")
 
@@ -236,7 +244,6 @@ def prepare_tiktok_slides(job_data, output_prefix="slide"):
     template_img = get_blank_template()
     out_paths = []
 
-    # যদি ৮টির বেশি পদ থাকে তবে ৮টি করে ভাগ হবে
     if len(posts) > 8:
         for idx, chunk_start in enumerate(range(0, len(posts), 8), start=1):
             chunk = posts[chunk_start : chunk_start + 8]
