@@ -47,7 +47,6 @@ def remove_years(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
-    """HTML ও টেক্সট থেকে সরাসরি তারিখ ও পদের তালিকা স্ক্র্যাপ করে"""
     months = r'(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগষ্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)'
     date_pat = rf'([০-৯\d]{{1,2}}\s*{months})'
     
@@ -60,7 +59,6 @@ def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
     ed_m = re.search(rf'(?:শেষ|পর্যন্ত|সময়সীমা)\s*[:\-\—]?\s*{date_pat}', combined, re.I)
     if ed_m: ed_date = ed_m.group(1).strip()
 
-    # HTML Table স্ক্র্যাপ করা
     posts = []
     if html_text:
         soup = BeautifulSoup(html_text, 'html.parser')
@@ -141,7 +139,7 @@ Return strictly valid JSON only:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ১. Ollama Cloud
+    # ১. Ollama Cloud (Timeout: 135s - 3x)
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -160,7 +158,7 @@ Return strictly valid JSON only:
                     "options": {"temperature": 0.2}
                 }
                 try:
-                    resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=45)
+                    resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=135)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
@@ -168,7 +166,7 @@ Return strictly valid JSON only:
                             return data
                 except Exception: pass
 
-    # ২. Groq AI ব্যাকআপ
+    # ২. Groq AI ব্যাকআপ (Timeout: 90s - 3x)
     if GROQ_API:
         headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
         for g_model in GROQ_MODELS:
@@ -183,7 +181,7 @@ Return strictly valid JSON only:
                 "max_tokens": 2500
             }
             try:
-                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30)
+                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=90)
                 if resp.status_code == 200:
                     data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                     if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
