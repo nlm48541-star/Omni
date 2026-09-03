@@ -166,28 +166,25 @@ async def process_sync(config, memory):
 
             print(f"\n🔥 [NEW ARTICLE DETECTED] '{article_title}'")
 
-            # 🌟 সরাসরি লাইভ ওয়েবপেজ থেকে পূর্ণ বিবরণ ও এইচটিএমএল টেবিল স্ক্র্যাপ করা
             web_text, web_html = scrape_full_webpage_content(entry_link)
             raw_desc = entry.get('summary', '') or entry.get('description', '') or web_text
             raw_desc_clean = clean_text(raw_desc)
 
-            # মূল ছবি ডাউনলোড
+            # মূল ছবি ডাউনলোড (Timeout: 30s - 3x)
             img_urls = extract_article_images(entry, entry_link, raw_desc)
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
                 try:
-                    ir = requests.get(u, headers=HEADERS, timeout=10)
+                    ir = requests.get(u, headers=HEADERS, timeout=30)
                     if ir.status_code == 200:
                         p = f"tmp_raw_{hash(entry_link)}_{i_idx}.jpg"
                         with open(p, 'wb') as f: f.write(ir.content)
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # 🌟 সম্পূর্ণ ওয়েবপেজ কনটেন্টসহ এআই ডাটা এক্সট্রাক্ট করা
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
             voiceover_script = job_data.get("voiceover_script", "")
 
-            # অডিও তৈরি
             single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
             audio_ready = False
 
