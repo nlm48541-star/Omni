@@ -10,7 +10,20 @@ from PIL import Image
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
 GROQ_API = os.environ.get("GROQ_API", "").strip()
 
-OLLAMA_MODELS = ["kimi-k3", "minimax-m3", "gemma4", "kimi-k2.6"]
+# 🌟 আপনার নির্ধারিত অগ্রাধিকার ক্রম অনুযায়ী Ollama Cloud মডেল লিস্ট
+OLLAMA_MODELS = [
+    "gemma4:31b",
+    "gpt-oss:120b",
+    "gpt-oss:20b",
+    "nemotron-3-nano:30b",
+    "nemotron-3-super",
+    "nemotron-3-ultra",
+    "kimi-k3",
+    "minimax-m3",
+    "gemma4",
+    "kimi-k2.6"
+]
+
 GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 def get_all_ollama_keys():
@@ -99,7 +112,7 @@ def smart_fallback_data(title, article_text="", raw_html=""):
         "start_date": st_d,
         "end_date": ed_d,
         "posts": scraped_posts,
-        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।",
+        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।",
         "optimized_title": clean[:90],
         "video_description": f"{clean}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
     }
@@ -139,7 +152,7 @@ Return strictly valid JSON only:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ১. Ollama Cloud (Timeout: 135s - 3x)
+    # ১. Ollama Cloud - প্রতিটি কী-এর জন্য অগ্রাধিকার তালিকা ধরে ট্রাই করা
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -151,6 +164,7 @@ Return strictly valid JSON only:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
             for model in OLLAMA_MODELS:
+                print(f"  [AI] Attempting Ollama model '{model}' with Key #{k_idx + 1}...")
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt, "images": base64_imgs}],
@@ -162,12 +176,18 @@ Return strictly valid JSON only:
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
+                            print(f"  ✅ [SUCCESS] Successfully extracted using Ollama '{model}'!")
                             if isinstance(memory, dict): memory["ollama_key_index"] = k_idx
                             return data
-                except Exception: pass
+                    elif resp.status_code in [401, 402, 429]:
+                        print(f"  ⚠️ Ollama Key #{k_idx + 1} hit quota/limit ({resp.status_code}). Switching to next key...")
+                        break
+                except Exception as e:
+                    print(f"  ⚠️ Ollama ({model}) notice: {e}")
 
-    # ২. Groq AI ব্যাকআপ (Timeout: 90s - 3x)
+    # ২. Groq AI ব্যাকআপ
     if GROQ_API:
+        print("  [AI Fallback] Attempting Groq AI...")
         headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
         for g_model in GROQ_MODELS:
             payload = {
@@ -185,7 +205,9 @@ Return strictly valid JSON only:
                 if resp.status_code == 200:
                     data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                     if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
+                        print(f"  ✅ [SUCCESS] Successfully extracted using Groq ({g_model})!")
                         return data
             except Exception: pass
 
+    print("  ⚠️ [AI NOTICE] Using smart scraped fallback data...")
     return smart_fallback_data(title, article_text, raw_html)
