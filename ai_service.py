@@ -7,9 +7,6 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 
-OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
-GROQ_API = os.environ.get("GROQ_API", "").strip()
-
 # 🌟 আপনার নির্ধারিত অগ্রাধিকার ক্রম অনুযায়ী Ollama Cloud মডেল লিস্ট
 OLLAMA_MODELS = [
     "gemma4:31b",
@@ -25,6 +22,21 @@ OLLAMA_MODELS = [
 ]
 
 GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+
+def get_ollama_chat_endpoint():
+    """Ollama Cloud API-এর নির্ভুল এবং ভ্যালিড URL নিশ্চিত করে"""
+    raw = os.environ.get("OLLAMA_API_URL", "").strip()
+    if not raw or not raw.startswith("http"):
+        base = "https://ollama.com"
+    else:
+        base = raw.rstrip("/")
+
+    if base.endswith("/api/chat"):
+        return base
+    elif base.endswith("/api"):
+        return f"{base}/chat"
+    else:
+        return f"{base}/api/chat"
 
 def get_all_ollama_keys():
     raw_keys = os.environ.get("OLLAMA_API_KEYS", os.environ.get("OLLAMA_API_KEY", os.environ.get("Ollama_API_Key", ""))).strip()
@@ -112,7 +124,7 @@ def smart_fallback_data(title, article_text="", raw_html=""):
         "start_date": st_d,
         "end_date": ed_d,
         "posts": scraped_posts,
-        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।",
+        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।",
         "optimized_title": clean[:90],
         "video_description": f"{clean}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
     }
@@ -128,13 +140,13 @@ Content:
 {full_content}
 
 CRITICAL RULES:
-1. "org_name": Extract ONLY the official company/ministry/institution name (e.g. "মেঘনা পেট্রোলিয়াম লিমিটেড", "পাবনা বিজ্ঞান ও প্রযুক্তি বিশ্ববিদ্যালয়"). Do NOT write words like "নিয়োগ বিজ্ঞপ্তি" or "2026".
+1. "org_name": Extract ONLY the official company/ministry/institution name (e.g. "মেঘনা পেট্রোলিয়াম লিমিটেড", "পাবনা বিজ্ঞান ও প্রযুক্তি বিশ্ববিদ্যালয়", "এসসিআই ফার্মাসিউটিক্যালস"). Do NOT write words like "নিয়োগ বিজ্ঞপ্তি" or "2026".
 2. "start_date": Extract exact start date with Bengali month, WITHOUT YEAR (e.g. "০১ জুলাই" or "২৭ জুলাই").
 3. "end_date": Extract exact deadline date with Bengali month, WITHOUT YEAR (e.g. "৩১ জুলাই" or "২১ আগস্ট").
 4. "posts": Extract up to 16 actual post items from the text/table. Each object MUST contain:
-   - "post_name": Actual position name (e.g. "সহকারী ব্যবস্থাপক", "অফিস সহকারী", "নিরাপত্তা প্রহরী")
+   - "post_name": Actual position name (e.g. "সহকারী ব্যবস্থাপক", "অফিস সহকারী", "মেডিকেল রিপ্রেজেন্টেটিভ")
    - "vacancy": Vacancy count in Bengali digits (e.g. "০১", "০২", "১০")
-   - "qualification": Short educational requirement (e.g. "স্নাতক/সম্মান", "এইচএসসি পাশ", "অষ্টম শ্রেণি পাশ")
+   - "qualification": Short educational requirement (e.g. "স্নাতক/সম্মান", "এইচএসসি পাশ", "এসএসসি পাশ")
 5. "voiceover_script": ~1 minute spoken Bengali script without mentioning phone numbers or years.
 
 Return strictly valid JSON only:
@@ -151,8 +163,9 @@ Return strictly valid JSON only:
 }}"""
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
+    ollama_endpoint = get_ollama_chat_endpoint()
 
-    # ১. Ollama Cloud - প্রতিটি কী-এর জন্য অগ্রাধিকার তালিকা ধরে ট্রাই করা
+    # ১. Ollama Cloud (ফিক্সড ও নির্ভুল এন্ডপয়েন্টসহ)
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -172,20 +185,23 @@ Return strictly valid JSON only:
                     "options": {"temperature": 0.2}
                 }
                 try:
-                    resp = requests.post(f"{OLLAMA_API_URL}/api/chat", headers=headers, json=payload, timeout=135)
+                    resp = requests.post(ollama_endpoint, headers=headers, json=payload, timeout=135)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
-                            print(f"  ✅ [SUCCESS] Successfully extracted using Ollama '{model}'!")
+                            print(f"  ✅ [OLLAMA SUCCESS] Successfully extracted data using '{model}'!")
                             if isinstance(memory, dict): memory["ollama_key_index"] = k_idx
                             return data
                     elif resp.status_code in [401, 402, 429]:
                         print(f"  ⚠️ Ollama Key #{k_idx + 1} hit quota/limit ({resp.status_code}). Switching to next key...")
                         break
+                    else:
+                        print(f"  ⚠️ Ollama ({model}) returned HTTP {resp.status_code}: {resp.text[:120]}")
                 except Exception as e:
                     print(f"  ⚠️ Ollama ({model}) notice: {e}")
 
     # ২. Groq AI ব্যাকআপ
+    GROQ_API = os.environ.get("GROQ_API", "").strip()
     if GROQ_API:
         print("  [AI Fallback] Attempting Groq AI...")
         headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
@@ -205,7 +221,7 @@ Return strictly valid JSON only:
                 if resp.status_code == 200:
                     data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                     if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
-                        print(f"  ✅ [SUCCESS] Successfully extracted using Groq ({g_model})!")
+                        print(f"  ✅ [GROQ SUCCESS] Successfully extracted using Groq ({g_model})!")
                         return data
             except Exception: pass
 
