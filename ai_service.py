@@ -7,6 +7,9 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 
+OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
+GROQ_API = os.environ.get("GROQ_API", "").strip()
+
 # 🌟 আপনার নির্ধারিত অগ্রাধিকার ক্রম অনুযায়ী Ollama Cloud মডেল লিস্ট
 OLLAMA_MODELS = [
     "gemma4:31b",
@@ -24,7 +27,6 @@ OLLAMA_MODELS = [
 GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 def get_ollama_chat_endpoint():
-    """Ollama Cloud API-এর নির্ভুল এবং ভ্যালিড URL নিশ্চিত করে"""
     raw = os.environ.get("OLLAMA_API_URL", "").strip()
     if not raw or not raw.startswith("http"):
         base = "https://ollama.com"
@@ -70,6 +72,32 @@ def remove_years(text):
     text = re.sub(r'\b202[0-9]\b', '', str(text))
     text = re.sub(r'২০২[০-৯]', '', text)
     return re.sub(r'\s+', ' ', text).strip()
+
+def sanitize_voiceover_script(script):
+    """অনাকাঙ্ক্ষিত বাক্য (যেমন: সম্পূর্ণ ভিডিও দেখুন, ওয়েবসাইটে ভিজিট করুন) স্বয়ংক্রিয়ভাবে মুছে ফেলে"""
+    if not script: return ""
+    text = str(script)
+
+    # অনাকাঙ্ক্ষিত বাক্যগুলো রিমুভ করা
+    bad_patterns = [
+        r'সম্পূর্ণ\s*ভিডিও(?:টি)?\s*(?:দেখুন|দেখার\s*জন্য\s*ধন্যবাদ|শেষ\s*পর্যন্ত\s*দেখুন)[^\.\!\n]*[\.\!\n]?',
+        r'পুরো\s*ভিডিও(?:টি)?\s*(?:দেখুন|দেখার\s*জন্য\s*ধন্যবাদ)[^\.\!\n]*[\.\!\n]?',
+        r'ভিডিওটি\s*শেষ\s*পর্যন্ত\s*দেখার\s*জন্য\s*ধন্যবাদ[^\.\!\n]*[\.\!\n]?',
+        r'(?:অফিসিয়াল\s*)?ওয়েবসাইটে?\s*(?:ভিজিট\s*করুন|গিয়ে\s*আবেদন\s*করুন|দেখুন)[^\.\!\n]*[\.\!\n]?',
+        r'চ্যানেলটি\s*সাবস্ক্রাইব\s*করুন[^\.\!\n]*[\.\!\n]?',
+        r'লাইক\s*(?:ও|এবং)\s*শেয়ার\s*করুন[^\.\!\n]*[\.\!\n]?'
+    ]
+    for pat in bad_patterns:
+        text = re.sub(pat, '', text, flags=re.IGNORECASE)
+
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # নিশ্চিত করা যে স্ক্রিপ্টটি হোয়াটসঅ্যাপে মেসেজ দেওয়ার আহ্বান দিয়েই শেষ হচ্ছে
+    cta_sentence = "ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
+    if not any(k in text for k in ["হোয়াটসঅ্যাপ", "হোয়াটসঅ্যাপ", "WhatsApp", "whatsapp"]):
+        text = f"{text} {cta_sentence}"
+
+    return text.strip()
 
 def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
     months = r'(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগষ্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)'
@@ -118,13 +146,15 @@ def smart_fallback_data(title, article_text="", raw_html=""):
         vac_str = (vac_match.group(1)) if vac_match else "০১"
         scraped_posts = [{"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": vac_str, "qualification": "বিজ্ঞপ্তি অনুযায়ী"}]
 
+    fallback_script = f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
+
     return {
         "org_name": org_candidate,
         "headline": "নিয়োগ বিজ্ঞপ্তি",
         "start_date": st_d,
         "end_date": ed_d,
         "posts": scraped_posts,
-        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে সহজে নির্ভুলভাবে আবেদন করতে আজই যোগাযোগ করুন স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে।",
+        "voiceover_script": fallback_script,
         "optimized_title": clean[:90],
         "video_description": f"{clean}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
     }
@@ -133,23 +163,31 @@ def generate_job_data_and_script(title, article_text, raw_html, image_paths, mem
     clean_title = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
 
-    prompt = f"""You are a professional Bengali Job Circular Analyst.
-Analyze the following circular details and extract the EXACT fields for our 8-row table template:
+    prompt = f"""You are a professional Bengali Job Circular Voiceover Scriptwriter and Data Extractor for Short Vertical Videos.
+Analyze the following circular details:
 
 Content:
 {full_content}
 
-CRITICAL RULES:
-1. "org_name": Extract ONLY the official company/ministry/institution name (e.g. "মেঘনা পেট্রোলিয়াম লিমিটেড", "পাবনা বিজ্ঞান ও প্রযুক্তি বিশ্ববিদ্যালয়", "এসসিআই ফার্মাসিউটিক্যালস"). Do NOT write words like "নিয়োগ বিজ্ঞপ্তি" or "2026".
-2. "start_date": Extract exact start date with Bengali month, WITHOUT YEAR (e.g. "০১ জুলাই" or "২৭ জুলাই").
-3. "end_date": Extract exact deadline date with Bengali month, WITHOUT YEAR (e.g. "৩১ জুলাই" or "২১ আগস্ট").
-4. "posts": Extract up to 16 actual post items from the text/table. Each object MUST contain:
-   - "post_name": Actual position name (e.g. "সহকারী ব্যবস্থাপক", "অফিস সহকারী", "মেডিকেল রিপ্রেজেন্টেটিভ")
-   - "vacancy": Vacancy count in Bengali digits (e.g. "০১", "০২", "১০")
-   - "qualification": Short educational requirement (e.g. "স্নাতক/সম্মান", "এইচএসসি পাশ", "এসএসসি পাশ")
-5. "voiceover_script": ~1 minute spoken Bengali script without mentioning phone numbers or years.
+CRITICAL RULES FOR "voiceover_script":
+1. Duration: A concise, highly engaging spoken Bengali script of around 120 to 150 words (under 1 minute for a Short/Reel video).
+2. OUTRO RULE (STRICT):
+   - DO NOT say "সম্পূর্ণ ভিডিওটি দেখুন" or "ভিডিওটি শেষ পর্যন্ত দেখার জন্য ধন্যবাদ".
+   - DO NOT say "ওয়েবসাইটে ভিজিট করুন" or "অফিসিয়াল ওয়েবসাইটে গিয়ে আবেদন করুন".
+   - DO NOT say "লাইক ও সাবস্ক্রাইব করুন".
+   - MUST END ONLY WITH THIS CALL-TO-ACTION: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে মেসেজ দিন।"
+3. NUMBERS & YEARS:
+   - Write all counts/dates strictly in Bengali words (e.g., "১৫০" ➔ "একশত পঞ্চাশ", "১২" ➔ "বারো", "৩ জুলাই" ➔ "তিন জুলাই").
+   - DO NOT recite phone number digits.
+   - DO NOT mention any year (e.g. 2026/২০২৬).
 
-Return strictly valid JSON only:
+4. DATA EXTRACTION:
+   - "org_name": ONLY the official company/ministry/institution name (e.g. "মেঘনা পেট্রোলিয়াম লিমিটেড").
+   - "start_date": Exact start date with Bengali month, WITHOUT YEAR (e.g. "০১ জুলাই").
+   - "end_date": Exact deadline date with Bengali month, WITHOUT YEAR (e.g. "৩১ জুলাই").
+   - "posts": Array of actual post objects with "post_name", "vacancy" (in Bengali digits e.g. "০১"), and "qualification".
+
+Return strictly valid JSON:
 {{
   "org_name": "...",
   "start_date": "...",
@@ -165,7 +203,7 @@ Return strictly valid JSON only:
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
     ollama_endpoint = get_ollama_chat_endpoint()
 
-    # ১. Ollama Cloud (ফিক্সড ও নির্ভুল এন্ডপয়েন্টসহ)
+    # ১. Ollama Cloud
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -177,7 +215,6 @@ Return strictly valid JSON only:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
             for model in OLLAMA_MODELS:
-                print(f"  [AI] Attempting Ollama model '{model}' with Key #{k_idx + 1}...")
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt, "images": base64_imgs}],
@@ -189,27 +226,21 @@ Return strictly valid JSON only:
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
-                            print(f"  ✅ [OLLAMA SUCCESS] Successfully extracted data using '{model}'!")
+                            data["voiceover_script"] = sanitize_voiceover_script(data.get("voiceover_script", ""))
                             if isinstance(memory, dict): memory["ollama_key_index"] = k_idx
                             return data
                     elif resp.status_code in [401, 402, 429]:
-                        print(f"  ⚠️ Ollama Key #{k_idx + 1} hit quota/limit ({resp.status_code}). Switching to next key...")
                         break
-                    else:
-                        print(f"  ⚠️ Ollama ({model}) returned HTTP {resp.status_code}: {resp.text[:120]}")
-                except Exception as e:
-                    print(f"  ⚠️ Ollama ({model}) notice: {e}")
+                except Exception: pass
 
     # ২. Groq AI ব্যাকআপ
-    GROQ_API = os.environ.get("GROQ_API", "").strip()
     if GROQ_API:
-        print("  [AI Fallback] Attempting Groq AI...")
         headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
         for g_model in GROQ_MODELS:
             payload = {
                 "model": g_model,
                 "messages": [
-                    {"role": "system", "content": "You are a professional Bengali job circular analyzer. Output valid JSON with real post names and dates."},
+                    {"role": "system", "content": "You are a professional Bengali job circular voiceover writer. End strictly with WhatsApp CTA. No website or full video mentions."},
                     {"role": "user", "content": prompt}
                 ],
                 "response_format": {"type": "json_object"},
@@ -221,9 +252,8 @@ Return strictly valid JSON only:
                 if resp.status_code == 200:
                     data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                     if data and data.get("org_name") and data.get("posts") and len(data.get("posts")) > 0:
-                        print(f"  ✅ [GROQ SUCCESS] Successfully extracted using Groq ({g_model})!")
+                        data["voiceover_script"] = sanitize_voiceover_script(data.get("voiceover_script", ""))
                         return data
             except Exception: pass
 
-    print("  ⚠️ [AI NOTICE] Using smart scraped fallback data...")
     return smart_fallback_data(title, article_text, raw_html)
