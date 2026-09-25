@@ -17,7 +17,7 @@ from config_manager import (
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
-from video_engine import render_vertical_video
+from video_engine import render_vertical_video, render_tiktok_motion_video
 from feed_manager import fetch_feed_entries, extract_article_images, scrape_full_webpage_content
 from uploader_service import (
     get_page_access_token, post_photo_to_facebook,
@@ -170,7 +170,6 @@ async def process_sync(config, memory):
             raw_desc = entry.get('summary', '') or entry.get('description', '') or web_text
             raw_desc_clean = clean_text(raw_desc)
 
-            # মূল ছবি ডাউনলোড (Timeout: 30s - 3x)
             img_urls = extract_article_images(entry, entry_link, raw_desc)
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
@@ -232,13 +231,13 @@ async def process_sync(config, memory):
                 print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
                 upload_video_to_youtube(yt1_client_id, yt1_client_secret, yt1_refresh_token, main_video_path, video_final_title, final_post_text)
 
-            # ২ নম্বর ভিডিও (৮-ঘরের টেমপ্লেট স্লাইড + অডিও) ➔ Google Drive, TikTok & YouTube 2
+            # 🌟 ২ নম্বর ভিডিও (অ্যানিমেটেড মোশন গ্রাফিক্স ওভারলে + মোশন ব্যাকগ্রাউন্ড ভিডিও)
             if audio_ready and os.path.exists(single_audio_path):
-                print("  [~] Rendering 8-Row Template Slide Video (TikTok / Drive)...")
-                tiktok_slides = prepare_tiktok_slides(job_data, output_prefix=f"tt_slide_{hash(entry_link)}")
+                print("  [🎬 Motion Graphics Engine] Generating Animated TikTok Video...")
                 tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
 
-                if render_vertical_video(tiktok_slides, single_audio_path, tiktok_video_path):
+                # সম্পূর্ণ অ্যানিমেটেড মোশন রেন্ডারার কল করা হচ্ছে
+                if render_tiktok_motion_video(job_data, single_audio_path, tiktok_video_path):
                     if save_to_gdrive:
                         print("  [📁 Google Drive Save] Saving video to Google Drive...")
                         upload_video_via_rclone(tiktok_video_path, rclone_conf, folder_id=gdrive_folder_id)
@@ -252,8 +251,6 @@ async def process_sync(config, memory):
                             upload_video_to_youtube(yt2_client_id, yt2_client_secret, yt2_refresh_token, tiktok_video_path, video_final_title, final_post_text)
 
                 if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
-                for sp in tiktok_slides:
-                    if os.path.exists(sp): os.remove(sp)
 
             for did in tg_dest_ids:
                 if tg_client:
