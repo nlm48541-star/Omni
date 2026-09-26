@@ -231,12 +231,11 @@ async def process_sync(config, memory):
                 print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
                 upload_video_to_youtube(yt1_client_id, yt1_client_secret, yt1_refresh_token, main_video_path, video_final_title, final_post_text)
 
-            # 🌟 ২ নম্বর ভিডিও (অ্যানিমেটেড মোশন গ্রাফিক্স ওভারলে + মোশন ব্যাকগ্রাউন্ড ভিডিও)
+            # 🌟 ২ নম্বর ভিডিও (মোশন গ্রাফিক্স এনিমেশনসহ TikTok ও Drive ভিডিও)
             if audio_ready and os.path.exists(single_audio_path):
                 print("  [🎬 Motion Graphics Engine] Generating Animated TikTok Video...")
                 tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
 
-                # সম্পূর্ণ অ্যানিমেটেড মোশন রেন্ডারার কল করা হচ্ছে
                 if render_tiktok_motion_video(job_data, single_audio_path, tiktok_video_path):
                     if save_to_gdrive:
                         print("  [📁 Google Drive Save] Saving video to Google Drive...")
