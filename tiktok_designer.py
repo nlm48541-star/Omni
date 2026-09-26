@@ -139,7 +139,6 @@ def clean_org_name(org_name):
     clean = re.sub(r'202[0-9]|২০২[০-৯]', '', clean).strip(" -|,")
     return clean if len(clean) > 2 else org_name
 
-# 🌟 মোশন গ্রাফিক্স ইজিং ফাংশন
 def ease_out_cubic(t):
     t = max(0.0, min(1.0, t))
     return 1.0 - math.pow(1.0 - t, 3)
@@ -153,19 +152,19 @@ def get_progress(frame_num, start_f, end_f):
     if frame_num >= end_f: return 1.0
     return (frame_num - start_f) / float(end_f - start_f)
 
-# 🌟 মোশন গ্রাফিক্স অ্যানিমেশন ফ্রেম জেনারেটর
+# 🌟 মোশন ফ্রেম রেন্ডারার
 def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_frames=60):
     W, H = 1080, 1920
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # ১. মূল ফ্রস্টেড কার্ড অ্যানিমেশন (Fade-in)
+    # ১. ফ্রস্টেড কার্ড
     card_prog = ease_out_cubic(get_progress(frame_idx, 0, 12))
     card_alpha = int(246 * card_prog)
     if card_alpha > 0:
         draw.rounded_rectangle([45, 55, W - 45, H - 55], radius=32, fill=(255, 255, 255, card_alpha), outline=(203, 213, 225, card_alpha), width=2)
 
-    # ২. লোগো অ্যানিমেশন (Logo.png পপ-ইন স্কেল)
+    # ২. লোগো (Logo.png)
     logo_prog = ease_out_back(get_progress(frame_idx, 2, 16))
     if logo_prog > 0:
         logo_file = find_logo_file()
@@ -184,7 +183,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
             if rad > 5:
                 draw.ellipse([W//2 - rad, 130 - rad, W//2 + rad, 130 + rad], fill=(22, 101, 52, int(255 * logo_prog)))
 
-    # ৩. প্রতিষ্ঠানের নাম অ্যানিমেশন (Slide down & Fade)
+    # ৩. প্রতিষ্ঠানের নাম (১ লাইনে বড় ৬৮ পিক্সেল, ২ লাইনে ৪৮ পিক্সেল)
     org_prog = ease_out_cubic(get_progress(frame_idx, 6, 20))
     if org_prog > 0:
         org_name = clean_org_name(job_data.get("org_name", "নিয়োগ বিজ্ঞপ্তি"))
@@ -203,7 +202,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
                 draw_mixed_text(draw, W // 2, oy, ol, org_font, org_fs, "#047857", anchor="mm")
                 oy += 56
 
-    # ৪. "নিয়োগ বিজ্ঞপ্তি" ব্যানার (Zoom/Pop with bounce)
+    # ৪. "নিয়োগ বিজ্ঞপ্তি" ব্যানার
     banner_prog = ease_out_back(get_progress(frame_idx, 10, 24))
     if banner_prog > 0:
         bw = int(390 * banner_prog)
@@ -213,14 +212,14 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
             if banner_prog >= 0.8:
                 draw_mixed_text(draw, W // 2, 395, "নিয়োগ বিজ্ঞপ্তি", get_header_font(72), 72, "#FFFFFF", anchor="mm")
 
-    # ৫. ক্যালেন্ডার বক্স অ্যানিমেশন (বাম ও ডান থেকে স্লাইড)
+    # ৫. ক্যালেন্ডার বক্স (আবেদন শুরু ও শেষ)
     cal_prog = ease_out_cubic(get_progress(frame_idx, 16, 28))
     if cal_prog > 0:
         c_top, c_bot = 490, 640
         box_w = (W - 170 - 25) // 2
         slide_offset = int((1.0 - cal_prog) * 60)
 
-        # আবেদন শুরু (বাম বক্স)
+        # আবেদন শুরু
         b1_x1 = 85 - slide_offset
         b1_x2 = b1_x1 + box_w
         draw.rounded_rectangle([b1_x1, c_top, b1_x2, c_bot], radius=20, fill=(255, 255, 255, 255), outline=(37, 99, 235, 180), width=2)
@@ -228,7 +227,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
         draw_mixed_text(draw, (b1_x1 + 105 + b1_x2 - 35) // 2, c_top + 36, "আবেদন শুরু", get_dates_font(24), 24, "#FFFFFF", anchor="mm")
         draw_mixed_text(draw, (b1_x1 + b1_x2) // 2 + 20, c_top + 100, str(job_data.get("start_date", "চলমান")), get_dates_font(38), 38, "#000000", anchor="mm")
 
-        # আবেদন শেষ (ডান বক্স)
+        # আবেদন শেষ
         b2_x1 = b1_x2 + 25 + slide_offset
         b2_x2 = W - 85 + slide_offset
         draw.rounded_rectangle([b2_x1, c_top, b2_x2, c_bot], radius=20, fill=(255, 255, 255, 255), outline=(37, 99, 235, 180), width=2)
@@ -236,7 +235,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
         draw_mixed_text(draw, (b2_x1 + 105 + b2_x2 - 35) // 2, c_top + 36, "আবেদন শেষ", get_dates_font(24), 24, "#FFFFFF", anchor="mm")
         draw_mixed_text(draw, (b2_x1 + b2_x2) // 2 + 20, c_top + 100, str(job_data.get("end_date", "শীঘ্রই শেষ হবে")), get_dates_font(38), 38, "#000000", anchor="mm")
 
-    # ৬. "পদসমূহ" লাল রিবন (Expand)
+    # ৬. "পদসমূহ" রিবন
     rib_prog = ease_out_back(get_progress(frame_idx, 22, 34))
     if rib_prog > 0:
         rw = int(270 * rib_prog)
@@ -245,7 +244,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
             if rib_prog >= 0.7:
                 draw_mixed_text(draw, W // 2, 715, "পদসমূহ", get_header_font(38), 38, "#FFFFFF", anchor="mm")
 
-    # ৭. টেবিল কার্ড ও গ্রিড লাইন
+    # ৭. টেবিল কার্ড ও গ্রিড
     table_prog = ease_out_cubic(get_progress(frame_idx, 24, 36))
     table_top, table_bottom = 755, 1540
     row_h = (table_bottom - table_top) / 8.0
@@ -259,13 +258,12 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
             ry = int(table_top + r * row_h)
             draw.line([(85, ry), (W - 85, ry)], fill=(226, 232, 240, t_alpha), width=1)
 
-    # 🌟 ৮. পদের সারিগুলোর ক্যাসকেড অ্যানিমেশন (Staggered Row-by-Row Entry)
+    # ৮. পদের সারিগুলোর ক্যাসকেড এন্ট্রি (ডিপ ব্ল্যাক #000000)
     p_name_font = get_table_font(34)
     p_vac_font = get_table_font(40)
     p_qual_font = get_table_font(30)
 
     for i in range(8):
-        # প্রতিটি সারি ৩ ফ্রেম পর পর স্লাইড করে ঢুকবে
         row_start_f = 26 + i * 3
         row_end_f = row_start_f + 8
         r_prog = ease_out_cubic(get_progress(frame_idx, row_start_f, row_end_f))
@@ -297,7 +295,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
             # কলাম ২: পদ সংখ্যা
             draw_mixed_text(draw, 590, cy, p_vac, p_vac_font, 40, "#000000", anchor="mm")
 
-            # কলাম ৩: শিক্ষাগত যোগ্যতা
+            # কলাম ৩: যোগ্যতা
             qual_lines = wrap_mixed_text(draw, p_qual, p_qual_font, 30, max_width=300)
             if len(qual_lines) == 1:
                 draw_mixed_text(draw, 825, cy, qual_lines[0], p_qual_font, 30, "#000000", anchor="mm")
@@ -307,7 +305,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
                     draw_mixed_text(draw, 825, qy, ql, p_qual_font, 26, "#000000", anchor="mm")
                     qy += 34
 
-    # ৯. নিচে সবুজ WhatsApp কন্টাক্ট বার (Slide Up from Bottom with Spring Bounce)
+    # ৯. নিচে WhatsApp কন্টাক্ট বার
     wa_prog = ease_out_back(get_progress(frame_idx, 44, 58))
     if wa_prog > 0:
         wa_y_offset = int((1.0 - wa_prog) * 60)
@@ -319,18 +317,40 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_
 
     return overlay
 
-# 🌟 সম্পূর্ণ অ্যানিমেশন ফ্রেম প্যাক তৈরি করে রিটার্ন করে
+# 🌟 static/স্থির স্লাইড তৈরি (prepare_tiktok_slides)
+def create_tiktok_overlay_slide(job_data, slide_posts):
+    return render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_anim_frames=60)
+
+# 🌟 run_on_github.py এবং video_engine-এর জন্য prepare_tiktok_slides নিশ্চিতকরণ
+def prepare_tiktok_slides(job_data, output_prefix="slide"):
+    posts = job_data.get("posts", [])
+    out_paths = []
+
+    if len(posts) > 8:
+        for idx, chunk_start in enumerate(range(0, len(posts), 8), start=1):
+            chunk = posts[chunk_start : chunk_start + 8]
+            s = create_tiktok_overlay_slide(job_data, chunk)
+            p = f"{output_prefix}_{idx}.png"
+            s.save(p, "PNG")
+            out_paths.append(p)
+    else:
+        s = create_tiktok_overlay_slide(job_data, posts)
+        p = f"{output_prefix}_1.png"
+        s.save(p, "PNG")
+        out_paths.append(p)
+
+    return out_paths
+
+# 🌟 ভিডিও অ্যানিমেশন ফ্রেম প্যাক তৈরি
 def generate_tiktok_animated_overlay_frames(job_data, temp_frames_dir, num_frames=60, fps=24):
     os.makedirs(temp_frames_dir, exist_ok=True)
     posts = job_data.get("posts", [])
     slide_posts = posts[:8]
 
-    # ৬০টি মোশন ফ্রেম রেন্ডার করা (২.৫ সেকেন্ডের ইন্ট্রো মোশন)
     for f in range(num_frames):
         img_frame = render_motion_graphic_frame(job_data, slide_posts, frame_idx=f, total_anim_frames=num_frames)
         img_frame.save(os.path.join(temp_frames_dir, f"overlay_{f:04d}.png"), "PNG")
 
-    # বাকি সময়ের জন্য স্থির ফাইনাল ফ্রেম
     final_frame = render_motion_graphic_frame(job_data, slide_posts, frame_idx=num_frames, total_anim_frames=num_frames)
     final_path = os.path.join(temp_frames_dir, "hold_frame.png")
     final_frame.save(final_path, "PNG")
