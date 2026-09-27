@@ -48,7 +48,7 @@ def find_random_background_video():
 
     if video_files:
         chosen = random.choice(video_files)
-        print(f"  [🎬 Motion Background Video Selected] '{chosen}'")
+        print(f"  [🎬 Motion Background Selected] '{chosen}'")
         return chosen
     return None
 
@@ -57,68 +57,64 @@ def find_front_overlay_file():
         if os.path.exists(f): return f
     return None
 
-# 🌟 মোশন গ্রাফিক্স টেক্সট অ্যানিমেশনসহ TikTok ভিডিও রেন্ডারার
+# 🌟 সম্পূর্ণ প্রোগ্রাম্যাটিক মোশন গ্রাফিক্স TikTok ভিডিও রেন্ডারার
 def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
-    print(f"  [~] Rendering Animated Motion Graphics TikTok Video: '{output_path}'")
+    print(f"  [~] Rendering Kinetic Motion Graphics TikTok Video: '{output_path}'")
     if not os.path.exists(audio_path): return False
 
-    from tiktok_designer import generate_tiktok_animated_overlay_frames
+    from tiktok_designer import generate_tiktok_animated_overlay_frames, prepare_tiktok_slides
 
     audio_duration = get_audio_duration(audio_path)
+    total_frames = int(audio_duration * fps)
+
     bg_video = find_random_background_video()
+    temp_anim_dir = f"_tmp_kinetic_{random.randint(100000, 999999)}"
 
-    # অ্যানিমেশন ফ্রেম জেনারেট (২.৫ সেকেন্ড = ৬০ ফ্রেম)
-    temp_anim_dir = f"_tmp_motion_anim_{random.randint(100000, 999999)}"
-    hold_frame_path = generate_tiktok_animated_overlay_frames(job_data, temp_anim_dir, num_frames=60, fps=fps)
+    # সম্পূর্ণ ভিডিওর জন্য ইন-আউট অ্যানিমেটেড ফ্রেম তৈরি করা হচ্ছে
+    generate_tiktok_animated_overlay_frames(job_data, temp_anim_dir, total_frames=total_frames, fps=fps)
 
-    # ব্যাকগ্রাউন্ড ভিডিও না থাকলে সাধারণ মোডে ফলব্যাক
     if not bg_video or not os.path.exists(bg_video):
         print("  ⚠️ No motion background videos found in 'Backgrounds/'. Falling back...")
-        res = render_vertical_video([hold_frame_path], audio_path, output_path, fps)
+        static_slides = prepare_tiktok_slides(job_data, "fallback")
+        res = render_vertical_video(static_slides, audio_path, output_path, fps)
         shutil.rmtree(temp_anim_dir, ignore_errors=True)
         return res
 
     w, h, vid_dur = get_video_properties(bg_video)
 
-    # র্যান্ডম স্নাইপেট কাটা (অডিওর দৈর্ঘ্য অনুযায়ী)
+    # র্যান্ডম স্নাইপেট কাটা
     if vid_dur > audio_duration:
         max_start = max(0.0, vid_dur - audio_duration - 1.0)
         start_time = round(random.uniform(0.0, max_start), 2)
     else:
         start_time = 0.0
 
-    print(f"  [✂️ Video Snippet] Cutting from {start_time}s to {round(start_time + audio_duration, 2)}s")
+    print(f"  [✂️ Video Snippet] Cutting from {start_time}s (Duration: {round(audio_duration, 1)}s)")
 
-    # ১৬:৯ হলে ৯০ ডিগ্রি রোটেট করে ৯:১৬ পোর্ট্রেট (১০৮০x১৯২০) করা
+    # ১৬:৯ ল্যান্ডস্কেপ হলে ৯০ ডিগ্রি রোটেট করে ৯:১৬ পোর্ট্রেট (১০৮০x১৯২০) করা
     if w > h:
         print("  [🔄 Auto-Rotate] 16:9 Landscape Video detected. Rotating 90° to 9:16 Portrait...")
         video_filter = "transpose=1,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
     else:
         video_filter = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
 
-    # ইনপুটসমূহ
     inputs = [
         "-ss", str(start_time), "-t", str(audio_duration), "-i", bg_video,
         "-i", audio_path,
-        "-framerate", str(fps), "-i", os.path.join(temp_anim_dir, "overlay_%04d.png"),
-        "-loop", "1", "-t", str(audio_duration), "-i", hold_frame_path
+        "-framerate", str(fps), "-i", os.path.join(temp_anim_dir, "overlay_%04d.png")
     ]
 
-    # Front.png হ্যান্ডলিং (নির্দিষ্ট ধীরগতি ও র্যান্ডম স্টার্টিং পজিশন)
     front_file = find_front_overlay_file()
     has_front = front_file and os.path.exists(front_file)
     if has_front:
         inputs.extend(["-loop", "1", "-t", str(audio_duration), "-i", front_file])
 
     filter_complex = [video_filter]
-
-    # ইন্ট্রো অ্যানিমেশন (0 to 2.5s) এবং পরে স্ট্যাটিক হোল্ড ফ্রেম (2.5s to end)
-    filter_complex.append("[bg][2:v]overlay=0:0:enable='lt(t,2.5)'[v_anim]")
-    filter_complex.append("[v_anim][3:v]overlay=0:0:enable='gte(t,2.5)'[v_base]")
+    filter_complex.append("[bg][2:v]overlay=0:0[v_base]")
     last_v = "[v_base]"
 
     if has_front:
-        front_idx = 4
+        front_idx = 3
         speed_x = random.choice([35, 42, -35, -42])
         speed_y = random.choice([28, 35, -28, -35])
         start_x = random.randint(50, 700)
@@ -153,7 +149,7 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
     except Exception as e:
-        print(f"  ❌ [FFmpeg Motion Video Error]: {e}")
+        print(f"  ❌ [FFmpeg Error]: {e}")
         success = False
 
     shutil.rmtree(temp_anim_dir, ignore_errors=True)
