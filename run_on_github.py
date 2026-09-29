@@ -12,7 +12,8 @@ from telethon.sessions import StringSession
 from config_manager import (
     CONFIG_FILE, MEMORY_FILE, HEADERS,
     load_json, save_json, get_credential,
-    clean_text, clean_telegram_id, sanitize_filename
+    clean_text, clean_telegram_id, sanitize_filename,
+    check_if_offline_application
 )
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
@@ -24,7 +25,7 @@ from uploader_service import (
     post_multi_photo_to_facebook, post_reel_to_facebook,
     post_video_to_facebook, upload_video_to_youtube,
     upload_video_to_tiktok_buffer, upload_video_via_rclone,
-    post_to_whatsapp_channel
+    post_to_whatsapp_channel, sync_background_videos_from_gdrive
 )
 
 def is_forbidden_title(title):
@@ -83,6 +84,9 @@ async def process_sync(config, memory):
     if not rules:
         print("[!] No sync rules found in automation_config.json")
         return memory
+
+    # 🌟 গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিওগুলো ডাউনলোড/সিঙ্ক করে নেওয়া
+    sync_background_videos_from_gdrive(config)
 
     tg_session = get_credential(config, "tg_session", "TG_SESSION")
     tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
@@ -160,7 +164,7 @@ async def process_sync(config, memory):
             if is_forbidden_title(article_title):
                 print(f"🚫 [FILTERED] Skipping '{article_title}' (Title contains NGO / Bank / চলমান).")
                 processed_set.add(entry_link)
-                memory["processed_articles"] = list(processed_set)[-200:]
+                memory["processed_articles"] = list(processed_set)[-300:]
                 save_json(MEMORY_FILE, memory)
                 continue
 
@@ -182,8 +186,38 @@ async def process_sync(config, memory):
                 except Exception: pass
 
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
-            voiceover_script = job_data.get("voiceover_script", "")
 
+            # 🌟 অফলাইন / ডাকযোগ / কুরিয়ার আবেদন যাচাই ফিল্টার
+            is_offline, offline_reason = check_if_offline_application(
+                article_text=web_text or raw_desc_clean,
+                raw_html=web_html,
+                job_data=job_data,
+                title=article_title
+            )
+
+            if is_offline:
+                print(f"\n🚫 [OFFLINE APPLICATION FILTER TRIGGERED] Skipping '{article_title}'")
+                print(f"   Reason: {offline_reason}")
+                print(f"   No video will be generated for offline/postal circular.")
+
+                for dp in downloaded_imgs:
+                    if os.path.exists(dp): os.remove(dp)
+
+                processed_set.add(entry_link)
+                memory["processed_articles"] = list(processed_set)[-300:]
+                if "skipped_offline_articles" not in memory:
+                    memory["skipped_offline_articles"] = []
+                memory["skipped_offline_articles"].append({
+                    "url": entry_link,
+                    "title": article_title,
+                    "reason": offline_reason
+                })
+                memory["skipped_offline_articles"] = memory["skipped_offline_articles"][-300:]
+                save_json(MEMORY_FILE, memory)
+                print(f"  💾 [SAVED TO MEMORY] Skipped link saved to '{MEMORY_FILE}'.")
+                continue
+
+            voiceover_script = job_data.get("voiceover_script", "")
             single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
             audio_ready = False
 
@@ -231,7 +265,7 @@ async def process_sync(config, memory):
                 print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
                 upload_video_to_youtube(yt1_client_id, yt1_client_secret, yt1_refresh_token, main_video_path, video_final_title, final_post_text)
 
-            # 🌟 ২ নম্বর ভিডিও (প্রিমিয়াম মিনিমালিস্টিক মোশন গ্রাফিক্স TikTok ও Drive ভিডিও)
+            # 🌟 ২ নম্বর ভিডিও (প্রিমিয়াম মোশন গ্রাফিক্স TikTok ও Drive ভিডিও)
             if audio_ready and os.path.exists(single_audio_path):
                 print("  [🎬 Kinetic Motion Graphics] Rendering Programmatic Video for TikTok...")
                 tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
@@ -268,7 +302,7 @@ async def process_sync(config, memory):
                 if os.path.exists(dp): os.remove(dp)
 
             processed_set.add(entry_link)
-            memory["processed_articles"] = list(processed_set)[-200:]
+            memory["processed_articles"] = list(processed_set)[-300:]
             save_json(MEMORY_FILE, memory)
             print(f"  💾 [INSTANT MEMORY SAVED] '{article_title[:40]}' saved to {MEMORY_FILE}.")
 
