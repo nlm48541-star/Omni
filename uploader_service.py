@@ -7,7 +7,81 @@ import subprocess
 import requests
 from config_manager import HEADERS, get_credential
 
-# --- YOUTUBE SHORTS UPLOADER (Timeouts 3x increased: 90s init, 900s put) ---
+# 🌟 গুগল ড্রাইভ ফোল্ডার থেকে ব্যাকগ্রাউন্ড ভিডিও সিঙ্ক করার ফাংশন
+def sync_background_videos_from_gdrive(config=None):
+    if config is None: config = {}
+    
+    bg_folder_id = (
+        os.environ.get("GDRIVE_BG_FOLDER_ID", "").strip() or
+        os.environ.get("BG_FOLDER_ID", "").strip() or
+        get_credential(config, "gdrive_bg_folder_id", "GDRIVE_BG_FOLDER_ID") or
+        get_credential(config, "bg_folder_id", "BG_FOLDER_ID")
+    )
+
+    os.makedirs("Backgrounds", exist_ok=True)
+    existing_videos = [f for f in os.listdir("Backgrounds") if f.lower().endswith(('.mp4', '.mov', '.mkv', '.webm'))]
+    if len(existing_videos) >= 2:
+        print(f"  📁 [Backgrounds] Found {len(existing_videos)} existing background video(s) locally.")
+        return True
+
+    if not bg_folder_id:
+        print("  ℹ️ [Backgrounds] 'GDRIVE_BG_FOLDER_ID' not provided in Secrets. Local/Dynamic backgrounds will be used.")
+        return False
+
+    print(f"  📥 [Google Drive] Fetching background videos from Folder ID: '{bg_folder_id}'...")
+
+    # Rclone ব্যবহার করে ডাউনলোড
+    rclone_conf_str = get_credential(config, "rclone_conf", "RCLONE_CONF")
+    if rclone_conf_str:
+        conf_path = "_tmp_rclone_bg.conf"
+        try:
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(rclone_conf_str.strip())
+            match = re.search(r'\[(.*?)\]', rclone_conf_str)
+            remote_name = match.group(1).strip() if match else "gdrive"
+            dest_spec = f"{remote_name}:{bg_folder_id}"
+
+            cmd = [
+                "rclone", "--config", conf_path, "copy", dest_spec, "Backgrounds/",
+                "--include", "*.mp4", "--include", "*.MP4",
+                "--include", "*.mov", "--include", "*.MOV",
+                "--include", "*.mkv", "--include", "*.webm",
+                "--max-files", "5"
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0:
+                downloaded = [f for f in os.listdir("Backgrounds") if f.lower().endswith(('.mp4', '.mov', '.mkv', '.webm'))]
+                if downloaded:
+                    print(f"  ✅ [Rclone] Successfully downloaded {len(downloaded)} background video(s) from Google Drive.")
+                    return True
+        except Exception as e:
+            print(f"  ⚠️ Rclone sync note: {e}")
+        finally:
+            if os.path.exists(conf_path):
+                os.remove(conf_path)
+
+    # পাবলিক ড্রাইভ লিঙ্ক/ফোল্ডার হলে সরাসরি ডাউনলোড
+    try:
+        url = f"https://drive.google.com/embeddedfolderview?id={bg_folder_id}#grid"
+        r = requests.get(url, timeout=30)
+        if r.status_code == 200:
+            file_ids = re.findall(r'https://drive\.google\.com/file/d/([a-zA-Z0-9_-]+)', r.text)
+            for idx, fid in enumerate(set(file_ids)[:3]):
+                out_path = os.path.join("Backgrounds", f"gdrive_bg_{idx+1}.mp4")
+                if not os.path.exists(out_path):
+                    dl_url = f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t"
+                    resp = requests.get(dl_url, stream=True, timeout=120)
+                    if resp.status_code == 200 and 'video' in resp.headers.get('content-type', '').lower():
+                        with open(out_path, 'wb') as f:
+                            for chunk in resp.iter_content(chunk_size=1024*1024):
+                                if chunk: f.write(chunk)
+                        print(f"  ✅ Downloaded background video: {out_path}")
+    except Exception: pass
+
+    downloaded = [f for f in os.listdir("Backgrounds") if f.lower().endswith(('.mp4', '.mov', '.mkv', '.webm'))]
+    return len(downloaded) > 0
+
+# --- YOUTUBE SHORTS UPLOADER ---
 def get_youtube_access_token(client_id, client_secret, refresh_token):
     if not client_id or not client_secret or not refresh_token: return None
     url = "https://oauth2.googleapis.com/token"
@@ -21,7 +95,7 @@ def get_youtube_access_token(client_id, client_secret, refresh_token):
 def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path, title, description):
     access_token = get_youtube_access_token(client_id, client_secret, refresh_token)
     if not access_token:
-        print("  ❌ [YOUTUBE ERROR] Could not refresh Access Token. Check CLIENT_ID / REFRESH_TOKEN.")
+        print("  ❌ [YOUTUBE ERROR] Could not refresh Access Token.")
         return False
 
     try:
@@ -50,9 +124,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         }
 
         res = requests.post(init_url, headers=headers, json=metadata, timeout=90)
-        if res.status_code != 200:
-            print(f"  ❌ [YOUTUBE INIT ERROR] HTTP {res.status_code}: {res.text[:200]}")
-            return False
+        if res.status_code != 200: return False
 
         upload_url = res.headers.get("Location")
         if not upload_url: return False
@@ -63,12 +135,8 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         if up_res.status_code in [200, 201]:
             video_id = up_res.json().get("id")
             if video_id:
-                print(f"  ✅ [YOUTUBE SUCCESS] Video Published! Live Link: https://youtu.be/{video_id}")
+                print(f"  ✅ [YOUTUBE SUCCESS] Live Link: https://youtu.be/{video_id}")
                 return True
-        else:
-            print(f"  ❌ [YOUTUBE UPLOAD ERROR] HTTP {up_res.status_code}: {up_res.text[:200]}")
-            return False
-
     except Exception as e:
         print(f"  ❌ [YOUTUBE EXCEPTION] {e}")
         return False
@@ -91,7 +159,7 @@ def upload_video_via_rclone(file_path, rclone_conf_str, folder_id=""):
     finally:
         if os.path.exists(conf_path): os.remove(conf_path)
 
-# --- FACEBOOK HANDLERS (Timeouts 3x increased: 180s photo, 540s reel put) ---
+# --- FACEBOOK HANDLERS ---
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
@@ -149,7 +217,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
         return res.status_code == 200
     except Exception: return False
 
-# --- TIKTOK BUFFER HANDLER (Timeout: 135s host, 180s Buffer) ---
+# --- TIKTOK BUFFER HANDLER ---
 def upload_to_public_host(video_path):
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
     hosts = [
@@ -196,7 +264,7 @@ def upload_video_to_tiktok_buffer(video_path, description, config=None):
         except Exception: pass
     return False
 
-# --- WHATSAPP HANDLER (Timeout: 270s) ---
+# --- WHATSAPP HANDLER ---
 def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
     if not render_url: return False
     try:
