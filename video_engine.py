@@ -57,32 +57,50 @@ def find_front_overlay_file():
         if os.path.exists(f): return f
     return None
 
-# 🌟 TikTok-এর জন্য ৬টি এলিমেন্ট ও মোশন গ্রাফিক্স টেক্সট দিয়ে ভিডিও রেন্ডারার
+# 🌟 TikTok-এর জন্য ৬টি এলিমেন্ট ও মোশন গ্রাফিক্স রেন্ডারার
 def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
     print(f"  [~] Rendering Animated TikTok Video (Elements Overlay): '{output_path}'")
     if not os.path.exists(audio_path): return False
 
-    from tiktok_designer import generate_tiktok_animated_overlay_frames, prepare_tiktok_slides
+    from tiktok_designer import generate_tiktok_animated_overlay_frames
 
     audio_duration = get_audio_duration(audio_path)
     total_frames = int(audio_duration * fps)
 
-    bg_video = find_random_background_video()
     temp_anim_dir = f"_tmp_elements_anim_{random.randint(100000, 999999)}"
-
-    # সম্পূর্ণ ভিডিওর জন্য ইন-আউট অ্যানিমেশন ফ্রেম জেনারেট করা
     generate_tiktok_animated_overlay_frames(job_data, temp_anim_dir, total_frames=total_frames, fps=fps)
 
+    bg_video = find_random_background_video()
+    temp_dyn_bg = None
+
+    # 🌟 ব্যাকগ্রাউন্ড ভিডিও না থাকলে কখনো কালো স্ক্রিন হবে না; ডায়নামিক মোশন ব্যাকগ্রাউন্ড তৈরি হবে
     if not bg_video or not os.path.exists(bg_video):
-        print("  ⚠️ No background video in 'Backgrounds/'. Using fallback slideshow...")
-        static_slides = prepare_tiktok_slides(job_data, "fallback")
-        res = render_vertical_video(static_slides, audio_path, output_path, fps)
-        shutil.rmtree(temp_anim_dir, ignore_errors=True)
-        return res
+        print("  ⚠️ No background video in 'Backgrounds/'. Generating dynamic animated motion background...")
+        temp_dyn_bg = f"_tmp_dyn_bg_{random.randint(100000, 999999)}.mp4"
+        bg_cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", f"gradients=s=1080x1920:r={fps}:c0=0x060d1b:c1=0x0f2b46:c2=0x1e1e38:c3=0x0a192f:duration={math.ceil(audio_duration)+2}:speed=0.01",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            temp_dyn_bg
+        ]
+        try:
+            subprocess.run(bg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            if os.path.exists(temp_dyn_bg) and os.path.getsize(temp_dyn_bg) > 1000:
+                bg_video = temp_dyn_bg
+        except Exception:
+            pass
+
+    if not bg_video or not os.path.exists(bg_video):
+        temp_dyn_bg = f"_tmp_dyn_bg_{random.randint(100000, 999999)}.mp4"
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x0b132b:s=1080x1920:r={fps}:d={math.ceil(audio_duration)+2}",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", temp_dyn_bg
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        bg_video = temp_dyn_bg
 
     w, h, vid_dur = get_video_properties(bg_video)
 
-    # র্যান্ডম স্নাইপেট কাটা
     if vid_dur > audio_duration:
         max_start = max(0.0, vid_dur - audio_duration - 1.0)
         start_time = round(random.uniform(0.0, max_start), 2)
@@ -91,45 +109,22 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
 
     print(f"  [✂️ Video Snippet] Cutting from {start_time}s (Duration: {round(audio_duration, 1)}s)")
 
-    # ১৬:৯ হলে ৯০ ডিগ্রি রোটেট করে ৯:১৬ পোর্ট্রেট (১০৮০x১৯২০) করা
     if w > h:
-        print("  [🔄 Auto-Rotate] 16:9 Landscape Video detected. Rotating 90° to 9:16 Portrait...")
         video_filter = "transpose=1,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
     else:
         video_filter = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
 
+    # 🌟 টিকটক ভিডিওতে front.png যুক্ত করা হয়নি (শুধুমাত্র মোশন ফ্রেম ওভারলে হবে)
     inputs = [
         "-ss", str(start_time), "-t", str(audio_duration), "-i", bg_video,
         "-i", audio_path,
         "-framerate", str(fps), "-i", os.path.join(temp_anim_dir, "overlay_%04d.png")
     ]
 
-    front_file = find_front_overlay_file()
-    has_front = front_file and os.path.exists(front_file)
-    if has_front:
-        inputs.extend(["-loop", "1", "-t", str(audio_duration), "-i", front_file])
-
-    filter_complex = [video_filter]
-    filter_complex.append("[bg][2:v]overlay=0:0[v_base]")
-    last_v = "[v_base]"
-
-    if has_front:
-        front_idx = 3
-        speed_x = random.choice([35, 42, -35, -42])
-        speed_y = random.choice([28, 35, -28, -35])
-        start_x = random.randint(50, 700)
-        start_y = random.randint(100, 1200)
-
-        max_fx = 1080 - 290
-        max_fy = 1920 - 160
-        x_expr = f"abs(mod({start_x}+({speed_x}*t),2*{max_fx})-{max_fx})"
-        y_expr = f"abs(mod({start_y}+({speed_y}*t),2*{max_fy})-{max_fy})"
-
-        filter_complex.append(f"[{front_idx}:v]scale=290:-1[front_scaled]")
-        filter_complex.append(f"{last_v}[front_scaled]overlay=x='{x_expr}':y='{y_expr}'[final_v]")
-        final_video_label = "[final_v]"
-    else:
-        final_video_label = last_v
+    filter_complex = [
+        video_filter,
+        "[bg][2:v]overlay=0:0[final_v]"
+    ]
 
     if os.path.exists(output_path): os.remove(output_path)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -138,7 +133,7 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
         "ffmpeg", "-y",
         *inputs,
         "-filter_complex", ";".join(filter_complex),
-        "-map", final_video_label,
+        "-map", "[final_v]",
         "-map", "1:a",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
@@ -153,9 +148,13 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
         success = False
 
     shutil.rmtree(temp_anim_dir, ignore_errors=True)
+    if temp_dyn_bg and os.path.exists(temp_dyn_bg):
+        try: os.remove(temp_dyn_bg)
+        except Exception: pass
+
     return success
 
-# সাধারণ ফেসবুক/ইউটিউব ভিডিও রেন্ডারার
+# সাধারণ ফেসবুক/ইউটিউব ভিডিও রেন্ডারার (এখানে front.png যথারীতি থাকবে)
 def render_vertical_video(image_paths, audio_path, output_path, fps=24):
     if not image_paths or not os.path.exists(audio_path): return False
     valid_images = [p for p in image_paths if os.path.exists(p)]
