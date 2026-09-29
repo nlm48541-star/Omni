@@ -6,11 +6,11 @@ import base64
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
+from config_manager import detect_offline_application_rules
 
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
 GROQ_API = os.environ.get("GROQ_API", "").strip()
 
-# 🌟 আপনার নির্ধারিত অগ্রাধিকার ক্রম অনুযায়ী Ollama Cloud মডেল লিস্ট
 OLLAMA_MODELS = [
     "gemma4:31b",
     "gpt-oss:120b",
@@ -74,11 +74,9 @@ def remove_years(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 def sanitize_voiceover_script(script):
-    """অনাকাঙ্ক্ষিত বাক্য (যেমন: সম্পূর্ণ ভিডিও দেখুন, ওয়েবসাইটে ভিজিট করুন) স্বয়ংক্রিয়ভাবে মুছে ফেলে"""
     if not script: return ""
     text = str(script)
 
-    # অনাকাঙ্ক্ষিত বাক্যগুলো রিমুভ করা
     bad_patterns = [
         r'সম্পূর্ণ\s*ভিডিও(?:টি)?\s*(?:দেখুন|দেখার\s*জন্য\s*ধন্যবাদ|শেষ\s*পর্যন্ত\s*দেখুন)[^\.\!\n]*[\.\!\n]?',
         r'পুরো\s*ভিডিও(?:টি)?\s*(?:দেখুন|দেখার\s*জন্য\s*ধন্যবাদ)[^\.\!\n]*[\.\!\n]?',
@@ -91,8 +89,6 @@ def sanitize_voiceover_script(script):
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
     text = re.sub(r'\s+', ' ', text).strip()
-
-    # নিশ্চিত করা যে স্ক্রিপ্টটি হোয়াটসঅ্যাপে মেসেজ দেওয়ার আহ্বান দিয়েই শেষ হচ্ছে
     cta_sentence = "ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
     if not any(k in text for k in ["হোয়াটসঅ্যাপ", "হোয়াটসঅ্যাপ", "WhatsApp", "whatsapp"]):
         text = f"{text} {cta_sentence}"
@@ -148,8 +144,13 @@ def smart_fallback_data(title, article_text="", raw_html=""):
 
     fallback_script = f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
 
+    is_offline, off_reason = detect_offline_application_rules(article_text, raw_html, title)
+
     return {
         "org_name": org_candidate,
+        "is_online_application": not is_offline,
+        "application_method": "postal" if is_offline else "online",
+        "offline_reason": off_reason if is_offline else "",
         "headline": "নিয়োগ বিজ্ঞপ্তি",
         "start_date": st_d,
         "end_date": ed_d,
@@ -164,32 +165,41 @@ def generate_job_data_and_script(title, article_text, raw_html, image_paths, mem
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
 
     prompt = f"""You are a professional Bengali Job Circular Voiceover Scriptwriter and Data Extractor for Short Vertical Videos.
-Analyze the following circular details:
+Analyze the following circular details and attached circular images:
 
 Content:
 {full_content}
 
-CRITICAL RULES FOR "voiceover_script":
-1. Duration: A concise, highly engaging spoken Bengali script of around 120 to 150 words (under 1 minute for a Short/Reel video).
-2. OUTRO RULE (STRICT):
+CRITICAL RULES:
+1. APPLICATION METHOD ANALYSIS (STRICT):
+   - Carefully examine BOTH the article text AND the circular images to determine how candidates submit their application:
+   - "is_online_application": Set to TRUE if candidates can apply online (via website, online recruitment portal, teletalk, online form, email).
+   - Set "is_online_application" to FALSE if the application MUST be submitted offline via postal mail (ডাকযোগে), courier service (কুরিয়ার সার্ভিস), or physical in-person office submission (সরাসরি অফিসে জমা/হাতে হাতে পৌঁছাতে হবে), and there is NO online application system.
+   - "application_method": "online" | "postal" | "courier" | "in_person"
+   - "offline_reason": "" if online, or a brief explanation in Bengali if offline.
+
+2. Duration: A concise Bengali script of around 120 to 150 words (under 1 minute).
+3. OUTRO RULE:
    - DO NOT say "সম্পূর্ণ ভিডিওটি দেখুন" or "ভিডিওটি শেষ পর্যন্ত দেখার জন্য ধন্যবাদ".
    - DO NOT say "ওয়েবসাইটে ভিজিট করুন" or "অফিসিয়াল ওয়েবসাইটে গিয়ে আবেদন করুন".
    - DO NOT say "লাইক ও সাবস্ক্রাইব করুন".
-   - MUST END ONLY WITH THIS CALL-TO-ACTION: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে মেসেজ দিন।"
-3. NUMBERS & YEARS:
-   - Write all counts/dates strictly in Bengali words (e.g., "১৫০" ➔ "একশত পঞ্চাশ", "১২" ➔ "বারো", "৩ জুলাই" ➔ "তিন জুলাই").
-   - DO NOT recite phone number digits.
+   - MUST END ONLY WITH: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে মেসেজ দিন।"
+4. NUMBERS & YEARS:
+   - Write numbers strictly in Bengali words.
    - DO NOT mention any year (e.g. 2026/২০২৬).
 
-4. DATA EXTRACTION:
-   - "org_name": ONLY the official company/ministry/institution name (e.g. "মেঘনা পেট্রোলিয়াম লিমিটেড").
-   - "start_date": Exact start date with Bengali month, WITHOUT YEAR (e.g. "০১ জুলাই").
-   - "end_date": Exact deadline date with Bengali month, WITHOUT YEAR (e.g. "৩১ জুলাই").
-   - "posts": Array of actual post objects with "post_name", "vacancy" (in Bengali digits e.g. "০১"), and "qualification".
+5. DATA EXTRACTION:
+   - "org_name": ONLY the official company/ministry/institution name (e.g. "বাংলাদেশ টেক্সটাইল বিশ্ববিদ্যালয়").
+   - "start_date": Exact start date with Bengali month, WITHOUT YEAR (e.g. "৩০ সেপ্টেম্বর").
+   - "end_date": Exact deadline date with Bengali month, WITHOUT YEAR (e.g. "২৯ অক্টোবর").
+   - "posts": Array of actual post objects with "post_name", "vacancy" (Bengali digits e.g. "০১"), and "qualification".
 
 Return strictly valid JSON:
 {{
   "org_name": "...",
+  "is_online_application": true,
+  "application_method": "online",
+  "offline_reason": "",
   "start_date": "...",
   "end_date": "...",
   "posts": [
@@ -203,7 +213,6 @@ Return strictly valid JSON:
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
     ollama_endpoint = get_ollama_chat_endpoint()
 
-    # ১. Ollama Cloud
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -233,14 +242,13 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ২. Groq AI ব্যাকআপ
     if GROQ_API:
         headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
         for g_model in GROQ_MODELS:
             payload = {
                 "model": g_model,
                 "messages": [
-                    {"role": "system", "content": "You are a professional Bengali job circular voiceover writer. End strictly with WhatsApp CTA. No website or full video mentions."},
+                    {"role": "system", "content": "You are a professional Bengali job circular voiceover writer and circular analyst. Detect whether circular requires online application or offline postal/courier submission. End strictly with WhatsApp CTA. No website or full video mentions."},
                     {"role": "user", "content": prompt}
                 ],
                 "response_format": {"type": "json_object"},
