@@ -50,9 +50,10 @@ jobs:
           GROQ_API: ${{ secrets.GROQ_API }}
           ELEVENLABS_API_KEYS: ${{ secrets.ELEVENLABS_API_KEYS }}
           
-          # Rclone & Google Drive
+          # 🌟 Rclone & Google Drive Settings
           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          GDRIVE_BG_FOLDER_ID: ${{ secrets.GDRIVE_BG_FOLDER_ID }}
           SAVE_TO_GDRIVE: ${{ secrets.SAVE_TO_GDRIVE }}
           ENABLE_TIKTOK: ${{ secrets.ENABLE_TIKTOK }}
           USE_LOCAL_MUSIC: ${{ secrets.USE_LOCAL_MUSIC }}
