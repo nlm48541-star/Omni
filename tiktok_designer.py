@@ -95,11 +95,11 @@ def measure_mixed_text(draw, text, bn_font, font_size):
         if h > max_h: max_h = h
     return total_w, max_h
 
-# 🌟 কোনো কালো স্ট্রোক ছাড়া একদম পিওর সলিড কালারে টেক্সট রেন্ডার
+# 🌟 কোনো কালো স্ট্রোক ছাড়া শতভাগ পরিষ্কার ও সলিড কালারে টেক্সট ড্র
 def draw_mixed_text(draw, x, y, text, bn_font, font_size, fill_color, anchor="lm"):
     eng_font = get_english_bold_font(font_size)
     segments = split_text_by_script(text)
-    total_w, max_h = measure_mixed_text(draw, text, bn_font, font_size)
+    total_w, _ = measure_mixed_text(draw, text, bn_font, font_size)
 
     if anchor in ["mm", "center"]:
         cur_x = x - (total_w // 2)
@@ -148,6 +148,16 @@ def clean_org_name(org_name):
     clean = re.sub(r'202[0-9]|২০২[০-৯]', '', clean).strip(" -|,")
     return clean if len(clean) > 2 else org_name
 
+# 🌟 ৩টির বেশি শব্দ হলে সমান দুই লাইনে ভাগ করার নিখুঁত ফাংশন
+def split_title_words(text):
+    words = str(text).split()
+    if len(words) <= 3:
+        return [text]
+    mid = math.ceil(len(words) / 2.0)
+    line1 = " ".join(words[:mid])
+    line2 = " ".join(words[mid:])
+    return [line1, line2]
+
 def ease_out_cubic(t):
     t = max(0.0, min(1.0, t))
     return 1.0 - math.pow(1.0 - t, 3)
@@ -165,11 +175,12 @@ def get_progress(frame_num, start_f, end_f):
     if frame_num >= end_f: return 1.0
     return (frame_num - start_f) / float(end_f - start_f)
 
-def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frames=120, fps=24):
+def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frames=120, fps=24, slide_entry_prog=1.0, slide_exit_prog=0.0):
     W, H = 1080, 1920
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
+    # ভিডিওর শেষ ১.২ সেকেন্ডে সার্বিক আউটরো
     outro_frames = int(fps * 1.2)
     outro_start = max(115, total_frames - outro_frames)
     is_outro = frame_idx >= outro_start
@@ -184,7 +195,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
     if global_alpha <= 0:
         return overlay
 
-    # ১. emblem.png (ধীরে পপ-আপ: ফ্রেম ০ থেকে ২০)
+    # ১. emblem.png (ফ্রেম ০ থেকে ২০)
     emblem_img = find_element_image(["emblem", "input_file_5", "logo", "govt"])
     emblem_prog = ease_out_back(get_progress(frame_idx, 0, 20)) if not is_outro else (1.0 - exit_t)
     if emblem_img and emblem_prog > 0:
@@ -195,36 +206,34 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
             ey = 125 - (dim // 2) - exit_offset_y
             overlay.paste(scaled, (ex, ey), scaled)
 
-    # ২. প্রতিষ্ঠানের নাম (টাইটেল: ফ্রেম ১০ থেকে ৩২)
+    # 🌟 ২. প্রতিষ্ঠানের নাম (৩টির বেশি শব্দ হলে সমান ২ ভাগে ভাগ ও বড় ফন্ট)
     org_prog = ease_out_cubic(get_progress(frame_idx, 10, 32)) if not is_outro else (1.0 - exit_t)
     if org_prog > 0:
         org_name = clean_org_name(job_data.get("org_name", "নিয়োগ বিজ্ঞপ্তি"))
-        test_font = get_header_font(70)
-        test_lines = wrap_mixed_text(draw, org_name, test_font, 70, max_width=950)
+        title_lines = split_title_words(org_name)
         y_slide = int((1.0 - org_prog) * -35) - exit_offset_y
 
-        if len(test_lines) == 1:
-            draw_mixed_text(draw, W // 2, 245 + y_slide, test_lines[0], test_font, 70, "#FFFFFF", anchor="mm")
+        if len(title_lines) == 1:
+            org_font = get_header_font(76)
+            draw_mixed_text(draw, W // 2, 250 + y_slide, title_lines[0], org_font, 76, "#FFFFFF", anchor="mm")
         else:
-            org_fs = 54
-            org_font = get_header_font(org_fs)
-            org_lines = wrap_mixed_text(draw, org_name, org_font, org_fs, max_width=950)
-            oy = 220 + y_slide
-            for ol in org_lines[:2]:
-                draw_mixed_text(draw, W // 2, oy, ol, org_font, org_fs, "#FFFFFF", anchor="mm")
-                oy += 56
+            org_font = get_header_font(62)
+            oy = 222 + y_slide
+            for ol in title_lines:
+                draw_mixed_text(draw, W // 2, oy, ol, org_font, 62, "#FFFFFF", anchor="mm")
+                oy += 65
 
-    # ৩. headline_badge.png ("নিয়োগ বিজ্ঞপ্তি" ব্যানার: ফ্রেম ২০ থেকে ৪২)
+    # 🌟 ৩. headline_badge.png ("নিয়োগ বিজ্ঞপ্তি" ব্যানারটি আকারে একটু ছোট করা হয়েছে: ৬৪০px)
     badge_img = find_element_image(["headline_badge", "badge", "input_file_0"])
     badge_prog = ease_out_back(get_progress(frame_idx, 20, 42)) if not is_outro else (1.0 - exit_t)
     if badge_img and badge_prog > 0:
-        target_w = int(780 * badge_prog)
+        target_w = int(640 * badge_prog)
         aspect = badge_img.size[1] / float(badge_img.size[0])
         target_h = max(1, int(target_w * aspect))
         if target_w > 20 and target_h > 10:
             scaled_b = badge_img.resize((target_w, target_h), Image.LANCZOS)
             bx = (W - target_w) // 2
-            by = 405 - (target_h // 2) - exit_offset_y
+            by = 415 - (target_h // 2) - exit_offset_y
             overlay.paste(scaled_b, (bx, by), scaled_b)
 
     # ৪. আবেদন শুরু ও আবেদন শেষ বক্স (ফ্রেম ৩০ থেকে ৫২)
@@ -237,7 +246,7 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
         box_w = 460
         by_pos = 535 - exit_offset_y
 
-        # আবেদন শুরু (বাম বক্স)
+        # আবেদন শুরু
         if start_img:
             aspect_s = start_img.size[1] / float(start_img.size[0])
             box_h_s = int(box_w * aspect_s)
@@ -246,10 +255,9 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
             
         st_text = str(job_data.get("start_date", "চলমান"))
         st_fs = 52 if len(st_text) <= 15 else 44
-        # 🌟 বক্সের নিচের অংশের ঠিক মাঝ বরাবর পজিশন: by_pos + 138
         draw_mixed_text(draw, 295 - slide_offset, by_pos + 138, st_text, get_dates_font(st_fs), st_fs, "#FFFFFF", anchor="mm")
 
-        # আবেদন শেষ (ডান বক্স)
+        # আবেদন শেষ
         if end_img:
             aspect_e = end_img.size[1] / float(end_img.size[0])
             box_h_e = int(box_w * aspect_e)
@@ -258,10 +266,9 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
             
         ed_text = str(job_data.get("end_date", "শীঘ্রই শেষ হবে"))
         ed_fs = 52 if len(ed_text) <= 15 else 44
-        # 🌟 বক্সের নিচের অংশের ঠিক মাঝ বরাবর পজিশন: by_pos + 138
         draw_mixed_text(draw, 785 + slide_offset, by_pos + 138, ed_text, get_dates_font(ed_fs), ed_fs, "#FFFFFF", anchor="mm")
 
-    # 🌟 ৫. table_header.png (স্বাভাবিক অনুপাত ঠিক রেখে স্কেলিং - কখনো চ্যাপ্টা হবে না: ফ্রেম ৪০ থেকে ৬২)
+    # ৫. table_header.png (লাল রিবন - স্বাভাবিক অনুপাত)
     th_img = find_element_image(["table_header", "table", "header", "input_file_1"])
     th_prog = ease_out_back(get_progress(frame_idx, 40, 62)) if not is_outro else (1.0 - exit_t)
     if th_img and th_prog > 0:
@@ -274,20 +281,23 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
             ty = 832 - (th // 2) - exit_offset_y
             overlay.paste(scaled_th, (tx, ty), scaled_th)
 
-    # 🌟 ৬. পদের তালিকা (ধীরে ধীরে একটির পর একটি স্লাইড হয়ে আসবে: ফ্রেম ৫০ থেকে ১০০)
-    p_name_font = get_table_font(34)
-    p_vac_font = get_table_font(38)
-    p_qual_font = get_table_font(28)
+    # 🌟 ৬. পদের তালিকা (প্রতি স্লাইডে সর্বোচ্চ ৫টি পদ, আরও প্রশস্ত ও স্পেসিয়াস রেন্ডারিং)
+    p_name_font = get_table_font(36)
+    p_vac_font = get_table_font(42)
+    p_qual_font = get_table_font(30)
 
-    row_top_y = 940 - exit_offset_y
-    row_height = 88
+    row_top_y = 945 - exit_offset_y
+    row_height = 120  # ৫টি পদের জন্য ১২০px চমৎকার উচ্চতা
 
-    for i in range(8):
-        row_start_f = 50 + (i * 6)
-        row_end_f = row_start_f + 14
-        r_prog = ease_out_cubic(get_progress(frame_idx, row_start_f, row_end_f)) if not is_outro else (1.0 - exit_t)
+    # স্লাইড ট্রানজিশন ফেড ও স্লাইড অফসেট
+    slide_alpha_mult = 1.0 - ease_in_cubic(slide_exit_prog)
+    slide_exit_shift_x = int(ease_in_cubic(slide_exit_prog) * -40)
 
-        if r_prog > 0 and i < len(slide_posts):
+    for i in range(min(5, len(slide_posts))):
+        row_enter_f = 0.0 + (i * 0.15)
+        r_prog = ease_out_cubic(max(0.0, min(1.0, (slide_entry_prog - row_enter_f) / 0.4))) if not is_outro else (1.0 - exit_t)
+
+        if r_prog > 0 and slide_alpha_mult > 0:
             p = slide_posts[i]
             p_name = p.get("post_name", "")
             p_vac = str(p.get("vacancy", "০১"))
@@ -298,33 +308,33 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
                           "১":"০১","২":"০২","৩":"০৩","৪":"০৪","৫":"০৫","৬":"০৬","৭":"০৭","৮":"০৮","৯":"০৯"}
                 p_vac = bn_map.get(p_vac, p_vac)
 
-            cy = int(row_top_y + i * row_height + (row_height / 2))
-            rx_offset = int((1.0 - r_prog) * -45)
+            cy = int(row_top_y + (i * row_height) + (row_height / 2))
+            rx_offset = int((1.0 - r_prog) * -45) + slide_exit_shift_x
 
             # কলাম ১: পদের নাম (Left X = 80)
-            name_lines = wrap_mixed_text(draw, p_name, p_name_font, 34, max_width=410)
+            name_lines = wrap_mixed_text(draw, p_name, p_name_font, 36, max_width=410)
             if len(name_lines) == 1:
-                draw_mixed_text(draw, 80 + rx_offset, cy, name_lines[0], p_name_font, 34, "#FFFFFF", anchor="lm")
+                draw_mixed_text(draw, 80 + rx_offset, cy, name_lines[0], p_name_font, 36, "#FFFFFF", anchor="lm")
             else:
-                ny = cy - 16
+                ny = cy - 20
                 for nl in name_lines[:2]:
-                    draw_mixed_text(draw, 80 + rx_offset, ny, nl, p_name_font, 30, "#FFFFFF", anchor="lm")
-                    ny += 32
+                    draw_mixed_text(draw, 80 + rx_offset, ny, nl, p_name_font, 32, "#FFFFFF", anchor="lm")
+                    ny += 38
 
             # 🌟 কলাম ২: পদ সংখ্যা ("সংখ্যা" লেখার ঠিক মাঝ বরাবর: Center X = 550)
-            draw_mixed_text(draw, 550, cy, p_vac, p_vac_font, 38, "#FDE047", anchor="mm")
+            draw_mixed_text(draw, 550 + rx_offset, cy, p_vac, p_vac_font, 42, "#FDE047", anchor="mm")
 
             # 🌟 কলাম ৩: শিক্ষাগত যোগ্যতা ("যোগ্যতা" লেখার শুরু বরাবর: Left X = 740)
-            qual_lines = wrap_mixed_text(draw, p_qual, p_qual_font, 28, max_width=275)
+            qual_lines = wrap_mixed_text(draw, p_qual, p_qual_font, 30, max_width=280)
             if len(qual_lines) == 1:
-                draw_mixed_text(draw, 740, cy, qual_lines[0], p_qual_font, 28, "#FFFFFF", anchor="lm")
+                draw_mixed_text(draw, 740 + rx_offset, cy, qual_lines[0], p_qual_font, 30, "#FFFFFF", anchor="lm")
             else:
-                qy = cy - 15
+                qy = cy - 18
                 for ql in qual_lines[:2]:
-                    draw_mixed_text(draw, 740, qy, ql, p_qual_font, 24, "#FFFFFF", anchor="lm")
-                    qy += 30
+                    draw_mixed_text(draw, 740 + rx_offset, qy, ql, p_qual_font, 26, "#FFFFFF", anchor="lm")
+                    qy += 34
 
-    # 🌟 ৭. whatsapp_bar.png (স্বাভাবিক অনুপাত ঠিক রেখে স্কেলিং - কখনো চ্যাপ্টা হবে না: ফ্রেম ৮৫ থেকে ১০৮)
+    # ৭. whatsapp_bar.png (ফ্রেম ৮৫ থেকে ১০৮)
     wa_img = find_element_image(["whatsapp_bar", "whatsapp", "wa", "input_file_2"])
     wa_prog = ease_out_back(get_progress(frame_idx, 85, 108)) if not is_outro else (1.0 - exit_t)
     if wa_img and wa_prog > 0:
@@ -338,47 +348,68 @@ def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frame
 
     return overlay
 
-def prepare_tiktok_slides(job_data, output_prefix="slide"):
-    posts = job_data.get("posts", [])
-    out_paths = []
-    if len(posts) > 8:
-        for idx, chunk_start in enumerate(range(0, len(posts), 8), start=1):
-            chunk = posts[chunk_start : chunk_start + 8]
-            frame = render_motion_graphic_frame(job_data, chunk, frame_idx=110, total_frames=150)
-            p = f"{output_prefix}_{idx}.png"
-            frame.save(p, "PNG")
-            out_paths.append(p)
-    else:
-        frame = render_motion_graphic_frame(job_data, posts, frame_idx=110, total_frames=150)
-        p = f"{output_prefix}_1.png"
-        frame.save(p, "PNG")
-        out_paths.append(p)
-    return out_paths
-
+# 🌟 ৫টি ৫টি করে পদের নাম স্লাইড করার জন্য ফ্রেম জেনারেটর
 def generate_tiktok_animated_overlay_frames(job_data, temp_frames_dir, total_frames=120, fps=24):
     os.makedirs(temp_frames_dir, exist_ok=True)
     posts = job_data.get("posts", [])
-    slide_posts = posts[:8]
-
+    
+    PAGE_SIZE = 5
+    chunks = [posts[i:i + PAGE_SIZE] for i in range(0, len(posts), PAGE_SIZE)]
+    if not chunks:
+        chunks = [[]]
+        
+    num_slides = len(chunks)
+    frames_per_slide = total_frames / float(num_slides)
     outro_frames = int(fps * 1.2)
-    intro_settle_f = 110  # এনিমেশন সম্পূর্ণ সেটেল হওয়ার ফ্রেম
-    outro_start = max(intro_settle_f + 5, total_frames - outro_frames)
-    static_frame_path = None
+    outro_start = max(115, total_frames - outro_frames)
 
     for f in range(total_frames):
         target_path = os.path.join(temp_frames_dir, f"overlay_{f:04d}.png")
-        if f <= intro_settle_f:
-            img_frame = render_motion_graphic_frame(job_data, slide_posts, frame_idx=f, total_frames=total_frames, fps=fps)
-            img_frame.save(target_path, "PNG")
-            if f == intro_settle_f:
-                static_frame_path = target_path
-        elif f < outro_start:
-            if static_frame_path and os.path.exists(static_frame_path):
-                shutil.copyfile(static_frame_path, target_path)
-            else:
-                img_frame = render_motion_graphic_frame(job_data, slide_posts, frame_idx=intro_settle_f, total_frames=total_frames, fps=fps)
-                img_frame.save(target_path, "PNG")
-                static_frame_path = target_path
+        
+        # বর্তমান স্লাইড নির্ধারণ
+        slide_idx = min(int(f / frames_per_slide), num_slides - 1)
+        current_slide_posts = chunks[slide_idx]
+        
+        slide_start_f = slide_idx * frames_per_slide
+        local_f = f - slide_start_f
+        slide_len = frames_per_slide
+        
+        # স্লাইড এন্ট্রি প্রগ্রেস
+        if slide_idx == 0:
+            # প্রথম স্লাইড: হেডার এলিমেন্টগুলো আসার পর (ফ্রেম ৫০ থেকে ১০০)
+            s_entry = max(0.0, min(1.0, (f - 50) / 45.0))
         else:
-            img_frame = render_motion_graphic_frame(job_data, slide_posts, frame_idx=f, total_frames=total_frames, fps=fps)
-            img_frame.save(target_path, "PNG")
+            # পরবর্তী স্লাইড: নতুন স্লাইড আসার সাথে সাথে
+            s_entry = max(0.0, min(1.0, local_f / 25.0))
+            
+        # স্লাইড এক্সিট প্রগ্রেস (শেষ ১৬ ফ্রেমে ট্রানজিশন)
+        transition_f = 16.0
+        if slide_idx < num_slides - 1 and local_f >= (slide_len - transition_f):
+            s_exit = max(0.0, min(1.0, (local_f - (slide_len - transition_f)) / transition_f))
+        else:
+            s_exit = 0.0
+
+        img_frame = render_motion_graphic_frame(
+            job_data=job_data,
+            slide_posts=current_slide_posts,
+            frame_idx=f,
+            total_frames=total_frames,
+            fps=fps,
+            slide_entry_prog=s_entry,
+            slide_exit_prog=s_exit
+        )
+        img_frame.save(target_path, "PNG")
+
+def prepare_tiktok_slides(job_data, output_prefix="slide"):
+    posts = job_data.get("posts", [])
+    out_paths = []
+    PAGE_SIZE = 5
+    chunks = [posts[i:i + PAGE_SIZE] for i in range(0, len(posts), PAGE_SIZE)]
+    if not chunks: chunks = [[]]
+    
+    for idx, chunk in enumerate(chunks, start=1):
+        frame = render_motion_graphic_frame(job_data, chunk, frame_idx=110, total_frames=150, slide_entry_prog=1.0)
+        p = f"{output_prefix}_{idx}.png"
+        frame.save(p, "PNG")
+        out_paths.append(p)
+    return out_paths
