@@ -37,26 +37,18 @@ def get_credential(config, key, env_var):
     return val
 
 def strip_html(text):
-    """সব ধরনের এইচটিএমএল ট্যাগ ও কাঁচা কোড পরিষ্কার করে"""
     if not text: return ""
-    # প্যারাগ্রাফ ও লাইন ব্রেক হ্যান্ডেল করা
     text = re.sub(r'<br\s*/?>', '\n', str(text), flags=re.IGNORECASE)
     text = re.sub(r'</p>', '\n\n', str(text), flags=re.IGNORECASE)
-    # সব এইচটিএমএল ট্যাগ মুছে ফেলা
     text = re.sub(r'<[^>]+>', '', text)
-    # HTML Entity যেমন &nbsp;, &amp; ডিকোড করা
     text = html.unescape(text)
     return text
 
 def clean_text(text, keep_hashtags=False):
-    """টেক্সটকে শতভাগ পড়ার উপযোগী ও পরিচ্ছন্ন করে"""
     if not text: return ""
     text = strip_html(text)
-    
-    # বিস্তারিত পড়ুন বা read-more সংক্রান্ত আবর্জনা বাদ দেওয়া
     text = re.sub(r'\[\.\.\.\]|\.\.\.', '', text)
     text = re.sub(r'বিস্তারিত\s*পড়ুন.*$', '', text, flags=re.IGNORECASE)
-    
     text = re.sub(r'@\w+', '', text)
     if not keep_hashtags:
         text = re.sub(r'#\w+', '', text)
@@ -83,3 +75,64 @@ def sanitize_filename(name):
     if not name: return "video_output"
     cleaned = re.sub(r'[\/:*?"<>|\x00-\x1f]', '', str(name))
     return cleaned.strip()[:90]
+
+# 🌟 অফলাইন / ডাকযোগ / কুরিয়ার আবেদন সনাক্তকরণ ফাংশন
+def detect_offline_application_rules(text, html_content="", title=""):
+    combined = f"{title} {text} {html_content}".lower()
+
+    online_indicators = [
+        r'teletalk\.com\.bd',
+        r'online\s*application',
+        r'apply\s*online',
+        r'অনলাইনে\s*(?:আবেদন|ফরম|ফর্ম|দরখাস্ত|রেজিস্ট্রেশন)',
+        r'অনলাইনের\s*মাধ্যমে\s*আবেদন',
+        r'ওয়েবসাইটে\s*(?:গিয়ে\s*)?আবেদন',
+        r'ওয়েবসাইটে\s*(?:গিয়ে\s*)?আবেদন',
+        r'লিংকে\s*প্রবেশ\s*করে\s*আবেদন',
+        r'ই\-?মেইলে\s*(?:আবেদন|পাঠাতে|প্রেরণ)',
+        r'email\s*application',
+        r'portal\.',
+        r'erecruitment',
+        r'apply\.bdjobs\.com',
+        r'bdjobs\.com'
+    ]
+
+    offline_indicators = [
+        r'ডাকযোগে\s*(?:আবেদন|পাঠাতে|প্রেরণ|পৌঁছাতে|জমা)',
+        r'কুরি(?:য়ার|য়ার)\s*(?:সার্ভিস|সার্ভিসের\s*মাধ্যমে|এর\s*মাধ্যমে)?\s*(?:পাঠাতে|প্রেরণ|পৌঁছাতে)',
+        r'সরাসরি\s*(?:বা\s*ডাকযোগে|অফিসে\s*জমা|পৌঁছাতে)',
+        r'হাতে\s*হাতে\s*(?:জমা|পৌঁছাতে)',
+        r'খামের\s*উপর\s*(?:পদের\s*নাম|বিজ্ঞপ্তি\s*নং)',
+        r'রেজিস্ট্রি\s*ডাকযোগে',
+        r'জিইপি\s*(?:এর\s*মাধ্যমে|ডাকযোগে)',
+        r'স্বহস্তে\s*লিখিত\s*আবেদন',
+        r'ডাকযোগে\s*বা\s*সরাসরি',
+        r'অফিস\s*চলাকালীন\s*সময়ে\s*জমা',
+        r'নিম্নস্বাক্ষরকারীর\s*কার্যালয়ে\s*পৌঁছাতে\s*হবে',
+        r'বরাবর\s*ডাকযোগে\s*পাঠাতে\s*হবে',
+        r'ডাকযোগে\s*আবেদনপত্র\s*পাঠাতে\s*হবে'
+    ]
+
+    has_online = any(re.search(p, combined, re.I) for p in online_indicators)
+    has_offline = any(re.search(p, combined, re.I) for p in offline_indicators)
+
+    if has_offline and not has_online:
+        return True, "আবেদনের মাধ্যম ডাকযোগে/কুরিয়ারে/সরাসরি অফিসে জমা (অনলাইন আবেদন নেই)"
+    return False, "অনলাইন আবেদন বা সাধারণ বিজ্ঞপ্তি"
+
+def check_if_offline_application(article_text, raw_html="", job_data=None, title=""):
+    if job_data is None:
+        job_data = {}
+
+    ai_online = job_data.get("is_online_application")
+    ai_method = str(job_data.get("application_method", "")).lower().strip()
+    ai_reason = job_data.get("offline_reason", "")
+
+    if ai_online is False or ai_method in ["postal", "courier", "in_person", "offline", "offline_other"]:
+        return True, ai_reason or f"AI সনাক্ত করেছে আবেদনের পদ্ধতি অফলাইন ({ai_method})"
+
+    is_offline, reason = detect_offline_application_rules(article_text, raw_html, title)
+    if is_offline:
+        return True, reason
+
+    return False, "অনলাইন আবেদন"
