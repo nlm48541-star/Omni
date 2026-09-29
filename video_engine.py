@@ -48,7 +48,7 @@ def find_random_background_video():
 
     if video_files:
         chosen = random.choice(video_files)
-        print(f"  [🎬 Motion Background Selected] '{chosen}'")
+        print(f"  [🎬 Background Video Selected] '{chosen}'")
         return chosen
     return None
 
@@ -57,9 +57,9 @@ def find_front_overlay_file():
         if os.path.exists(f): return f
     return None
 
-# 🌟 সম্পূর্ণ প্রোগ্রাম্যাটিক মোশন গ্রাফিক্স TikTok ভিডিও রেন্ডারার
+# 🌟 TikTok-এর জন্য ৬টি এলিমেন্ট ও মোশন গ্রাফিক্স টেক্সট দিয়ে ভিডিও রেন্ডারার
 def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
-    print(f"  [~] Rendering Kinetic Motion Graphics TikTok Video: '{output_path}'")
+    print(f"  [~] Rendering Animated TikTok Video (Elements Overlay): '{output_path}'")
     if not os.path.exists(audio_path): return False
 
     from tiktok_designer import generate_tiktok_animated_overlay_frames, prepare_tiktok_slides
@@ -68,13 +68,13 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
     total_frames = int(audio_duration * fps)
 
     bg_video = find_random_background_video()
-    temp_anim_dir = f"_tmp_kinetic_{random.randint(100000, 999999)}"
+    temp_anim_dir = f"_tmp_elements_anim_{random.randint(100000, 999999)}"
 
-    # সম্পূর্ণ ভিডিওর জন্য ইন-আউট অ্যানিমেটেড ফ্রেম তৈরি করা হচ্ছে
+    # সম্পূর্ণ ভিডিওর জন্য ইন-আউট অ্যানিমেশন ফ্রেম জেনারেট করা
     generate_tiktok_animated_overlay_frames(job_data, temp_anim_dir, total_frames=total_frames, fps=fps)
 
     if not bg_video or not os.path.exists(bg_video):
-        print("  ⚠️ No motion background videos found in 'Backgrounds/'. Falling back...")
+        print("  ⚠️ No background video in 'Backgrounds/'. Using fallback slideshow...")
         static_slides = prepare_tiktok_slides(job_data, "fallback")
         res = render_vertical_video(static_slides, audio_path, output_path, fps)
         shutil.rmtree(temp_anim_dir, ignore_errors=True)
@@ -91,7 +91,7 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
 
     print(f"  [✂️ Video Snippet] Cutting from {start_time}s (Duration: {round(audio_duration, 1)}s)")
 
-    # ১৬:৯ ল্যান্ডস্কেপ হলে ৯০ ডিগ্রি রোটেট করে ৯:১৬ পোর্ট্রেট (১০৮০x১৯২০) করা
+    # ১৬:৯ হলে ৯০ ডিগ্রি রোটেট করে ৯:১৬ পোর্ট্রেট (১০৮০x১৯২০) করা
     if w > h:
         print("  [🔄 Auto-Rotate] 16:9 Landscape Video detected. Rotating 90° to 9:16 Portrait...")
         video_filter = "transpose=1,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]"
