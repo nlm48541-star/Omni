@@ -17,7 +17,7 @@ from config_manager import (
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
-from video_engine import render_vertical_video, render_tiktok_motion_video, get_video_properties
+from video_engine import render_vertical_video, render_tiktok_motion_video
 from feed_manager import fetch_feed_entries, extract_article_images, scrape_full_webpage_content
 from uploader_service import (
     get_page_access_token, post_photo_to_facebook,
@@ -44,7 +44,6 @@ def filter_banner_first_image(downloaded_imgs):
     except Exception: pass
     return list(downloaded_imgs)
 
-# 🌟 ব্যাকগ্রাউন্ড ভিডিওগুলোর তালিকা সংগ্রহ করা (রেন্ডম না হয়ে ইউনিক নিশ্চিত করতে)
 def get_all_background_videos():
     valid_exts = ('.mp4', '.mov', '.mkv', '.webm', '.avi')
     videos = []
@@ -60,11 +59,11 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # ১. গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিওগুলো সিঙ্ক করা
+    # ১. গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিও সিঙ্ক করা
     sync_background_videos_from_gdrive(config)
     bg_video_list = get_all_background_videos()
 
-    # ২. কানেক্টেড একাউন্ট সংখ্যা শনাক্ত করা
+    # ২. কানেক্টেড অ্যাকাউন্টসমূহ রিড করা
     yt_targets = get_all_youtube_targets(config)
     tiktok_targets = get_all_tiktok_buffer_targets(config)
 
@@ -85,7 +84,7 @@ async def process_sync(config, memory):
         elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
         elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
-    # 🌟 ফ্লেক্সিবল ভিডিও কাউন্ট নির্ধারণ
+    # ফ্লেক্সিবল ভিডিও কাউন্ট নির্ধারণ
     main_needed_count = max(len(fb_dest_ids), len(yt_targets), 1)
     tiktok_needed_count = len(tiktok_targets)
     total_audio_needed = min(8, max(main_needed_count, tiktok_needed_count))
@@ -141,7 +140,7 @@ async def process_sync(config, memory):
 
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
-            # 🌟 অফলাইন আবেদন ফিল্টার
+            # অফলাইন আবেদন যাচাই ফিল্টার
             is_offline, offline_reason = check_if_offline_application(web_text or raw_desc_clean, web_html, job_data, article_title)
             if is_offline:
                 print(f"🚫 [SKIPPED - OFFLINE CIRCULAR] {article_title}")
@@ -155,7 +154,7 @@ async def process_sync(config, memory):
             print(f"\n🔥 [PROCESSING ARTICLE] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
-            # 🌟 ক্রমানুসারে প্রয়োজনীয় সংখ্যক অডিও ফাইল তৈরি
+            # প্রয়োজনীয় সংখ্যক অডিও জেনারেশন
             generated_audios = []
             for idx in range(total_audio_needed):
                 audio_file = f"tmp_voice_{hash(entry_link)}_{idx+1}.mp3"
@@ -167,11 +166,12 @@ async def process_sync(config, memory):
                 print("  ❌ [ERROR] Could not generate any audio. Skipping...")
                 continue
 
-            contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
-            final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}" if len(raw_desc_clean) > 20 else f"{article_title}{contact_sfx}"
+            contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন WhatsApp: 01540503092"
+            fb_yt_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}" if len(raw_desc_clean) > 20 else f"{article_title}{contact_sfx}"
+            tiktok_caption = f"{article_title[:90]} | নতুন নিয়োগ বিজ্ঞপ্তি\n\nআবেদন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।\n\n#bdjobs #jobcircular #career #bangladesh"
             video_final_title = article_title[:85].strip()
 
-            # 🌟 ১. মেইন ভিডিও তৈরি ও FB / YouTube-এ আপলোড (যতগুলো চ্যানেল ততগুলো ভিডিও)
+            # ১. মেইন ভিডিও তৈরি ও FB / YouTube-এ আপলোড
             valid_source_imgs = filter_banner_first_image(downloaded_imgs)
             fb_yt_source = valid_source_imgs if valid_source_imgs else prepare_tiktok_slides(job_data, f"fb_fallback_{hash(entry_link)}")
 
@@ -180,7 +180,7 @@ async def process_sync(config, memory):
                 yt_vid_path = f"tmp_main_yt_{hash(entry_link)}_{y_idx+1}.mp4"
                 if render_vertical_video(fb_yt_source, audio_for_yt, yt_vid_path):
                     print(f"  [+] Uploading Video #{y_idx+1} to YouTube Channel #{yt_channel.get('index')}...")
-                    upload_video_to_youtube(yt_channel['client_id'], yt_channel['client_secret'], yt_channel['refresh_token'], yt_vid_path, video_final_title, final_post_text)
+                    upload_video_to_youtube(yt_channel['client_id'], yt_channel['client_secret'], yt_channel['refresh_token'], yt_vid_path, video_final_title, fb_yt_post_text)
                     if os.path.exists(yt_vid_path): os.remove(yt_vid_path)
 
             for f_idx, did in enumerate(fb_dest_ids):
@@ -189,16 +189,15 @@ async def process_sync(config, memory):
                     audio_for_fb = generated_audios[f_idx % len(generated_audios)]
                     fb_vid_path = f"tmp_main_fb_{hash(entry_link)}_{f_idx+1}.mp4"
                     if render_vertical_video(fb_yt_source, audio_for_fb, fb_vid_path):
-                        if not post_reel_to_facebook(did, token, fb_vid_path, video_final_title, final_post_text):
-                            post_video_to_facebook(did, token, fb_vid_path, final_post_text)
+                        if not post_reel_to_facebook(did, token, fb_vid_path, video_final_title, fb_yt_post_text):
+                            post_video_to_facebook(did, token, fb_vid_path, fb_yt_post_text)
                         if os.path.exists(fb_vid_path): os.remove(fb_vid_path)
 
-            # 🌟 ২. TikTok ভিডিও তৈরি ও আপলোড (ইউনিক ব্যাকগ্রাউন্ড ভিডিও ও নির্দিষ্ট একাউন্ট অনুযায়ী)
+            # ২. TikTok ভিডিও তৈরি ও আপলোড (নিরাপদ ক্যাপশন ও ইউনিক ব্যাকগ্রাউন্ড সহ)
             for t_idx, tk_account in enumerate(tiktok_targets):
                 tk_audio = generated_audios[t_idx % len(generated_audios)]
                 tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{t_idx+1}.mp4"
 
-                # ব্যাকগ্রাউন্ড যাতে রেন্ডম না হয়ে প্রত্যেকটির জন্য আলাদা হয়
                 assigned_bg = bg_video_list[t_idx % len(bg_video_list)] if bg_video_list else None
 
                 print(f"  🎬 Rendering TikTok Video #{t_idx+1} for Account #{tk_account.get('index')} (BG: '{assigned_bg}')")
@@ -207,7 +206,7 @@ async def process_sync(config, memory):
                         upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id)
 
                     print(f"  [+] Uploading Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
-                    upload_to_specific_buffer_account(tk_vid_path, final_post_text, tk_account['profile_id'], tk_account['token'])
+                    upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
 
                     if os.path.exists(tk_vid_path): os.remove(tk_vid_path)
 
@@ -215,7 +214,7 @@ async def process_sync(config, memory):
             for did in tg_dest_ids:
                 pass
             for did in wa_dest_ids:
-                post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
+                post_to_whatsapp_channel(render_wa_url, did, fb_yt_post_text, downloaded_imgs)
 
             # ক্লিনআপ
             for a_f in generated_audios:
@@ -223,7 +222,7 @@ async def process_sync(config, memory):
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
-            # 🌟 ইনস্ট্যান্ট মেমোরি সেভ (যাতে এই আর্টিকেল দিয়ে আর কখনো ভিডিও তৈরি না হয়)
+            # ইনস্ট্যান্ট মেমোরি সেভ (ডুপ্লিকেট ভিডিও প্রতিরোধক)
             processed_set.add(entry_link)
             memory["processed_articles"] = list(processed_set)[-300:]
             save_json(MEMORY_FILE, memory)
