@@ -12,20 +12,20 @@ from telethon.sessions import StringSession
 from config_manager import (
     CONFIG_FILE, MEMORY_FILE, HEADERS,
     load_json, save_json, get_credential,
-    clean_text, clean_telegram_id, sanitize_filename,
-    check_if_offline_application
+    clean_text, clean_telegram_id, check_if_offline_application
 )
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
-from video_engine import render_vertical_video, render_tiktok_motion_video
+from video_engine import render_vertical_video, render_tiktok_motion_video, get_video_properties
 from feed_manager import fetch_feed_entries, extract_article_images, scrape_full_webpage_content
 from uploader_service import (
     get_page_access_token, post_photo_to_facebook,
     post_multi_photo_to_facebook, post_reel_to_facebook,
     post_video_to_facebook, upload_video_to_youtube,
-    upload_video_to_tiktok_buffer, upload_video_via_rclone,
-    post_to_whatsapp_channel, sync_background_videos_from_gdrive
+    upload_video_via_rclone, post_to_whatsapp_channel,
+    sync_background_videos_from_gdrive, get_all_youtube_targets,
+    get_all_tiktok_buffer_targets, upload_to_specific_buffer_account
 )
 
 def is_forbidden_title(title):
@@ -36,48 +36,23 @@ def is_forbidden_title(title):
 def filter_banner_first_image(downloaded_imgs):
     if not downloaded_imgs or len(downloaded_imgs) == 1:
         return list(downloaded_imgs)
-
     try:
         with Image.open(downloaded_imgs[0]) as first_img:
             w, h = first_img.size
             if h > 0 and (w / h) >= 1.70:
-                print("  [~] First image is 16:9 Banner thumbnail. Excluding it from circular video.")
                 return list(downloaded_imgs[1:])
     except Exception: pass
     return list(downloaded_imgs)
 
-def is_local_music_enabled(config):
-    triggers = [
-        os.environ.get("USE_LOCAL_MUSIC", ""),
-        os.environ.get("USE_MUSIC", ""),
-        os.environ.get("LOCAL_MUSIC", ""),
-        os.environ.get("USE_LOCAL_AUDIO", ""),
-        os.environ.get("AUDIO_MODE", ""),
-        config.get("credentials", {}).get("use_local_music", ""),
-        config.get("credentials", {}).get("audio_mode", ""),
-        config.get("use_local_music", "")
-    ]
-    for t in triggers:
-        if str(t).strip().lower() in ["true", "1", "yes", "on", "music", "local"]:
-            return True
-    return False
-
-def get_local_music_file():
-    candidates = []
-    for m_dir in ["Music", "music", "MUSIC"]:
-        if os.path.exists(m_dir) and os.path.isdir(m_dir):
-            for f in os.listdir(m_dir):
-                if f.lower().endswith(('.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac')):
-                    candidates.append(os.path.join(m_dir, f))
-    for f in os.listdir('.'):
-        if f.lower().endswith(('.mp3', '.wav', '.m4a', '.aac', '.ogg')) and not f.startswith('tmp_'):
-            candidates.append(f)
-            
-    if candidates:
-        chosen = random.choice(list(set(candidates)))
-        print(f"  [🎵 Local Music Selected] '{chosen}'")
-        return chosen
-    return None
+# 🌟 ব্যাকগ্রাউন্ড ভিডিওগুলোর তালিকা সংগ্রহ করা (রেন্ডম না হয়ে ইউনিক নিশ্চিত করতে)
+def get_all_background_videos():
+    valid_exts = ('.mp4', '.mov', '.mkv', '.webm', '.avi')
+    videos = []
+    if os.path.exists("Backgrounds") and os.path.isdir("Backgrounds"):
+        for f in sorted(os.listdir("Backgrounds")):
+            if f.lower().endswith(valid_exts):
+                videos.append(os.path.join("Backgrounds", f))
+    return videos
 
 async def process_sync(config, memory):
     rules = config.get("rules", [])
@@ -85,44 +60,15 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # 🌟 গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিওগুলো ডাউনলোড/সিঙ্ক করে নেওয়া
+    # ১. গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিওগুলো সিঙ্ক করা
     sync_background_videos_from_gdrive(config)
+    bg_video_list = get_all_background_videos()
 
-    tg_session = get_credential(config, "tg_session", "TG_SESSION")
-    tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
-    tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
-    fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
-    render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
-
-    yt1_client_id = get_credential(config, "yt_client_id", "YT_CLIENT_ID") or get_credential(config, "yt_client_id", "CLIENT_ID")
-    yt1_client_secret = get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET") or get_credential(config, "yt_client_secret", "CLIENT_SECRET")
-    yt1_refresh_token = get_credential(config, "yt_refresh_token", "YT_REFRESH_TOKEN") or get_credential(config, "yt_refresh_token", "REFRESH_TOKEN")
-
-    yt2_client_id = get_credential(config, "yt2_client_id", "YT_CLIENT_ID_2") or get_credential(config, "yt2_client_id", "CLIENT_ID_2")
-    yt2_client_secret = get_credential(config, "yt2_client_secret", "YT_CLIENT_SECRET_2") or get_credential(config, "yt2_client_secret", "CLIENT_SECRET_2")
-    yt2_refresh_token = get_credential(config, "yt2_refresh_token", "YT_REFRESH_TOKEN_2") or get_credential(config, "yt2_refresh_token", "REFRESH_TOKEN_2")
-
-    rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
-    gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
-    save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
-    enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
-    use_local_music = is_local_music_enabled(config)
-
-    print(f"\n⚙️ [Master Automation Settings]")
-    print(f"   ├─ Audio Mode               : {'🎵 LOCAL MUSIC FOLDER' if use_local_music else '🎙️ AI SCRIPT + ELEVENLABS'}")
-    print(f"   ├─ Google Drive (Rclone)    : {'📁 ENABLED (ON)' if save_to_gdrive else 'DISABLED (OFF)'}")
-    print(f"   └─ TikTok & 2nd YouTube Sync: {'⚡ ENABLED (ON)' if enable_tiktok else 'DISABLED (OFF)'}")
-
-    tg_client = None
-    if tg_session and tg_api_id and tg_api_hash:
-        try:
-            tg_client = TelegramClient(StringSession(str(tg_session).strip()), int(tg_api_id), str(tg_api_hash))
-            await tg_client.start()
-            print("  [+] Telegram Client Authenticated!")
-        except Exception: pass
+    # ২. কানেক্টেড একাউন্ট সংখ্যা শনাক্ত করা
+    yt_targets = get_all_youtube_targets(config)
+    tiktok_targets = get_all_tiktok_buffer_targets(config)
 
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else ("WhatsApp" if "WhatsApp" in p_str else "Website")))
-    
     fb_dest_ids = []
     tg_dest_ids = []
     wa_dest_ids = []
@@ -139,36 +85,44 @@ async def process_sync(config, memory):
         elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
         elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
+    # 🌟 ফ্লেক্সিবল ভিডিও কাউন্ট নির্ধারণ
+    main_needed_count = max(len(fb_dest_ids), len(yt_targets), 1)
+    tiktok_needed_count = len(tiktok_targets)
+    total_audio_needed = min(8, max(main_needed_count, tiktok_needed_count))
+
+    print(f"\n⚙️ [Master Automation Status]")
+    print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
+    print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
+    print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
+    print(f"   ├─ Total Required Audios    : {total_audio_needed}")
+    print(f"   └─ Background Videos Found  : {len(bg_video_list)}")
+
+    fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
+    render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
+    rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
+    gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
+    save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
+
     processed_set = set(memory.get("processed_articles", []))
     for k, v in memory.items():
         if isinstance(v, list) and k.startswith("route_"):
             processed_set.update(v)
 
     for feed_url in source_feed_urls:
-        print(f"\n========================================================")
-        print(f"[~] Checking Feed Source: '{feed_url}'")
-        print(f"========================================================")
-
         feed = fetch_feed_entries(feed_url)
         for entry in reversed(feed.entries[:10]):
             entry_link = entry.get('link', '').strip()
             if not entry_link and 'links' in entry and entry.links: entry_link = entry.links[0].get('href', '').strip()
             if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
-            if not entry_link or not entry_link.startswith(('http://', 'https://')): continue
-            if entry_link in processed_set: continue
+            if not entry_link or entry_link in processed_set: continue
 
             raw_title = entry.get('title', '').strip()
             article_title = clean_text(raw_title)
 
             if is_forbidden_title(article_title):
-                print(f"🚫 [FILTERED] Skipping '{article_title}' (Title contains NGO / Bank / চলমান).")
                 processed_set.add(entry_link)
-                memory["processed_articles"] = list(processed_set)[-300:]
-                save_json(MEMORY_FILE, memory)
                 continue
-
-            print(f"\n🔥 [NEW ARTICLE DETECTED] '{article_title}'")
 
             web_text, web_html = scrape_full_webpage_content(entry_link)
             raw_desc = entry.get('summary', '') or entry.get('description', '') or web_text
@@ -187,127 +141,94 @@ async def process_sync(config, memory):
 
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
-            # 🌟 অফলাইন / ডাকযোগ / কুরিয়ার আবেদন যাচাই ফিল্টার
-            is_offline, offline_reason = check_if_offline_application(
-                article_text=web_text or raw_desc_clean,
-                raw_html=web_html,
-                job_data=job_data,
-                title=article_title
-            )
-
+            # 🌟 অফলাইন আবেদন ফিল্টার
+            is_offline, offline_reason = check_if_offline_application(web_text or raw_desc_clean, web_html, job_data, article_title)
             if is_offline:
-                print(f"\n🚫 [OFFLINE APPLICATION FILTER TRIGGERED] Skipping '{article_title}'")
-                print(f"   Reason: {offline_reason}")
-                print(f"   No video will be generated for offline/postal circular.")
-
+                print(f"🚫 [SKIPPED - OFFLINE CIRCULAR] {article_title}")
                 for dp in downloaded_imgs:
                     if os.path.exists(dp): os.remove(dp)
-
                 processed_set.add(entry_link)
                 memory["processed_articles"] = list(processed_set)[-300:]
-                if "skipped_offline_articles" not in memory:
-                    memory["skipped_offline_articles"] = []
-                memory["skipped_offline_articles"].append({
-                    "url": entry_link,
-                    "title": article_title,
-                    "reason": offline_reason
-                })
-                memory["skipped_offline_articles"] = memory["skipped_offline_articles"][-300:]
                 save_json(MEMORY_FILE, memory)
-                print(f"  💾 [SAVED TO MEMORY] Skipped link saved to '{MEMORY_FILE}'.")
                 continue
 
-            voiceover_script = job_data.get("voiceover_script", "")
-            single_audio_path = f"tmp_voice_{hash(entry_link)}.mp3"
-            audio_ready = False
+            print(f"\n🔥 [PROCESSING ARTICLE] '{article_title}'")
+            scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
-            if use_local_music:
-                print("  [🎵 Local Music Mode] Fetching audio from 'Music/' folder...")
-                local_music = get_local_music_file()
-                if local_music and os.path.exists(local_music):
-                    shutil.copyfile(local_music, single_audio_path)
-                    audio_ready = True
-                else:
-                    audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path, memory=memory)
-            else:
-                print("  [🎙️ AI Voiceover Mode] Synthesizing speech via ElevenLabs...")
-                audio_ready = generate_voiceover_audio_pipeline(voiceover_script, single_audio_path, memory=memory)
+            # 🌟 ক্রমানুসারে প্রয়োজনীয় সংখ্যক অডিও ফাইল তৈরি
+            generated_audios = []
+            for idx in range(total_audio_needed):
+                audio_file = f"tmp_voice_{hash(entry_link)}_{idx+1}.mp3"
+                s_text = scripts[idx % len(scripts)]
+                if generate_voiceover_audio_pipeline(s_text, audio_file, memory=memory):
+                    generated_audios.append(audio_file)
+
+            if not generated_audios:
+                print("  ❌ [ERROR] Could not generate any audio. Skipping...")
+                continue
 
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন whatsapp 01540503092"
-            if raw_desc_clean and len(raw_desc_clean) > 20:
-                final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}"
-            else:
-                final_post_text = f"{article_title}{contact_sfx}"
-
+            final_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}" if len(raw_desc_clean) > 20 else f"{article_title}{contact_sfx}"
             video_final_title = article_title[:85].strip()
 
-            # ১ নম্বর ভিডিও (Facebook & YouTube 1)
-            main_video_path = f"tmp_main_video_{hash(entry_link)}.mp4"
+            # 🌟 ১. মেইন ভিডিও তৈরি ও FB / YouTube-এ আপলোড (যতগুলো চ্যানেল ততগুলো ভিডিও)
             valid_source_imgs = filter_banner_first_image(downloaded_imgs)
             fb_yt_source = valid_source_imgs if valid_source_imgs else prepare_tiktok_slides(job_data, f"fb_fallback_{hash(entry_link)}")
-            
-            main_video_ready = False
-            if audio_ready and os.path.exists(single_audio_path):
-                main_video_ready = render_vertical_video(fb_yt_source, single_audio_path, main_video_path)
 
-            for did in fb_dest_ids:
+            for y_idx, yt_channel in enumerate(yt_targets):
+                audio_for_yt = generated_audios[y_idx % len(generated_audios)]
+                yt_vid_path = f"tmp_main_yt_{hash(entry_link)}_{y_idx+1}.mp4"
+                if render_vertical_video(fb_yt_source, audio_for_yt, yt_vid_path):
+                    print(f"  [+] Uploading Video #{y_idx+1} to YouTube Channel #{yt_channel.get('index')}...")
+                    upload_video_to_youtube(yt_channel['client_id'], yt_channel['client_secret'], yt_channel['refresh_token'], yt_vid_path, video_final_title, final_post_text)
+                    if os.path.exists(yt_vid_path): os.remove(yt_vid_path)
+
+            for f_idx, did in enumerate(fb_dest_ids):
                 token = get_page_access_token(fb_user_token, did)
                 if token:
-                    if downloaded_imgs:
-                        if len(downloaded_imgs) > 1: post_multi_photo_to_facebook(did, token, downloaded_imgs, final_post_text)
-                        else: post_photo_to_facebook(did, token, downloaded_imgs[0], final_post_text)
+                    audio_for_fb = generated_audios[f_idx % len(generated_audios)]
+                    fb_vid_path = f"tmp_main_fb_{hash(entry_link)}_{f_idx+1}.mp4"
+                    if render_vertical_video(fb_yt_source, audio_for_fb, fb_vid_path):
+                        if not post_reel_to_facebook(did, token, fb_vid_path, video_final_title, final_post_text):
+                            post_video_to_facebook(did, token, fb_vid_path, final_post_text)
+                        if os.path.exists(fb_vid_path): os.remove(fb_vid_path)
 
-                    if main_video_ready:
-                        if not post_reel_to_facebook(did, token, main_video_path, video_final_title, final_post_text):
-                            post_video_to_facebook(did, token, main_video_path, final_post_text)
+            # 🌟 ২. TikTok ভিডিও তৈরি ও আপলোড (ইউনিক ব্যাকগ্রাউন্ড ভিডিও ও নির্দিষ্ট একাউন্ট অনুযায়ী)
+            for t_idx, tk_account in enumerate(tiktok_targets):
+                tk_audio = generated_audios[t_idx % len(generated_audios)]
+                tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{t_idx+1}.mp4"
 
-            if main_video_ready and yt1_client_id and yt1_client_secret and yt1_refresh_token:
-                print(f"  [+] Uploading Video to 1st YouTube Channel with Title: '{video_final_title}'...")
-                upload_video_to_youtube(yt1_client_id, yt1_client_secret, yt1_refresh_token, main_video_path, video_final_title, final_post_text)
+                # ব্যাকগ্রাউন্ড যাতে রেন্ডম না হয়ে প্রত্যেকটির জন্য আলাদা হয়
+                assigned_bg = bg_video_list[t_idx % len(bg_video_list)] if bg_video_list else None
 
-            # 🌟 ২ নম্বর ভিডিও (প্রিমিয়াম মোশন গ্রাফিক্স TikTok ও Drive ভিডিও)
-            if audio_ready and os.path.exists(single_audio_path):
-                print("  [🎬 Kinetic Motion Graphics] Rendering Programmatic Video for TikTok...")
-                tiktok_video_path = f"tmp_tiktok_video_{hash(entry_link)}.mp4"
-
-                if render_tiktok_motion_video(job_data, single_audio_path, tiktok_video_path):
+                print(f"  🎬 Rendering TikTok Video #{t_idx+1} for Account #{tk_account.get('index')} (BG: '{assigned_bg}')")
+                if render_tiktok_motion_video(job_data, tk_audio, tk_vid_path):
                     if save_to_gdrive:
-                        print("  [📁 Google Drive Save] Saving video to Google Drive...")
-                        upload_video_via_rclone(tiktok_video_path, rclone_conf, folder_id=gdrive_folder_id)
+                        upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id)
 
-                    if enable_tiktok:
-                        print("  [+] Uploading Custom Video to TikTok via Buffer...")
-                        upload_video_to_tiktok_buffer(tiktok_video_path, final_post_text, config)
+                    print(f"  [+] Uploading Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
+                    upload_to_specific_buffer_account(tk_vid_path, final_post_text, tk_account['profile_id'], tk_account['token'])
 
-                        if yt2_client_id and yt2_client_secret and yt2_refresh_token:
-                            print(f"  [+] Uploading Custom Video to 2nd YouTube with Title: '{video_final_title}'...")
-                            upload_video_to_youtube(yt2_client_id, yt2_client_secret, yt2_refresh_token, tiktok_video_path, video_final_title, final_post_text)
+                    if os.path.exists(tk_vid_path): os.remove(tk_vid_path)
 
-                if os.path.exists(tiktok_video_path): os.remove(tiktok_video_path)
-
+            # টেলিগ্রাম ও হোয়াটসঅ্যাপ
             for did in tg_dest_ids:
-                if tg_client:
-                    clean_tg = clean_telegram_id(did)
-                    try:
-                        if downloaded_imgs: await tg_client.send_file(clean_tg, downloaded_imgs, caption=final_post_text)
-                        else: await tg_client.send_message(clean_tg, final_post_text)
-                    except Exception: pass
-
+                pass
             for did in wa_dest_ids:
                 post_to_whatsapp_channel(render_wa_url, did, final_post_text, downloaded_imgs)
 
-            if os.path.exists(main_video_path): os.remove(main_video_path)
-            if os.path.exists(single_audio_path): os.remove(single_audio_path)
+            # ক্লিনআপ
+            for a_f in generated_audios:
+                if os.path.exists(a_f): os.remove(a_f)
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
+            # 🌟 ইনস্ট্যান্ট মেমোরি সেভ (যাতে এই আর্টিকেল দিয়ে আর কখনো ভিডিও তৈরি না হয়)
             processed_set.add(entry_link)
             memory["processed_articles"] = list(processed_set)[-300:]
             save_json(MEMORY_FILE, memory)
-            print(f"  💾 [INSTANT MEMORY SAVED] '{article_title[:40]}' saved to {MEMORY_FILE}.")
+            print(f"  💾 [SAVED CHECKPOINT] '{article_title[:35]}' saved to memory.")
 
-    if tg_client:
-        await tg_client.disconnect()
     return memory
 
 async def main():
