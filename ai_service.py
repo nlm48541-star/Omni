@@ -67,7 +67,6 @@ def parse_json_safely(raw_text):
     except Exception:
         return None
 
-# 🌟 সাল মুছে ফেলার ফাংশন
 def remove_years(text):
     if not text: return ""
     text = re.sub(r'\b202[0-9]\b', '', str(text))
@@ -90,8 +89,8 @@ def sanitize_voiceover_script(script):
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
     text = re.sub(r'\s+', ' ', text).strip()
-    cta_sentence = "ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
-    if not any(k in text for k in ["হোয়াটসঅ্যাপ", "হোয়াটসঅ্যাপ", "WhatsApp", "whatsapp"]):
+    cta_sentence = "ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।"
+    if not any(k in text for k in ["ইনবক্স", "বায়ো", "বায়ো", "মেসেজ"]):
         text = f"{text} {cta_sentence}"
 
     return text.strip()
@@ -143,7 +142,7 @@ def smart_fallback_data(title, article_text="", raw_html=""):
         vac_str = (vac_match.group(1)) if vac_match else "০১"
         scraped_posts = [{"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": vac_str, "qualification": "বিজ্ঞপ্তি অনুযায়ী"}]
 
-    fallback_script = f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে অথবা ডেসক্রিপশনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
+    fallback_script = f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।"
 
     is_offline, off_reason = detect_offline_application_rules(article_text, raw_html, title)
 
@@ -211,8 +210,8 @@ CRITICAL RULES:
 2. MULTI-SCRIPT GENERATION:
    - Provide "scripts": Array of 8 UNIQUE spoken Bengali voiceover scripts (each 100-130 words).
    - Each script must have a DIFFERENT hook and sentence structure.
-   - All 8 scripts MUST strictly end with WhatsApp CTA: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে আজই মেসেজ দিন।"
-   - NO years (2026/২০২৬), NO website mentions, NO like/subscribe mentions.
+   - All 8 scripts MUST strictly end with this CTA: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।"
+   - NO years (2026/২০২৬), NO phone digits, NO website mentions, NO like/subscribe mentions.
 
 3. DATA EXTRACTION:
    - "org_name": Official institution name.
@@ -248,7 +247,6 @@ Return strictly valid JSON:
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
     ollama_endpoint = get_ollama_chat_endpoint()
 
-    # ১. Ollama Cloud
     ollama_keys = get_all_ollama_keys()
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -275,14 +273,13 @@ Return strictly valid JSON:
                             return normalize_eight_scripts(data)
                 except Exception: pass
 
-    # ২. Groq AI ব্যাকআপ
     if GROQ_API:
         headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
         for g_model in GROQ_MODELS:
             payload = {
                 "model": g_model,
                 "messages": [
-                    {"role": "system", "content": "You are a Bengali job circular analyst. Return 8 distinct voiceover scripts strictly ending with WhatsApp CTA."},
+                    {"role": "system", "content": "You are a Bengali job circular analyst. Return 8 distinct voiceover scripts strictly ending with bio/inbox CTA."},
                     {"role": "user", "content": prompt}
                 ],
                 "response_format": {"type": "json_object"},
