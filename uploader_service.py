@@ -68,15 +68,12 @@ def sync_background_videos_from_gdrive(config=None):
             if os.path.exists(conf_path):
                 os.remove(conf_path)
 
-    # পদ্ধতি ২: পাবলিক লিঙ্ক হলে gdown দিয়ে সরাসরি ডাউনলোড
+    # পদ্ধতি ২: পাবলিক লিঙ্ক হলে gdown Python API দিয়ে সরাসরি ডাউনলোড (আর্গুমেন্ট এরর মুক্ত)
     try:
-        print("  📥 [Public Drive Link] Attempting download via gdown...")
+        print("  📥 [Public Drive Link] Attempting download via gdown Python API...")
+        import gdown
         folder_url = f"https://drive.google.com/drive/folders/{bg_folder_id}"
-        subprocess.run([
-            "gdown", "--folder", folder_url,
-            "-O", "Backgrounds/",
-            "--remaining-ok", "--quiet"
-        ], timeout=180)
+        gdown.download_folder(url=folder_url, output="Backgrounds", quiet=True, use_cookies=False)
         downloaded = [f for f in os.listdir("Backgrounds") if f.lower().endswith(('.mp4', '.mov', '.mkv', '.webm'))]
         if downloaded:
             print(f"  ✅ [gdown] Successfully downloaded {len(downloaded)} video(s): {downloaded}")
@@ -209,7 +206,7 @@ def get_all_tiktok_buffer_targets(config=None):
     if config is None: config = {}
     targets = []
     
-    # ৩টি বা ততোধিক Buffer একাউন্টের জন্য চেক করা
+    # ৩টি Buffer একাউন্টের টোকেন এবং কমা-সেপারেটেড প্রোফাইল চেক
     for i in range(1, 5):
         token = os.environ.get(f"BUFFER_TOKEN_{i}", "").strip()
         profiles_str = os.environ.get(f"BUFFER_PROFILES_{i}", os.environ.get(f"BUFFER_PROFILE_{i}", "")).strip()
