@@ -10,10 +10,10 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from config_manager import (
-    CONFIG_FILE, MEMORY_FILE, HEADERS,
+    CONFIG_FILE, MEMORY_FILE, SKIPPED_OFFLINE_FILE, HEADERS,
     load_json, save_json, get_credential,
     clean_text, clean_telegram_id, check_if_offline_application,
-    sanitize_filename
+    sanitize_filename, load_skipped_offline_urls, record_skipped_offline_job
 )
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
@@ -105,10 +105,14 @@ async def process_sync(config, memory):
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
 
+    # 🌟 মেমোরি এবং পূর্বে স্কিপ করা অফলাইন সার্কুলার লিঙ্কগুলোর তালিকা লোড
     processed_set = set(memory.get("processed_articles", []))
     for k, v in memory.items():
         if isinstance(v, list) and k.startswith("route_"):
             processed_set.update(v)
+
+    skipped_offline_urls = load_skipped_offline_urls()
+    processed_set.update(skipped_offline_urls)
 
     for feed_url in source_feed_urls:
         feed = fetch_feed_entries(feed_url)
@@ -117,6 +121,7 @@ async def process_sync(config, memory):
             if not entry_link and 'links' in entry and entry.links: entry_link = entry.links[0].get('href', '').strip()
             if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
+            # পূর্বে প্রোসেসড অথবা পূর্বে স্কিপ করা থাকলে সরাসরি বাদ দেওয়া হবে
             if not entry_link or entry_link in processed_set: continue
 
             raw_title = entry.get('title', '').strip()
@@ -141,20 +146,29 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
+            # এআই দিয়ে সার্কুলার ছবি ও টেক্সট বিশ্লেষণ
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
-            # অফলাইন আবেদন যাচাই ফিল্টার
+            # 🌟 অফলাইন আবেদন যাচাই ফিল্টার (ডাকযোগ / কুরিয়ার / সরাসরি)
             is_offline, offline_reason = check_if_offline_application(web_text or raw_desc_clean, web_html, job_data, article_title)
             if is_offline:
-                print(f"🚫 [SKIPPED - OFFLINE CIRCULAR] {article_title}")
+                print(f"\n🚫 [OFFLINE CIRCULAR DETECTED] Skipping '{article_title}'")
+                print(f"   Reason: {offline_reason}")
+                print(f"   Action: No video will be generated.")
+
+                # ডাউনলোড করা ছবিগুলো মুছে ফেলা
                 for dp in downloaded_imgs:
                     if os.path.exists(dp): os.remove(dp)
+
+                # 🌟 লিঙ্কটি skipped_offline_jobs.json এ সেভ করা যাতে পরবর্তীতে আর স্ক্যান না হয়
+                record_skipped_offline_job(entry_link, article_title, offline_reason)
                 processed_set.add(entry_link)
                 memory["processed_articles"] = list(processed_set)[-300:]
                 save_json(MEMORY_FILE, memory)
+                print(f"  💾 [SAVED TO JSON] Link recorded in '{SKIPPED_OFFLINE_FILE}' and memory.")
                 continue
 
-            print(f"\n🔥 [PROCESSING ARTICLE] '{article_title}'")
+            print(f"\n🔥 [ONLINE JOB VERIFIED - CREATING CONTENT] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
             # প্রয়োজনীয় সংখ্যক অডিও জেনারেশন
@@ -206,14 +220,10 @@ async def process_sync(config, memory):
                 print(f"  🎬 Rendering TikTok Video #{t_idx+1} for Account #{tk_account.get('index')} (BG: '{assigned_bg}')")
                 if render_tiktok_motion_video(job_data, tk_audio, tk_vid_path):
                     
-                    # 🌟 গুগল ড্রাইভে ভিডিও সেভ করা (লাইভ লগসহ)
                     if save_to_gdrive:
                         drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
                         upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
-                    else:
-                        print("  ℹ️ [Google Drive Save] Skipped (SAVE_TO_GDRIVE is set to false)")
 
-                    # Buffer-এর মাধ্যমে টিকটকে আপলোড
                     print(f"  [+] Uploading Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
                     upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
 
