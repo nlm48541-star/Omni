@@ -104,7 +104,7 @@ def save_index(file_path, idx, total):
     except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (১ম অগ্রাধিকার)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (১ম অগ্রাধিকার + ৪০৪ অটো-রিকভারি)
 # =========================================================================
 def get_all_gemini_keys():
     raw_keys = os.environ.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEYS", "")).strip()
@@ -118,7 +118,9 @@ def synthesize_with_gemini(speech_text, output_audio_path):
         return False
 
     print("\n--- [Priority 1: Gemini 3.8 Flash TTS] ---")
-    voice_id = os.environ.get("GEMINI_VOICE_ID", "voice_z3e67k0f8p8c").strip() or "voice_z3e67k0f8p8c"
+    custom_voice = os.environ.get("GEMINI_VOICE_ID", "").strip()
+    # 🌟 কাস্টম ভয়েস আইডি থাকলে আগে তা দেখবে, না থাকলে অফিসিয়াল প্রি-বিল্ট 'Kore' ব্যবহার করবে
+    primary_voice = custom_voice if custom_voice else "Kore"
     delivery_style = os.environ.get("GEMINI_DELIVERY_STYLE", "Natural, calm, warm and articulate Bengali pronunciation").strip()
 
     try:
@@ -130,39 +132,54 @@ def synthesize_with_gemini(speech_text, output_audio_path):
     for idx, api_key in enumerate(gemini_keys, 1):
         masked = mask_key(api_key)
         print(f"  🚀 Attempting Gemini Key #{idx}/{len(gemini_keys)} ({masked})")
-        start_t = time.time()
-        try:
-            client = genai.Client(api_key=api_key)
-            interaction = client.interactions.create(
-                model="gemini-3.8-flash-tts",
-                input=[{
-                    "type": "user_input",
-                    "content": [{
-                        "type": "text",
-                        "text": speech_text,
-                        "annotations": [{
-                            "type": "speech_metadata",
-                            "style": delivery_style
-                        }]
-                    }]
-                }],
-                response_format={"type": "audio"},
-                generation_config={
-                    "speech_config": [{"voice": voice_id}]
-                }
-            )
 
-            if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
-                audio_bytes = base64.b64decode(interaction.output_audio.data)
-                if len(audio_bytes) > 2000:
-                    os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
-                    with open(output_audio_path, "wb") as f:
-                        f.write(audio_bytes)
-                    elapsed = round(time.time() - start_t, 2)
-                    print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS in {elapsed}s!")
-                    return True
-        except Exception as e:
-            print(f"  ⚠️ Gemini Key #{idx} notice: {e}")
+        # ভয়েস ট্রাই করার তালিকা: কাস্টম আইডি ফেইল করলে অটোমেটিক 'Kore' এবং 'Puck' এ ফলব্যাক করবে
+        voices_to_try = [primary_voice]
+        if primary_voice != "Kore":
+            voices_to_try.append("Kore")
+        if "Puck" not in voices_to_try:
+            voices_to_try.append("Puck")
+
+        for voice_candidate in voices_to_try:
+            start_t = time.time()
+            try:
+                client = genai.Client(api_key=api_key)
+                interaction = client.interactions.create(
+                    model="gemini-3.8-flash-tts",
+                    input=[{
+                        "type": "user_input",
+                        "content": [{
+                            "type": "text",
+                            "text": speech_text,
+                            "annotations": [{
+                                "type": "speech_metadata",
+                                "style": delivery_style
+                            }]
+                        }]
+                    }],
+                    response_format={"type": "audio"},
+                    generation_config={
+                        "speech_config": [{"voice": voice_candidate}]
+                    }
+                )
+
+                if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
+                    audio_bytes = base64.b64decode(interaction.output_audio.data)
+                    if len(audio_bytes) > 2000:
+                        os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
+                        with open(output_audio_path, "wb") as f:
+                            f.write(audio_bytes)
+                        elapsed = round(time.time() - start_t, 2)
+                        print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS! (Voice: '{voice_candidate}' in {elapsed}s)")
+                        return True
+            except Exception as e:
+                err_msg = str(e)
+                if "voice was not found" in err_msg or "404" in err_msg:
+                    print(f"  ⚠️ Voice '{voice_candidate}' not found/no permission. Auto-switching to standard voice...")
+                    continue
+                else:
+                    print(f"  ⚠️ Gemini Key #{idx} notice: {e}")
+                    break
 
     return False
 
