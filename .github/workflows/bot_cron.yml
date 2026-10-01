@@ -41,7 +41,7 @@ jobs:
           FB_TOKEN: ${{ secrets.FB_TOKEN }}
           RENDER_WA_URL: ${{ secrets.RENDER_WA_URL }}
 
-          # 🌟 YouTube মাল্টি-চ্যানেল সেটিংস (১ থেকে ৮টি চ্যানেল)
+          # YouTube মাল্টি-চ্যানেল সেটিংস (১ থেকে ৮টি চ্যানেল)
           YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
@@ -67,7 +67,7 @@ jobs:
           YT_CLIENT_SECRET_8: ${{ secrets.CLIENT_SECRET_8 }}
           YT_REFRESH_TOKEN_8: ${{ secrets.REFRESH_TOKEN_8 }}
 
-          # 🌟 TikTok / Buffer ৩টি অ্যাকাউন্ট ও মাল্টি-প্রোফাইল সেটিংস
+          # TikTok / Buffer ৩টি অ্যাকাউন্ট ও মাল্টি-প্রোফাইল সেটিংস
           BUFFER_TOKEN_1: ${{ secrets.BUFFER_TOKEN_1 }}
           BUFFER_PROFILES_1: ${{ secrets.BUFFER_PROFILES_1 }}
           BUFFER_TOKEN_2: ${{ secrets.BUFFER_TOKEN_2 }}
@@ -101,10 +101,11 @@ jobs:
           USE_LOCAL_MUSIC: ${{ secrets.USE_LOCAL_MUSIC }}
         run: python run_on_github.py
 
+      # 🌟 স্কিপ করা সার্কুলারের JSON ফাইল সহ মেমোরি স্টেট কমিট করা
       - name: Commit & Save Sync Progress State
         run: |
           git config --local user.email "engine@omnisync.io"
           git config --local user.name "OmniSync Master Engine"
-          git add bot_memory.json
-          git commit -m "Auto-Update: Visual & Multi-Output checkpoint [skip-ci]" || echo "No new updates to save"
+          git add bot_memory.json skipped_offline_jobs.json || true
+          git commit -m "Auto-Update: Save memory & skipped offline circulars [skip-ci]" || echo "No new updates to save"
           git push
