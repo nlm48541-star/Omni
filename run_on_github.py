@@ -12,7 +12,8 @@ from telethon.sessions import StringSession
 from config_manager import (
     CONFIG_FILE, MEMORY_FILE, HEADERS,
     load_json, save_json, get_credential,
-    clean_text, clean_telegram_id, check_if_offline_application
+    clean_text, clean_telegram_id, check_if_offline_application,
+    sanitize_filename
 )
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
@@ -89,18 +90,20 @@ async def process_sync(config, memory):
     tiktok_needed_count = len(tiktok_targets)
     total_audio_needed = min(8, max(main_needed_count, tiktok_needed_count))
 
+    rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
+    gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
+    save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
+
     print(f"\n⚙️ [Master Automation Status]")
     print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
     print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
     print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
     print(f"   ├─ Total Required Audios    : {total_audio_needed}")
-    print(f"   └─ Background Videos Found  : {len(bg_video_list)}")
+    print(f"   ├─ Background Videos Found  : {len(bg_video_list)}")
+    print(f"   └─ Google Drive Save Mode   : {'✅ ENABLED (ON)' if save_to_gdrive else '⚠️ DISABLED (OFF)'}")
 
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
-    rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
-    gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
-    save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
     processed_set = set(memory.get("processed_articles", []))
     for k, v in memory.items():
@@ -193,7 +196,7 @@ async def process_sync(config, memory):
                             post_video_to_facebook(did, token, fb_vid_path, fb_yt_post_text)
                         if os.path.exists(fb_vid_path): os.remove(fb_vid_path)
 
-            # ২. TikTok ভিডিও তৈরি ও আপলোড (নিরাপদ ক্যাপশন ও ইউনিক ব্যাকগ্রাউন্ড সহ)
+            # ২. TikTok ভিডিও তৈরি, ড্রাইভে সেভ এবং Buffer-এ আপলোড
             for t_idx, tk_account in enumerate(tiktok_targets):
                 tk_audio = generated_audios[t_idx % len(generated_audios)]
                 tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{t_idx+1}.mp4"
@@ -202,9 +205,15 @@ async def process_sync(config, memory):
 
                 print(f"  🎬 Rendering TikTok Video #{t_idx+1} for Account #{tk_account.get('index')} (BG: '{assigned_bg}')")
                 if render_tiktok_motion_video(job_data, tk_audio, tk_vid_path):
+                    
+                    # 🌟 গুগল ড্রাইভে ভিডিও সেভ করা (লাইভ লগসহ)
                     if save_to_gdrive:
-                        upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id)
+                        drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
+                        upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
+                    else:
+                        print("  ℹ️ [Google Drive Save] Skipped (SAVE_TO_GDRIVE is set to false)")
 
+                    # Buffer-এর মাধ্যমে টিকটকে আপলোড
                     print(f"  [+] Uploading Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
                     upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
 
