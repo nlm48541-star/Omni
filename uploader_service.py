@@ -35,6 +35,11 @@ def sync_background_videos_from_gdrive(config=None):
         print("  ℹ️ [Backgrounds] 'GDRIVE_BG_FOLDER_ID' not provided in Secrets. Local/Dynamic backgrounds will be used.")
         return False
 
+    # ড্রাইভের পুরো লিংক পেস্ট করলেও শুধু আইডি অংশটুকু আলাদা করে নেওয়া
+    if "drive.google.com" in bg_folder_id:
+        m = re.search(r'folders/([a-zA-Z0-9_-]+)', bg_folder_id)
+        if m: bg_folder_id = m.group(1)
+
     print(f"  📥 [Google Drive] Fetching background videos from Folder ID: '{bg_folder_id}'...")
 
     # পদ্ধতি ১: Rclone দিয়ে ড্রাইভ ফোল্ডার আইডি থেকে ডাউনলোড
@@ -47,7 +52,6 @@ def sync_background_videos_from_gdrive(config=None):
             match = re.search(r'\[(.*?)\]', rclone_conf_str)
             remote_name = match.group(1).strip() if match else "gdrive"
 
-            # 🌟 --drive-root-folder-id দিয়ে নির্দিষ্ট ফোল্ডারে রুট সেট করা
             cmd = [
                 "rclone", "--config", conf_path,
                 "--drive-root-folder-id", bg_folder_id,
@@ -68,7 +72,7 @@ def sync_background_videos_from_gdrive(config=None):
             if os.path.exists(conf_path):
                 os.remove(conf_path)
 
-    # পদ্ধতি ২: পাবলিক লিঙ্ক হলে gdown Python API দিয়ে সরাসরি ডাউনলোড (আর্গুমেন্ট এরর মুক্ত)
+    # পদ্ধতি ২: পাবলিক লিঙ্ক হলে gdown Python API দিয়ে সরাসরি ডাউনলোড
     try:
         print("  📥 [Public Drive Link] Attempting download via gdown Python API...")
         import gdown
@@ -88,13 +92,9 @@ def sync_background_videos_from_gdrive(config=None):
 # 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (১ থেকে ৮টি চ্যানেল)
 # =========================================================================
 def get_all_youtube_targets(config=None):
-    """
-    গিটহাব সিক্রেটস থেকে সর্বোচ্চ ৮টি ইউটিউব চ্যানেলের ক্রেডেনশিয়াল সংগ্রহ করে।
-    """
     if config is None: config = {}
     targets = []
 
-    # নাম্বারড সিক্রেটস চেক (YT_CLIENT_ID_1 থেকে YT_CLIENT_ID_8)
     for i in range(1, 9):
         cid = os.environ.get(f"YT_CLIENT_ID_{i}", "").strip()
         csec = os.environ.get(f"YT_CLIENT_SECRET_{i}", "").strip()
@@ -102,7 +102,6 @@ def get_all_youtube_targets(config=None):
         if cid and csec and rtok:
             targets.append({"client_id": cid, "client_secret": csec, "refresh_token": rtok, "index": i})
 
-    # ডিফল্ট চ্যানেল (যদি নাম্বারড ফরম্যাটে না থাকে)
     if not targets:
         cid1 = os.environ.get("YT_CLIENT_ID", "").strip() or os.environ.get("CLIENT_ID", "").strip()
         csec1 = os.environ.get("YT_CLIENT_SECRET", "").strip() or os.environ.get("CLIENT_SECRET", "").strip()
@@ -199,14 +198,9 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
 # 🌟 ৩. TikTok / Buffer মাল্টি-অ্যাকাউন্ট হ্যান্ডলার (সর্বোচ্চ ৮টি প্রোফাইল)
 # =========================================================================
 def get_all_tiktok_buffer_targets(config=None):
-    """
-    ১টি টোকেনের আন্ডারে কমা-সেপারেটেড ৩টি প্রোফাইল আইডি সহ 
-    সর্বোচ্চ ৮টি টিকটক টার্গেট অ্যাকাউন্ট রিড করে।
-    """
     if config is None: config = {}
     targets = []
     
-    # ৩টি Buffer একাউন্টের টোকেন এবং কমা-সেপারেটেড প্রোফাইল চেক
     for i in range(1, 5):
         token = os.environ.get(f"BUFFER_TOKEN_{i}", "").strip()
         profiles_str = os.environ.get(f"BUFFER_PROFILES_{i}", os.environ.get(f"BUFFER_PROFILE_{i}", "")).strip()
@@ -221,7 +215,6 @@ def get_all_tiktok_buffer_targets(config=None):
                     "index": len(targets) + 1
                 })
 
-    # ডিফল্ট একক সেটিংস চেক
     if not targets:
         pid_def = os.environ.get("BUFFER_PROFILE_ID", "").strip()
         tok_def = os.environ.get("BUFFER_ACCESS_TOKEN", "").strip()
@@ -235,10 +228,9 @@ def get_all_tiktok_buffer_targets(config=None):
                     "index": len(targets) + 1
                 })
 
-    return targets[:8]  # সর্বোচ্চ ৮টি প্রোফাইল রিটার্ন করবে
+    return targets[:8]
 
 def upload_to_public_host(video_path):
-    """Buffer এ পাঠানোর জন্য ভিডিওকে পাবলিক হোস্টে আপলোড করে URL তৈরি করে"""
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
     hosts = [
         ("Catbox", lambda: requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS, timeout=135)),
@@ -258,7 +250,6 @@ def upload_to_public_host(video_path):
     return None
 
 def upload_to_specific_buffer_account(video_path, description, profile_id, access_token):
-    """নির্দিষ্ট Buffer Channel ID এবং Access Token দিয়ে TikTok-এ পোস্ট তৈরি করে"""
     if not profile_id or not access_token: return False
 
     video_url = upload_to_public_host(video_path)
@@ -296,33 +287,69 @@ def upload_to_specific_buffer_account(video_path, description, profile_id, acces
     return False
 
 def upload_video_to_tiktok_buffer(video_path, description, config=None):
-    """পুরনো কোডের সাথে সামঞ্জস্য রাখার জন্য ফলব্যাক র‍্যাপার"""
     targets = get_all_tiktok_buffer_targets(config)
     if not targets: return False
     first = targets[0]
     return upload_to_specific_buffer_account(video_path, description, first['profile_id'], first['token'])
 
 # =========================================================================
-# 🌟 ৪. RCLONE গুগল ড্রাইভ আপলোড হ্যান্ডলার
+# 🌟 ৪. RCLONE গুগল ড্রাইভ আপলোড হ্যান্ডলার (সম্পূর্ণ লাইভ লগ সহ)
 # =========================================================================
-def upload_video_via_rclone(file_path, rclone_conf_str, folder_id=""):
-    """তৈরি হওয়া ভিডিও গুগল ড্রাইভে ব্যাকআপ হিসেবে আপলোড করে"""
-    if not rclone_conf_str: return False
-    conf_path = "_tmp_rclone.conf"
+def upload_video_via_rclone(file_path, rclone_conf_str, folder_id="", custom_filename=None):
+    """
+    তৈরি হওয়া ভিডিও গুগল ড্রাইভে ব্যাকআপ হিসেবে আপলোড করে (পূর্ণাঙ্গ লাইভ লগসহ)।
+    """
+    if not rclone_conf_str:
+        print("  ⚠️ [Google Drive Error] 'RCLONE_CONF' secret is empty or missing!")
+        return False
+
+    if not os.path.exists(file_path):
+        print(f"  ⚠️ [Google Drive Error] Video file not found: {file_path}")
+        return False
+
+    # ড্রাইভের পুরো লিংক পেস্ট করলেও শুধু আইডি অংশটুকু আলাদা করে নেওয়া
+    clean_folder_id = str(folder_id).strip()
+    if "drive.google.com" in clean_folder_id:
+        m = re.search(r'folders/([a-zA-Z0-9_-]+)', clean_folder_id)
+        if m: clean_folder_id = m.group(1)
+
+    conf_path = "_tmp_rclone_upload.conf"
     try:
         with open(conf_path, "w", encoding="utf-8") as f:
             f.write(rclone_conf_str.strip())
         match = re.search(r'\[(.*?)\]', rclone_conf_str)
         remote_name = match.group(1).strip() if match else "gdrive"
 
-        if folder_id:
-            cmd = ["rclone", "--config", conf_path, "--drive-root-folder-id", folder_id, "copy", file_path, f"{remote_name}:"]
+        target_name = custom_filename or os.path.basename(file_path)
+        print(f"  📤 [Google Drive] Uploading '{target_name}' to Remote: '{remote_name}' (Folder ID: '{clean_folder_id}')...")
+
+        if clean_folder_id:
+            cmd = [
+                "rclone", "--config", conf_path,
+                "--drive-root-folder-id", clean_folder_id,
+                "copyto", file_path, f"{remote_name}:{target_name}",
+                "-v"
+            ]
         else:
-            cmd = ["rclone", "--config", conf_path, "copy", file_path, f"{remote_name}:"]
+            cmd = [
+                "rclone", "--config", conf_path,
+                "copyto", file_path, f"{remote_name}:{target_name}",
+                "-v"
+            ]
 
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return res.returncode == 0
-    except Exception: return False
+
+        if res.returncode == 0:
+            print(f"  ✅ [Google Drive SUCCESS] Video saved to Google Drive: '{target_name}'")
+            return True
+        else:
+            print(f"  ❌ [Google Drive Upload Failed] Exit code {res.returncode}")
+            print(f"  ⚠️ Rclone Error Output: {res.stderr.strip()[:300]}")
+            return False
+
+    except Exception as e:
+        print(f"  ❌ [Google Drive Exception] {e}")
+        return False
     finally:
         if os.path.exists(conf_path):
             os.remove(conf_path)
