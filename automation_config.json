@@ -19,7 +19,7 @@
             "source": "🌐 Website",
             "source_id": "https://bdgovtnotice.com/feed/",
             "destination": "👥 Facebook",
-            "dest_id": "1390325630823628",
+            "dest_id": "1390325630823628, 1394434030412011, 1318091394727687, 1276158988920869, 1392353430623814, 1366754066520785",
             "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
@@ -40,7 +40,7 @@
             "source": "🌐 Website",
             "source_id": "https://projobsbd.com/feed/",
             "destination": "👥 Facebook",
-            "dest_id": "1390325630823628",
+            "dest_id": "1390325630823628, 1394434030412011, 1318091394727687, 1276158988920869, 1392353430623814, 1366754066520785",
             "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
@@ -61,7 +61,7 @@
             "source": "🌐 Website",
             "source_id": "https://bdgovtjob.net/feed/",
             "destination": "👥 Facebook",
-            "dest_id": "1390325630823628",
+            "dest_id": "1390325630823628, 1394434030412011, 1318091394727687, 1276158988920869, 1392353430623814, 1366754066520785",
             "txt": true, "img": true, "vid": true, "title_only": true, "keep_hashtags": false, "min_words": 1, "lookback_hours": 24.0
         },
         {
