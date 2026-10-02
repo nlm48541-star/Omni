@@ -8,23 +8,85 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from config_manager import detect_offline_application_rules
 
-OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
-GROQ_API = os.environ.get("GROQ_API", "").strip()
+TRACKER_FILE = "key_tracker.json"
 
+OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
+
+# 🌟 Ollama Cloud মডেল লিস্ট (Gemma মডেল সর্বোচ্চ প্রায়োরিটিতে)
 OLLAMA_MODELS = [
     "gemma4:31b",
+    "gemma4",
+    "gemma2:27b",
+    "gemma2",
     "gpt-oss:120b",
     "gpt-oss:20b",
     "nemotron-3-nano:30b",
-    "nemotron-3-super",
-    "nemotron-3-ultra",
     "kimi-k3",
-    "minimax-m3",
-    "gemma4",
-    "kimi-k2.6"
+    "minimax-m3"
 ]
 
-GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+# 🌟 OpenRouter মডেল লিস্ট
+OPENROUTER_MODELS = [
+    "google/gemini-2.0-flash-001",
+    "meta-llama/llama-3.3-70b-instruct",
+    "qwen/qwen-2.5-72b-instruct",
+    "mistralai/mistral-small-24b-instruct-2501"
+]
+
+# 🌟 Groq Cloud মডেল লিস্ট
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant"
+]
+
+# 🌟 Cerebras Cloud মডেল লিস্ট
+CEREBRAS_MODELS = [
+    "llama3.3-70b",
+    "llama3.1-8b"
+]
+
+# =========================================================================
+# 🌟 কি পার্সিং ও ট্র্যাকার হেল্পার (এন্টার/নিউলাইন সাপোর্ট ও ইনডেক্স সেভ)
+# =========================================================================
+def parse_multi_keys(env_var_names):
+    if isinstance(env_var_names, str):
+        env_var_names = [env_var_names]
+    for env_name in env_var_names:
+        raw = os.environ.get(env_name, "").strip()
+        if raw:
+            lines = re.split(r'[\r\n,;]+', raw)
+            keys = [k.strip() for k in lines if k.strip() and not k.strip().startswith('#')]
+            if keys:
+                return keys
+    return []
+
+def get_saved_key_index(platform, total_keys):
+    if total_keys <= 0: return 0
+    if os.path.exists(TRACKER_FILE):
+        try:
+            with open(TRACKER_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return int(data.get(f"{platform}_index", 0)) % total_keys
+        except Exception: pass
+    return 0
+
+def save_key_index(platform, index, total_keys):
+    if total_keys <= 0: return
+    data = {}
+    if os.path.exists(TRACKER_FILE):
+        try:
+            with open(TRACKER_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception: data = {}
+    data[f"{platform}_index"] = index % total_keys
+    try:
+        with open(TRACKER_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception: pass
+
+def mask_key(k):
+    if not k or len(k) <= 8: return "****"
+    return k[:4] + "..." + k[-4:]
 
 def get_ollama_chat_endpoint():
     raw = os.environ.get("OLLAMA_API_URL", "").strip()
@@ -39,11 +101,6 @@ def get_ollama_chat_endpoint():
         return f"{base}/chat"
     else:
         return f"{base}/api/chat"
-
-def get_all_ollama_keys():
-    raw_keys = os.environ.get("OLLAMA_API_KEYS", os.environ.get("OLLAMA_API_KEY", os.environ.get("Ollama_API_Key", ""))).strip()
-    if not raw_keys: return []
-    return [k.strip() for k in re.split(r'[\r\n,;]+', raw_keys) if k.strip()]
 
 def encode_image_base64(image_path, max_dim=1024):
     try:
@@ -191,6 +248,9 @@ def normalize_eight_scripts(data):
     data["voiceover_script"] = final_8[0]
     return data
 
+# =========================================================================
+# 🌟 মাস্টার এআই কো-অর্ডিনেটর (Ollama -> OpenRouter -> Groq -> Cerebras)
+# =========================================================================
 def generate_job_data_and_script(title, article_text, raw_html, image_paths, memory=None):
     clean_title = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
@@ -245,13 +305,17 @@ Return strictly valid JSON:
 }}"""
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
-    ollama_endpoint = get_ollama_chat_endpoint()
 
-    ollama_keys = get_all_ollama_keys()
+    # ---------------------------------------------------------------------
+    # 🌟 প্ল্যাটফর্ম ১: Ollama Cloud (১ম অগ্রাধিকার - Gemma মডেল অগ্রাধিকার)
+    # ---------------------------------------------------------------------
+    ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
     if ollama_keys:
         total_k = len(ollama_keys)
-        start_idx = (memory.get("ollama_key_index", 0) if isinstance(memory, dict) else 0) % total_k
+        start_idx = get_saved_key_index("ollama", total_k)
+        ollama_endpoint = get_ollama_chat_endpoint()
 
+        print(f"\n--- [Priority 1: Ollama Cloud API] ({total_k} keys detected) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = ollama_keys[k_idx]
@@ -262,37 +326,146 @@ Return strictly valid JSON:
                     "model": model,
                     "messages": [{"role": "user", "content": prompt, "images": base64_imgs}],
                     "stream": False,
-                    "options": {"temperature": 0.4}
+                    "options": {"temperature": 0.3}
                 }
                 try:
-                    resp = requests.post(ollama_endpoint, headers=headers, json=payload, timeout=135)
+                    resp = requests.post(ollama_endpoint, headers=headers, json=payload, timeout=90)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name") and data.get("posts"):
-                            if isinstance(memory, dict): memory["ollama_key_index"] = k_idx
+                            save_key_index("ollama", k_idx, total_k)
+                            print(f"  ✅ [Ollama SUCCESS] Model: '{model}' (Key #{k_idx+1})")
                             return normalize_eight_scripts(data)
+                    elif resp.status_code in [401, 402, 429]:
+                        print(f"  ⚠️ Ollama Key #{k_idx+1} limit/auth notice (HTTP {resp.status_code}). Switching key...")
+                        save_key_index("ollama", (k_idx + 1) % total_k, total_k)
+                        break
                 except Exception: pass
 
-    if GROQ_API:
-        headers = {"Authorization": f"Bearer {GROQ_API}", "Content-Type": "application/json"}
-        for g_model in GROQ_MODELS:
-            payload = {
-                "model": g_model,
-                "messages": [
-                    {"role": "system", "content": "You are a Bengali job circular analyst. Return 8 distinct voiceover scripts strictly ending with bio/inbox CTA."},
-                    {"role": "user", "content": prompt}
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.4,
-                "max_tokens": 3000
-            }
-            try:
-                resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=90)
-                if resp.status_code == 200:
-                    data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                    if data and data.get("org_name") and data.get("posts"):
-                        return normalize_eight_scripts(data)
-            except Exception: pass
+    # ---------------------------------------------------------------------
+    # 🌟 প্ল্যাটফর্ম ২: OpenRouter Cloud API (২য় অগ্রাধিকার)
+    # ---------------------------------------------------------------------
+    openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
+    if openrouter_keys:
+        total_k = len(openrouter_keys)
+        start_idx = get_saved_key_index("openrouter", total_k)
+        print(f"\n--- [Priority 2: OpenRouter Cloud API] ({total_k} keys detected) ---")
 
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = openrouter_keys[k_idx]
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/omnisync",
+                "X-Title": "OmniSync"
+            }
+
+            for model in OPENROUTER_MODELS:
+                # OpenRouter ইমেজ সাপোর্ট হ্যান্ডলিং
+                msg_content = [{"type": "text", "text": prompt}]
+                for b64 in base64_imgs[:2]:
+                    msg_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": msg_content}],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.3
+                }
+                try:
+                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=90)
+                    if resp.status_code == 200:
+                        data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
+                        if data and data.get("org_name") and data.get("posts"):
+                            save_key_index("openrouter", k_idx, total_k)
+                            print(f"  ✅ [OpenRouter SUCCESS] Model: '{model}' (Key #{k_idx+1})")
+                            return normalize_eight_scripts(data)
+                    elif resp.status_code in [401, 402, 429]:
+                        print(f"  ⚠️ OpenRouter Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
+                        save_key_index("openrouter", (k_idx + 1) % total_k, total_k)
+                        break
+                except Exception: pass
+
+    # ---------------------------------------------------------------------
+    # 🌟 প্ল্যাটফর্ম ৩: Groq Cloud API (৩য় অগ্রাধিকার)
+    # ---------------------------------------------------------------------
+    groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
+    if groq_keys:
+        total_k = len(groq_keys)
+        start_idx = get_saved_key_index("groq", total_k)
+        print(f"\n--- [Priority 3: Groq Cloud API] ({total_k} keys detected) ---")
+
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = groq_keys[k_idx]
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+            for g_model in GROQ_MODELS:
+                payload = {
+                    "model": g_model,
+                    "messages": [
+                        {"role": "system", "content": "You are a professional Bengali job circular analyst. Return strictly valid JSON containing 8 distinct voiceover scripts ending with inbox/bio CTA."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.3,
+                    "max_tokens": 3000
+                }
+                try:
+                    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=80)
+                    if resp.status_code == 200:
+                        data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
+                        if data and data.get("org_name") and data.get("posts"):
+                            save_key_index("groq", k_idx, total_k)
+                            print(f"  ✅ [Groq SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
+                            return normalize_eight_scripts(data)
+                    elif resp.status_code in [401, 402, 429]:
+                        print(f"  ⚠️ Groq Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
+                        save_key_index("groq", (k_idx + 1) % total_k, total_k)
+                        break
+                except Exception: pass
+
+    # ---------------------------------------------------------------------
+    # 🌟 প্ল্যাটফর্ম ৪: Cerebras Cloud API (৪র্থ অগ্রাধিকার)
+    # ---------------------------------------------------------------------
+    cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
+    if cerebras_keys:
+        total_k = len(cerebras_keys)
+        start_idx = get_saved_key_index("cerebras", total_k)
+        print(f"\n--- [Priority 4: Cerebras Cloud API] ({total_k} keys detected) ---")
+
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = cerebras_keys[k_idx]
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+            for c_model in CEREBRAS_MODELS:
+                payload = {
+                    "model": c_model,
+                    "messages": [
+                        {"role": "system", "content": "You are a Bengali job circular analyst. Return strictly valid JSON with 8 voiceover scripts ending with inbox/bio CTA."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.3,
+                    "max_tokens": 3000
+                }
+                try:
+                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload, timeout=80)
+                    if resp.status_code == 200:
+                        data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
+                        if data and data.get("org_name") and data.get("posts"):
+                            save_key_index("cerebras", k_idx, total_k)
+                            print(f"  ✅ [Cerebras SUCCESS] Model: '{c_model}' (Key #{k_idx+1})")
+                            return normalize_eight_scripts(data)
+                    elif resp.status_code in [401, 402, 429]:
+                        print(f"  ⚠️ Cerebras Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
+                        save_key_index("cerebras", (k_idx + 1) % total_k, total_k)
+                        break
+                except Exception: pass
+
+    # চূড়ান্ত স্মার্ট ফলব্যাক
+    print("  ⚠️ [Notice] All Cloud AI Platforms exhausted/unavailable. Utilizing Smart Local Fallback...")
     fallback = smart_fallback_data(title, article_text, raw_html)
     return normalize_eight_scripts(fallback)
