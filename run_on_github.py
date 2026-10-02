@@ -85,7 +85,6 @@ async def process_sync(config, memory):
         elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
         elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
-    # ফ্লেক্সিবল ভিডিও কাউন্ট নির্ধারণ
     main_needed_count = max(len(fb_dest_ids), len(yt_targets), 1)
     tiktok_needed_count = len(tiktok_targets)
     total_audio_needed = min(8, max(main_needed_count, tiktok_needed_count))
@@ -105,7 +104,6 @@ async def process_sync(config, memory):
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
     render_wa_url = get_credential(config, "render_wa_url", "RENDER_WA_URL") or "https://wa-channel-bridge.onrender.com"
 
-    # 🌟 মেমোরি এবং পূর্বে স্কিপ করা অফলাইন সার্কুলার লিঙ্কগুলোর তালিকা লোড
     processed_set = set(memory.get("processed_articles", []))
     for k, v in memory.items():
         if isinstance(v, list) and k.startswith("route_"):
@@ -121,7 +119,6 @@ async def process_sync(config, memory):
             if not entry_link and 'links' in entry and entry.links: entry_link = entry.links[0].get('href', '').strip()
             if not entry_link: entry_link = entry.get('id', entry.get('guid', '')).strip()
 
-            # পূর্বে প্রোসেসড অথবা পূর্বে স্কিপ করা থাকলে সরাসরি বাদ দেওয়া হবে
             if not entry_link or entry_link in processed_set: continue
 
             raw_title = entry.get('title', '').strip()
@@ -146,21 +143,19 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # এআই দিয়ে সার্কুলার ছবি ও টেক্সট বিশ্লেষণ
+            # 🌟 এআই প্রসেসিং (Ollama -> OpenRouter -> Groq -> Cerebras)
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
-            # 🌟 অফলাইন আবেদন যাচাই ফিল্টার (ডাকযোগ / কুরিয়ার / সরাসরি)
+            # অফলাইন আবেদন যাচাই ফিল্টার (ডাকযোগ / কুরিয়ার / সরাসরি)
             is_offline, offline_reason = check_if_offline_application(web_text or raw_desc_clean, web_html, job_data, article_title)
             if is_offline:
                 print(f"\n🚫 [OFFLINE CIRCULAR DETECTED] Skipping '{article_title}'")
                 print(f"   Reason: {offline_reason}")
                 print(f"   Action: No video will be generated.")
 
-                # ডাউনলোড করা ছবিগুলো মুছে ফেলা
                 for dp in downloaded_imgs:
                     if os.path.exists(dp): os.remove(dp)
 
-                # 🌟 লিঙ্কটি skipped_offline_jobs.json এ সেভ করা যাতে পরবর্তীতে আর স্ক্যান না হয়
                 record_skipped_offline_job(entry_link, article_title, offline_reason)
                 processed_set.add(entry_link)
                 memory["processed_articles"] = list(processed_set)[-300:]
@@ -223,6 +218,8 @@ async def process_sync(config, memory):
                     if save_to_gdrive:
                         drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
                         upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
+                    else:
+                        print("  ℹ️ [Google Drive Save] Skipped (SAVE_TO_GDRIVE is set to false)")
 
                     print(f"  [+] Uploading Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
                     upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
@@ -241,7 +238,7 @@ async def process_sync(config, memory):
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
-            # ইনস্ট্যান্ট মেমোরি সেভ (ডুপ্লিকেট ভিডিও প্রতিরোধক)
+            # মেমোরি সেভ
             processed_set.add(entry_link)
             memory["processed_articles"] = list(processed_set)[-300:]
             save_json(MEMORY_FILE, memory)
