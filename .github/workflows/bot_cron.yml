@@ -32,6 +32,8 @@ jobs:
 
       - name: Execute OmniSync Master Engine
         env:
+          PYTHONUNBUFFERED: "1"
+
           # টেলিগ্রাম সেটিংস
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
@@ -77,10 +79,7 @@ jobs:
           BUFFER_PROFILE_ID: ${{ secrets.BUFFER_PROFILE_ID }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
 
-          # 🌟 টেক্সট এআই প্ল্যাটফর্মসমূহ (একাধিক কি সাপোর্ট)
-          OLLAMA_API_KEYS: ${{ secrets.OLLAMA_API_KEYS }}
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-          OLLAMA_API_URL: ${{ secrets.OLLAMA_API_URL }}
+          # টেক্সট এআই প্ল্যাটফর্মসমূহ
           OPENROUTER_API_KEYS: ${{ secrets.OPENROUTER_API_KEYS }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
@@ -88,8 +87,11 @@ jobs:
           GROQ_API: ${{ secrets.GROQ_API }}
           CEREBRAS_API_KEYS: ${{ secrets.CEREBRAS_API_KEYS }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          OLLAMA_API_KEYS: ${{ secrets.OLLAMA_API_KEYS }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_API_URL: ${{ secrets.OLLAMA_API_URL }}
 
-          # 🌟 ভয়েস এআই প্ল্যাটফর্মসমূহ (Gemini ও ElevenLabs)
+          # ভয়েস এআই প্ল্যাটফর্মসমূহ (Gemini ও ElevenLabs)
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_VOICE_ID: ${{ secrets.GEMINI_VOICE_ID }}
@@ -105,13 +107,13 @@ jobs:
           SAVE_TO_GDRIVE: ${{ secrets.SAVE_TO_GDRIVE }}
           ENABLE_TIKTOK: ${{ secrets.ENABLE_TIKTOK }}
           USE_LOCAL_MUSIC: ${{ secrets.USE_LOCAL_MUSIC }}
-        run: python run_on_github.py
+        run: python -u run_on_github.py
 
-      # 🌟 মেমোরি স্টেট, অফলাইন স্কিপ লিস্ট ও কি-ট্র্যাকার অটোমেটিক গিটহাবে সেভ
+      # মেমোরি স্টেট অটোমেটিক গিটহাবে সেভ
       - name: Commit & Save Sync Progress State
         run: |
           git config --local user.email "engine@omnisync.io"
           git config --local user.name "OmniSync Master Engine"
-          git add bot_memory.json skipped_offline_jobs.json key_tracker.json || true
-          git commit -m "Auto-Update: Save memory, key tracker & skipped jobs [skip-ci]" || echo "No new updates to save"
+          git add bot_memory.json key_tracker.json || true
+          git commit -m "Auto-Update: Save memory & key tracker [skip-ci]" || echo "No new updates to save"
           git push
