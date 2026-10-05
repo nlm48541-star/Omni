@@ -24,8 +24,8 @@ from uploader_service import (
     post_multi_photo_to_facebook, post_reel_to_facebook,
     post_video_to_facebook, upload_video_to_youtube,
     upload_video_via_rclone, post_to_whatsapp_channel,
-    sync_background_videos_from_gdrive, get_all_youtube_targets,
-    get_all_tiktok_buffer_targets, upload_to_specific_buffer_account
+    get_all_youtube_targets, get_all_tiktok_buffer_targets,
+    upload_to_specific_buffer_account
 )
 
 def is_forbidden_title(title):
@@ -44,26 +44,13 @@ def filter_banner_first_image(downloaded_imgs):
     except Exception: pass
     return list(downloaded_imgs)
 
-def get_all_background_videos():
-    valid_exts = ('.mp4', '.mov', '.mkv', '.webm', '.avi')
-    videos = []
-    if os.path.exists("Backgrounds") and os.path.isdir("Backgrounds"):
-        for f in sorted(os.listdir("Backgrounds")):
-            if f.lower().endswith(valid_exts):
-                videos.append(os.path.join("Backgrounds", f))
-    return videos
-
 async def process_sync(config, memory):
     rules = config.get("rules", [])
     if not rules:
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # ১. গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিও সিঙ্ক করা
-    sync_background_videos_from_gdrive(config)
-    bg_video_list = get_all_background_videos()
-
-    # ২. কানেক্টেড অ্যাকাউন্টসমূহ রিড করা
+    # কানেক্টেড অ্যাকাউন্টসমূহ রিড করা
     yt_targets = get_all_youtube_targets(config)
     tiktok_targets = get_all_tiktok_buffer_targets(config)
 
@@ -84,7 +71,6 @@ async def process_sync(config, memory):
         elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
         elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
-    # ফ্লেক্সিবল ভিডিও কাউন্ট নির্ধারণ
     main_needed_count = max(len(fb_dest_ids), len(yt_targets), 1)
     tiktok_needed_count = len(tiktok_targets)
     total_audio_needed = min(8, max(main_needed_count, tiktok_needed_count))
@@ -93,12 +79,11 @@ async def process_sync(config, memory):
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
-    print(f"\n⚙️ [Master Automation Status]")
+    print(f"\n⚙️ [Master Automation Status - Poster Video Mode]")
     print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
     print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
     print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
     print(f"   ├─ Total Required Audios    : {total_audio_needed}")
-    print(f"   ├─ Background Videos Found  : {len(bg_video_list)}")
     print(f"   └─ Google Drive Save Mode   : {'✅ ENABLED (ON)' if save_to_gdrive else '⚠️ DISABLED (OFF)'}")
 
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
@@ -140,13 +125,13 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # 🌟 এআই প্রসেসিং (OpenRouter -> Groq -> Cerebras -> Ollama)
+            # 🌟 এআই প্রসেসিং (পোস্টার ডাটা ও স্ক্রিপ্ট উভয়ই তৈরি)
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
-            print(f"\n🔥 [CREATING CONTENT FOR CIRCULAR] '{article_title}'")
+            print(f"\n🔥 [CREATING POSTER CONTENT] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
-            # প্রয়োজনীয় সংখ্যক অডিও জেনারেশন
+            # অডিও ফাইলসমূহ তৈরি
             generated_audios = []
             for idx in range(total_audio_needed):
                 audio_file = f"tmp_voice_{hash(entry_link)}_{idx+1}.mp3"
@@ -160,7 +145,7 @@ async def process_sync(config, memory):
 
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন WhatsApp: 01540503092"
             fb_yt_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}" if len(raw_desc_clean) > 20 else f"{article_title}{contact_sfx}"
-            tiktok_caption = f"{article_title[:90]} | নতুন নিয়োগ বিজ্ঞপ্তি\n\nআবেদন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।\n\n#bdjobs #jobcircular #career #bangladesh"
+            tiktok_caption = f"{article_title[:90]} | নতুন নিয়োগ বিজ্ঞপ্তি\n\nআবেদন করতে WhatsApp: 01540503092 নাম্বারে যোগাযোগ করুন।\n\n#bdjobs #jobcircular #career #bangladesh"
             video_final_title = article_title[:85].strip()
 
             # ১. মেইন ভিডিও তৈরি ও FB / YouTube-এ আপলোড
@@ -185,14 +170,12 @@ async def process_sync(config, memory):
                             post_video_to_facebook(did, token, fb_vid_path, fb_yt_post_text)
                         if os.path.exists(fb_vid_path): os.remove(fb_vid_path)
 
-            # ২. TikTok ভিডিও তৈরি, ড্রাইভে সেভ এবং Buffer-এ আপলোড
+            # 🌟 ২. টিকটকের জন্য আপনার নমুনার পোস্টার ভিডিও তৈরি, ড্রাইভে সেভ ও Buffer-এ আপলোড
             for t_idx, tk_account in enumerate(tiktok_targets):
                 tk_audio = generated_audios[t_idx % len(generated_audios)]
                 tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{t_idx+1}.mp4"
 
-                assigned_bg = bg_video_list[t_idx % len(bg_video_list)] if bg_video_list else None
-
-                print(f"  🎬 Rendering TikTok Video #{t_idx+1} for Account #{tk_account.get('index')} (BG: '{assigned_bg}')")
+                print(f"  🎬 Rendering TikTok Poster Video #{t_idx+1} for Account #{tk_account.get('index')}...")
                 if render_tiktok_motion_video(job_data, tk_audio, tk_vid_path):
                     
                     if save_to_gdrive:
@@ -201,7 +184,7 @@ async def process_sync(config, memory):
                     else:
                         print("  ℹ️ [Google Drive Save] Skipped (SAVE_TO_GDRIVE is set to false)")
 
-                    print(f"  [+] Uploading Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
+                    print(f"  [+] Uploading Poster Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
                     upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
 
                     if os.path.exists(tk_vid_path): os.remove(tk_vid_path)
