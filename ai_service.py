@@ -231,9 +231,6 @@ def normalize_eight_scripts(data):
     data["voiceover_script"] = final_8[0]
     return data
 
-# =========================================================================
-# 🌟 এআই প্রম্পট: পোস্টার ও স্ক্রিপ্ট উভয় ডাটা সংগ্রহ
-# =========================================================================
 def generate_job_data_and_script(title, article_text, raw_html, image_paths, memory=None):
     clean_title = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
@@ -248,9 +245,9 @@ CRITICAL RULES FOR POSTER & SCRIPTS:
 1. POSTER LAYOUT EXTRACTION (VERY CONCISE & EXACT):
    - "poster_headline_1": Short first line in Bengali (e.g. "প্রাণিসম্পদ অধিদপ্তরের বিশাল নিয়োগ")
    - "poster_headline_2": Short punchy hook (e.g. "সুযোগ!" or "বড় সুযোগ!")
-   - "poster_p1_lines": Array of 1-2 short punchy Bengali lines about qualification & vacancies (e.g. ["এসএসসি পাশে প্রাণিসম্পদ অধিদপ্তরে", "৫৩৮ পদে আবেদনের শেষ সুযোগ।"])
+   - "poster_p1_lines": Array of 1-2 short punchy Bengali lines about qualification & vacancies.
    - "poster_fee_line": e.g. "রাত ১২:০০ টা পর্যন্ত। আবেদন ফি বিজ্ঞপ্তিমতে।"
-   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts & vacancy counts (e.g. ["👥 সিমেন ক্যারিয়ার – ৩২ টি এবং অফিস", "সহায়ক – ৫০৬ টি পদে আবেদন করা যাবে।"])
+   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts & vacancy counts.
 
 2. SCRIPTS:
    - Provide "scripts": Array of 8 UNIQUE spoken Bengali voiceover scripts (100-120 words each).
@@ -278,7 +275,7 @@ Return strictly valid JSON:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ১. OpenRouter Cloud API (১ম অগ্রাধিকার)
+    # ১. OpenRouter Cloud API (১ম অগ্রাধিকার - নো টাইমআউট)
     openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
     if openrouter_keys:
         total_k = len(openrouter_keys)
@@ -307,7 +304,8 @@ Return strictly valid JSON:
                     "temperature": 0.3
                 }
                 try:
-                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=90)
+                    # 🌟 নো টাইমআউট
+                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if data and data.get("org_name"):
@@ -319,7 +317,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ২. Groq Cloud API (২য় অগ্রাধিকার)
+    # ২. Groq Cloud API (২য় অগ্রাধিকার - নো টাইমআউট)
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k = len(groq_keys)
@@ -343,7 +341,8 @@ Return strictly valid JSON:
                     "max_tokens": 3000
                 }
                 try:
-                    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=80)
+                    # 🌟 নো টাইমআউট
+                    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if data and data.get("org_name"):
@@ -355,7 +354,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ৩. Cerebras Cloud API (৩য় অগ্রাধিকার)
+    # ৩. Cerebras Cloud API (৩য় অগ্রাধিকার - নো টাইমআউট)
     cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
     if cerebras_keys:
         total_k = len(cerebras_keys)
@@ -379,7 +378,8 @@ Return strictly valid JSON:
                     "max_tokens": 3000
                 }
                 try:
-                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload, timeout=80)
+                    # 🌟 নো টাইমআউট
+                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if data and data.get("org_name"):
@@ -391,7 +391,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ৪. Ollama Cloud API (সর্বশেষ অগ্রাধিকার)
+    # ৪. Ollama Cloud API (সর্বশেষ অগ্রাধিকার - নো টাইমআউট)
     ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -412,7 +412,8 @@ Return strictly valid JSON:
                     "options": {"temperature": 0.3}
                 }
                 try:
-                    resp = requests.post(ollama_endpoint, headers=headers, json=payload, timeout=90)
+                    # 🌟 নো টাইমআউট
+                    resp = requests.post(ollama_endpoint, headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name"):
