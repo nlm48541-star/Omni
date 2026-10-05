@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import sys
 import os
 import re
 import random
@@ -6,6 +7,10 @@ import shutil
 import asyncio
 import requests
 from PIL import Image
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
@@ -50,7 +55,27 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # কানেক্টেড অ্যাকাউন্টসমূহ রিড করা
+    # ১. টেলিগ্রাম ক্লায়েন্ট
+    tg_session = get_credential(config, "tg_session", "TG_SESSION")
+    tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
+    tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
+
+    tg_client = None
+    if tg_session and tg_api_id and tg_api_hash:
+        try:
+            tg_client = TelegramClient(StringSession(str(tg_session).strip()), int(tg_api_id), str(tg_api_hash))
+            await tg_client.connect()
+            if await tg_client.is_user_authorized():
+                print("  [+] Telegram Client Authenticated!")
+            else:
+                print("  ⚠️ Telegram Session expired/unauthorized. Disabling Telegram for this run.")
+                await tg_client.disconnect()
+                tg_client = None
+        except Exception as e:
+            print(f"  ⚠️ Telegram connection notice: {e}")
+            tg_client = None
+
+    # ২. কানেক্টেড অ্যাকাউন্টসমূহ
     yt_targets = get_all_youtube_targets(config)
     tiktok_targets = get_all_tiktok_buffer_targets(config)
 
@@ -79,7 +104,7 @@ async def process_sync(config, memory):
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
-    print(f"\n⚙️ [Master Automation Status - Poster Video Mode]")
+    print(f"\n⚙️ [Master Automation Status - Active & Unlimited Mode]")
     print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
     print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
     print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
@@ -95,6 +120,7 @@ async def process_sync(config, memory):
             processed_set.update(v)
 
     for feed_url in source_feed_urls:
+        print(f"\n[~] Scanning Source Feed: {feed_url}")
         feed = fetch_feed_entries(feed_url)
         for entry in reversed(feed.entries[:10]):
             entry_link = entry.get('link', '').strip()
@@ -118,20 +144,21 @@ async def process_sync(config, memory):
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
                 try:
-                    ir = requests.get(u, headers=HEADERS, timeout=30)
+                    # 🌟 নো টাইমআউট
+                    ir = requests.get(u, headers=HEADERS)
                     if ir.status_code == 200:
                         p = f"tmp_raw_{hash(entry_link)}_{i_idx}.jpg"
                         with open(p, 'wb') as f: f.write(ir.content)
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # 🌟 এআই প্রসেসিং (পোস্টার ডাটা ও স্ক্রিপ্ট উভয়ই তৈরি)
+            # এআই প্রসেসিং
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
             print(f"\n🔥 [CREATING POSTER CONTENT] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
-            # অডিও ফাইলসমূহ তৈরি
+            # অডিও তৈরি
             generated_audios = []
             for idx in range(total_audio_needed):
                 audio_file = f"tmp_voice_{hash(entry_link)}_{idx+1}.mp3"
@@ -140,7 +167,7 @@ async def process_sync(config, memory):
                     generated_audios.append(audio_file)
 
             if not generated_audios:
-                print("  ❌ [ERROR] Could not generate any audio. Skipping...")
+                print("  ❌ [ERROR] Could not generate audio. Skipping...")
                 continue
 
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন WhatsApp: 01540503092"
@@ -170,19 +197,16 @@ async def process_sync(config, memory):
                             post_video_to_facebook(did, token, fb_vid_path, fb_yt_post_text)
                         if os.path.exists(fb_vid_path): os.remove(fb_vid_path)
 
-            # 🌟 ২. টিকটকের জন্য আপনার নমুনার পোস্টার ভিডিও তৈরি, ড্রাইভে সেভ ও Buffer-এ আপলোড
+            # ২. TikTok পোস্টার ভিডিও তৈরি, ড্রাইভে সেভ এবং Buffer-এ আপলোড
             for t_idx, tk_account in enumerate(tiktok_targets):
                 tk_audio = generated_audios[t_idx % len(generated_audios)]
                 tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{t_idx+1}.mp4"
 
                 print(f"  🎬 Rendering TikTok Poster Video #{t_idx+1} for Account #{tk_account.get('index')}...")
                 if render_tiktok_motion_video(job_data, tk_audio, tk_vid_path):
-                    
                     if save_to_gdrive:
                         drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
                         upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
-                    else:
-                        print("  ℹ️ [Google Drive Save] Skipped (SAVE_TO_GDRIVE is set to false)")
 
                     print(f"  [+] Uploading Poster Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
                     upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
@@ -190,8 +214,14 @@ async def process_sync(config, memory):
                     if os.path.exists(tk_vid_path): os.remove(tk_vid_path)
 
             # টেলিগ্রাম ও হোয়াটসঅ্যাপ
-            for did in tg_dest_ids:
-                pass
+            if tg_client:
+                clean_tg = clean_telegram_id(tg_dest_ids[0]) if tg_dest_ids else ""
+                if clean_tg:
+                    try:
+                        if downloaded_imgs: await tg_client.send_file(clean_tg, downloaded_imgs, caption=fb_yt_post_text)
+                        else: await tg_client.send_message(clean_tg, fb_yt_post_text)
+                    except Exception: pass
+
             for did in wa_dest_ids:
                 post_to_whatsapp_channel(render_wa_url, did, fb_yt_post_text, downloaded_imgs)
 
@@ -201,11 +231,15 @@ async def process_sync(config, memory):
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
-            # মেমোরি সেভ (ডুপ্লিকেট ভিডিও প্রতিরোধক)
+            # মেমোরি সেভ
             processed_set.add(entry_link)
             memory["processed_articles"] = list(processed_set)[-300:]
             save_json(MEMORY_FILE, memory)
             print(f"  💾 [SAVED CHECKPOINT] '{article_title[:35]}' saved to memory.")
+
+    if tg_client:
+        try: await tg_client.disconnect()
+        except Exception: pass
 
     return memory
 
