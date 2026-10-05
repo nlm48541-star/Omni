@@ -9,13 +9,9 @@ import requests
 from config_manager import HEADERS, get_credential
 
 # =========================================================================
-# 🌟 ১. গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিও সিঙ্ক (Rclone + gdown)
+# 🌟 ১. গুগল ড্রাইভ থেকে ব্যাকগ্রাউন্ড ভিডিও সিঙ্ক (নো টাইমআউট)
 # =========================================================================
 def sync_background_videos_from_gdrive(config=None):
-    """
-    গিটহাব সিক্রেটস থেকে GDRIVE_BG_FOLDER_ID নিয়ে Backgrounds/ ফোল্ডারে 
-    ভিডিও ফাইলগুলো ডাউনলোড করে।
-    """
     if config is None: config = {}
     
     bg_folder_id = (
@@ -35,14 +31,12 @@ def sync_background_videos_from_gdrive(config=None):
         print("  ℹ️ [Backgrounds] 'GDRIVE_BG_FOLDER_ID' not provided in Secrets. Local/Dynamic backgrounds will be used.")
         return False
 
-    # ড্রাইভের পুরো লিংক পেস্ট করলেও শুধু আইডি অংশটুকু আলাদা করে নেওয়া
     if "drive.google.com" in bg_folder_id:
         m = re.search(r'folders/([a-zA-Z0-9_-]+)', bg_folder_id)
         if m: bg_folder_id = m.group(1)
 
     print(f"  📥 [Google Drive] Fetching background videos from Folder ID: '{bg_folder_id}'...")
 
-    # পদ্ধতি ১: Rclone দিয়ে ড্রাইভ ফোল্ডার আইডি থেকে ডাউনলোড
     rclone_conf_str = get_credential(config, "rclone_conf", "RCLONE_CONF")
     if rclone_conf_str:
         conf_path = "_tmp_rclone_bg.conf"
@@ -72,7 +66,6 @@ def sync_background_videos_from_gdrive(config=None):
             if os.path.exists(conf_path):
                 os.remove(conf_path)
 
-    # পদ্ধতি ২: পাবলিক লিঙ্ক হলে gdown Python API দিয়ে সরাসরি ডাউনলোড
     try:
         print("  📥 [Public Drive Link] Attempting download via gdown Python API...")
         import gdown
@@ -89,7 +82,7 @@ def sync_background_videos_from_gdrive(config=None):
     return len(downloaded) > 0
 
 # =========================================================================
-# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (১ থেকে ৮টি চ্যানেল)
+# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (নো টাইমআউট)
 # =========================================================================
 def get_all_youtube_targets(config=None):
     if config is None: config = {}
@@ -127,7 +120,8 @@ def get_youtube_access_token(client_id, client_secret, refresh_token):
         "grant_type": "refresh_token"
     }
     try:
-        res = requests.post(url, data=payload, timeout=60)
+        # 🌟 নো টাইমআউট
+        res = requests.post(url, data=payload)
         if res.status_code == 200:
             return res.json().get("access_token")
     except Exception: pass
@@ -136,7 +130,7 @@ def get_youtube_access_token(client_id, client_secret, refresh_token):
 def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path, title, description):
     access_token = get_youtube_access_token(client_id, client_secret, refresh_token)
     if not access_token:
-        print("  ❌ [YOUTUBE ERROR] Could not refresh Access Token. Check Credentials.")
+        print("  ❌ [YOUTUBE ERROR] Could not refresh Access Token.")
         return False
 
     try:
@@ -164,7 +158,8 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
             }
         }
 
-        res = requests.post(init_url, headers=headers, json=metadata, timeout=90)
+        # 🌟 নো টাইমআউট
+        res = requests.post(init_url, headers=headers, json=metadata)
         if res.status_code != 200:
             print(f"  ❌ [YOUTUBE INIT ERROR] HTTP {res.status_code}: {res.text[:200]}")
             return False
@@ -173,11 +168,11 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
         if not upload_url: return False
 
         with open(video_path, "rb") as f:
+            # 🌟 নো টাইমআউট
             up_res = requests.put(
                 upload_url,
                 headers={"Content-Length": str(os.path.getsize(video_path)), "Content-Type": "video/mp4"},
-                data=f,
-                timeout=900
+                data=f
             )
 
         if up_res.status_code in [200, 201]:
@@ -195,7 +190,7 @@ def upload_video_to_youtube(client_id, client_secret, refresh_token, video_path,
     return False
 
 # =========================================================================
-# 🌟 ৩. TikTok / Buffer মাল্টি-অ্যাকাউন্ট হ্যান্ডলার (সর্বোচ্চ ৮টি প্রোফাইল)
+# 🌟 ৩. TikTok / Buffer মাল্টি-অ্যাকাউন্ট হ্যান্ডলার (নো টাইমআউট)
 # =========================================================================
 def get_all_tiktok_buffer_targets(config=None):
     if config is None: config = {}
@@ -233,12 +228,13 @@ def get_all_tiktok_buffer_targets(config=None):
 def upload_to_public_host(video_path):
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
     hosts = [
-        ("Catbox", lambda: requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS, timeout=135)),
-        ("Litterbox", lambda: requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS, timeout=135)),
-        ("Pixeldrain", lambda: requests.post("https://pixeldrain.com/api/file", files={"file": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS, timeout=135))
+        ("Catbox", lambda: requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS)),
+        ("Litterbox", lambda: requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "24h"}, files={"fileToUpload": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS)),
+        ("Pixeldrain", lambda: requests.post("https://pixeldrain.com/api/file", files={"file": (clean_filename, open(video_path, 'rb'), "video/mp4")}, headers=HEADERS))
     ]
     for name, fn in hosts:
         try:
+            # 🌟 নো টাইমআউট
             r = fn()
             if r.status_code in [200, 201]:
                 if name == "Pixeldrain":
@@ -280,7 +276,8 @@ def upload_to_specific_buffer_account(video_path, description, profile_id, acces
             }
         }
         try:
-            res = requests.post(graphql_url, json=payload, headers=headers, timeout=180)
+            # 🌟 নো টাইমআউট
+            res = requests.post(graphql_url, json=payload, headers=headers)
             if res.status_code == 200 and "post" in res.json().get("data", {}).get("createPost", {}):
                 return True
         except Exception: pass
@@ -293,12 +290,9 @@ def upload_video_to_tiktok_buffer(video_path, description, config=None):
     return upload_to_specific_buffer_account(video_path, description, first['profile_id'], first['token'])
 
 # =========================================================================
-# 🌟 ৪. RCLONE গুগল ড্রাইভ আপলোড হ্যান্ডলার (সম্পূর্ণ লাইভ লগ সহ)
+# 🌟 ৪. RCLONE গুগল ড্রাইভ আপলোড হ্যান্ডলার (নো টাইমআউট)
 # =========================================================================
 def upload_video_via_rclone(file_path, rclone_conf_str, folder_id="", custom_filename=None):
-    """
-    তৈরি হওয়া ভিডিও গুগল ড্রাইভে ব্যাকআপ হিসেবে আপলোড করে (পূর্ণাঙ্গ লাইভ লগসহ)।
-    """
     if not rclone_conf_str:
         print("  ⚠️ [Google Drive Error] 'RCLONE_CONF' secret is empty or missing!")
         return False
@@ -307,7 +301,6 @@ def upload_video_via_rclone(file_path, rclone_conf_str, folder_id="", custom_fil
         print(f"  ⚠️ [Google Drive Error] Video file not found: {file_path}")
         return False
 
-    # ড্রাইভের পুরো লিংক পেস্ট করলেও শুধু আইডি অংশটুকু আলাদা করে নেওয়া
     clean_folder_id = str(folder_id).strip()
     if "drive.google.com" in clean_folder_id:
         m = re.search(r'folders/([a-zA-Z0-9_-]+)', clean_folder_id)
@@ -337,6 +330,7 @@ def upload_video_via_rclone(file_path, rclone_conf_str, folder_id="", custom_fil
                 "-v"
             ]
 
+        # 🌟 নো টাইমআউট
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         if res.returncode == 0:
@@ -355,13 +349,14 @@ def upload_video_via_rclone(file_path, rclone_conf_str, folder_id="", custom_fil
             os.remove(conf_path)
 
 # =========================================================================
-# 🌟 ৫. FACEBOOK GRAPH API হ্যান্ডলার (পোস্ট ও রিলস)
+# 🌟 ৫. FACEBOOK GRAPH API হ্যান্ডলার (নো টাইমআউট)
 # =========================================================================
 def get_page_access_token(master_user_token, page_id):
     if not master_user_token: return None
     try:
         url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={master_user_token}&limit=100"
-        r = requests.get(url, timeout=60)
+        # 🌟 নো টাইমআউট
+        r = requests.get(url)
         if r.status_code == 200:
             for p in r.json().get('data', []):
                 if str(p.get('id')) == str(page_id):
@@ -372,11 +367,11 @@ def get_page_access_token(master_user_token, page_id):
 def post_photo_to_facebook(page_id, page_token, photo_path, caption):
     try:
         with open(photo_path, 'rb') as f:
+            # 🌟 নো টাইমআউট
             res = requests.post(
                 f"https://graph.facebook.com/v20.0/{page_id}/photos",
                 data={'caption': caption, 'access_token': page_token},
-                files={'source': f},
-                timeout=180
+                files={'source': f}
             )
         return res.status_code == 200
     except Exception: return False
@@ -386,19 +381,19 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
         att = []
         for path in photo_paths:
             with open(path, 'rb') as f:
+                # 🌟 নো টাইমআউট
                 r = requests.post(
                     f"https://graph.facebook.com/v20.0/{page_id}/photos",
                     data={'published': 'false', 'access_token': page_token},
-                    files={'source': f},
-                    timeout=135
+                    files={'source': f}
                 )
             if r.status_code == 200:
                 att.append({"media_fbid": r.json().get('id')})
         if not att: return False
+        # 🌟 নো টাইমআউট
         res = requests.post(
             f"https://graph.facebook.com/v20.0/{page_id}/feed",
-            data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token},
-            timeout=90
+            data={'message': caption, 'attached_media': json.dumps(att), 'access_token': page_token}
         )
         return res.status_code == 200
     except Exception: return False
@@ -406,7 +401,8 @@ def post_multi_photo_to_facebook(page_id, page_token, photo_paths, caption):
 def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
     try:
         url = f"https://graph.facebook.com/v20.0/{page_id}/video_reels"
-        res = requests.post(url, data={'upload_phase': 'start', 'access_token': page_token}, timeout=75)
+        # 🌟 নো টাইমআউট
+        res = requests.post(url, data={'upload_phase': 'start', 'access_token': page_token})
         if res.status_code != 200: return False
         data = res.json()
         video_id, upload_url = data.get("video_id"), data.get("upload_url")
@@ -420,7 +416,8 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
             "Content-Type": "application/octet-stream"
         }
         with open(video_path, "rb") as f:
-            up_res = requests.post(upload_url, headers=headers, data=f, timeout=540)
+            # 🌟 নো টাইমআউট
+            up_res = requests.post(upload_url, headers=headers, data=f)
         if up_res.status_code != 200: return False
             
         finish_payload = {
@@ -431,7 +428,8 @@ def post_reel_to_facebook(page_id, page_token, video_path, title, caption):
             "title": title,
             "access_token": page_token
         }
-        pub_res = requests.post(url, data=finish_payload, timeout=120)
+        # 🌟 নো টাইমআউট
+        pub_res = requests.post(url, data=finish_payload)
         return pub_res.status_code == 200
     except Exception: return False
 
@@ -439,17 +437,17 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     try:
         url = f"https://graph.facebook.com/v20.0/{page_id}/videos"
         with open(video_path, 'rb') as f:
+            # 🌟 নো টাইমআউট
             res = requests.post(
                 url,
                 data={'description': caption, 'access_token': page_token},
-                files={'file': f},
-                timeout=360
+                files={'file': f}
             )
         return res.status_code == 200
     except Exception: return False
 
 # =========================================================================
-# 🌟 ৬. WHATSAPP চ্যানেল হ্যান্ডলার
+# 🌟 ৬. WHATSAPP চ্যানেল হ্যান্ডলার (নো টাইমআউট)
 # =========================================================================
 def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
     if not render_url: return False
@@ -461,6 +459,7 @@ def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
                 with open(p, 'rb') as f:
                     encoded.append(base64.b64encode(f.read()).decode('utf-8'))
         payload = {"channel_id": clean_id, "text": text, "images": encoded}
-        res = requests.post(f"{render_url.rstrip('/')}/send", json=payload, timeout=270)
+        # 🌟 নো টাইমআউট
+        res = requests.post(f"{render_url.rstrip('/')}/send", json=payload)
         return res.status_code == 200
     except Exception: return False
