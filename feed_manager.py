@@ -14,9 +14,9 @@ def extract_article_images(entry, entry_link, raw_desc=""):
         img_urls.extend([mc.get('url') for mc in entry.media_content])
     img_urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc, re.IGNORECASE))
 
-    # লাইভ ওয়েবপেজ স্ক্র্যাপ (Timeout: 36s - 3x)
     try:
-        web_res = requests.get(entry_link, headers=HEADERS, timeout=36)
+        # 🌟 নো টাইমআউট
+        web_res = requests.get(entry_link, headers=HEADERS)
         if web_res.status_code == 200:
             scraped = [u for u in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) if not any(l in u.lower() for l in ['logo', 'icon', 'avatar', 'emoji'])]
             img_urls.extend([i for i in scraped if i not in img_urls])
@@ -33,9 +33,9 @@ def extract_article_images(entry, entry_link, raw_desc=""):
     return cleaned
 
 def scrape_full_webpage_content(page_url):
-    """সরাসরি লাইভ আর্টিকেল ওয়েবপেজ থেকে টেবিল ও ভেতরের সম্পূর্ণ টেক্সট সংগ্রহ করে (Timeout: 45s - 3x)"""
     try:
-        resp = requests.get(page_url, headers=HEADERS, timeout=45)
+        # 🌟 নো টাইমআউট
+        resp = requests.get(page_url, headers=HEADERS)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             container = soup.find(['div', 'article', 'section'], class_=re.compile(r'(entry-content|post-content|article-body|main-content)', re.I))
@@ -49,13 +49,17 @@ def scrape_full_webpage_content(page_url):
 
 def fetch_feed_entries(source_url):
     target_feed_url = clean_feed_url(source_url)
-    try:
-        rss_target = target_feed_url if target_feed_url.endswith(('/feed', '/feed/', '/rss', '/rss/')) else target_feed_url.rstrip('/') + '/feed/'
-        resp = requests.get(rss_target, headers=HEADERS, timeout=36)
-        if resp.status_code == 200:
-            return feedparser.parse(resp.content)
-        else:
-            resp2 = requests.get(target_feed_url, headers=HEADERS, timeout=36)
-            return feedparser.parse(resp2.content if resp2.status_code == 200 else target_feed_url)
-    except Exception:
-        return feedparser.parse(target_feed_url)
+    rss_target = target_feed_url if target_feed_url.endswith(('/feed', '/feed/', '/rss', '/rss/')) else target_feed_url.rstrip('/') + '/feed/'
+    
+    for try_url in [rss_target, target_feed_url]:
+        try:
+            # 🌟 নো টাইমআউট
+            resp = requests.get(try_url, headers=HEADERS)
+            if resp.status_code == 200 and resp.content:
+                parsed = feedparser.parse(resp.content)
+                if parsed.entries:
+                    return parsed
+        except Exception:
+            pass
+
+    return feedparser.parse(b"")
