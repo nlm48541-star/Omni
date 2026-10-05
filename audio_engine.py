@@ -187,7 +187,7 @@ def synthesize_with_gemini(speech_text, output_audio_path):
     return False
 
 # =========================================================================
-# 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার)
+# 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার - নো টাইমআউট)
 # =========================================================================
 def synthesize_with_elevenlabs(speech_text, output_audio_path):
     eleven_keys = parse_multi_keys(["ELEVENLABS_API_KEYS", "ELEVENLABS_API_KEY"])
@@ -213,7 +213,8 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
         headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": api_key}
 
         try:
-            resp = requests.post(tts_url, json=payload, headers=headers, timeout=240)
+            # 🌟 নো টাইমআউট
+            resp = requests.post(tts_url, json=payload, headers=headers)
             if resp.status_code == 200 and len(resp.content) > 1000:
                 os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                 with open(output_audio_path, "wb") as f:
@@ -230,7 +231,7 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
     return False
 
 # =========================================================================
-# 🌟 ৩. Microsoft Edge Neural ব্যাকআপ ইঞ্জিন (ফ্রি ও আনলিমিটেড)
+# 🌟 ৩. Microsoft Edge Neural ব্যাকআপ ইঞ্জিন
 # =========================================================================
 def synthesize_with_edge_fallback(speech_text, output_audio_path):
     print("\n--- [Emergency Backup: Microsoft Edge Neural (bn-BD-PradeepNeural)] ---")
@@ -271,24 +272,20 @@ def generate_voiceover_audio_pipeline(text, output_audio_path, memory=None):
     words = len(speech_text.split())
 
     print("\n" + "="*65)
-    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active")
+    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active (Unlimited Time)")
     print(f"📊 [Text Stats] Chars: {clean_chars} | Words: {words}")
     print(f"📝 [Preview]: \"{speech_text[:120]}...\"")
     print("="*65)
 
-    # ১. Gemini 3.8 Flash TTS (১ম অগ্রাধিকার)
     if synthesize_with_gemini(speech_text, output_audio_path):
         return True
 
-    # ২. ElevenLabs (২য় অগ্রাধিকার)
     if synthesize_with_elevenlabs(speech_text, output_audio_path):
         return True
 
-    # ৩. Microsoft Edge Neural (জরুরি ব্যাকআপ)
     if synthesize_with_edge_fallback(speech_text, output_audio_path):
         return True
 
-    # ৪. লোকাল ব্যাকগ্রাউন্ড মিউজিক (চূড়ান্ত ফলব্যাক)
     fallback_music = get_fallback_music_file()
     if fallback_music and os.path.exists(fallback_music):
         os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
