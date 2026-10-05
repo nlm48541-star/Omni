@@ -11,7 +11,6 @@ TRACKER_FILE = "key_tracker.json"
 
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
 
-# 🌟 OpenRouter মডেল লিস্ট (১ম অগ্রাধিকার)
 OPENROUTER_MODELS = [
     "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
@@ -19,19 +18,16 @@ OPENROUTER_MODELS = [
     "mistralai/mistral-small-24b-instruct-2501"
 ]
 
-# 🌟 Groq Cloud মডেল লিস্ট (২য় অগ্রাধিকার)
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant"
 ]
 
-# 🌟 Cerebras Cloud মডেল লিস্ট (৩য় অগ্রাধিকার)
 CEREBRAS_MODELS = [
     "llama3.3-70b",
     "llama3.1-8b"
 ]
 
-# 🌟 Ollama Cloud মডেল লিস্ট (সর্বশেষ অগ্রাধিকার - Gemma প্রাধান্যসহ)
 OLLAMA_MODELS = [
     "gemma4:31b",
     "gemma4",
@@ -44,9 +40,6 @@ OLLAMA_MODELS = [
     "minimax-m3"
 ]
 
-# =========================================================================
-# 🌟 কি পার্সিং ও ট্র্যাকার হেল্পার (এন্টার/নিউলাইন সাপোর্ট ও ইনডেক্স সেভ)
-# =========================================================================
 def parse_multi_keys(env_var_names):
     if isinstance(env_var_names, str):
         env_var_names = [env_var_names]
@@ -82,10 +75,6 @@ def save_key_index(platform, index, total_keys):
         with open(TRACKER_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception: pass
-
-def mask_key(k):
-    if not k or len(k) <= 8: return "****"
-    return k[:4] + "..." + k[-4:]
 
 def get_ollama_chat_endpoint():
     raw = os.environ.get("OLLAMA_API_URL", "").strip()
@@ -145,8 +134,8 @@ def sanitize_voiceover_script(script):
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
     text = re.sub(r'\s+', ' ', text).strip()
-    cta_sentence = "ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।"
-    if not any(k in text for k in ["ইনবক্স", "বায়ো", "বায়ো", "মেসেজ"]):
+    cta_sentence = "ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে মেসেজ দিন।"
+    if not any(k in text for k in ["হোয়াটসঅ্যাপ", "হোয়াটসঅ্যাপ", "WhatsApp", "whatsapp"]):
         text = f"{text} {cta_sentence}"
 
     return text.strip()
@@ -191,24 +180,24 @@ def smart_fallback_data(title, article_text="", raw_html=""):
     org_candidate = re.sub(r'Job\s*Circular.*$', '', org_candidate, flags=re.IGNORECASE)
     org_candidate = org_candidate.strip(" -|,")
     if not org_candidate or len(org_candidate) < 3:
-        org_candidate = clean.split()[0] if clean else "সরকারি নিয়োগ বিজ্ঞপ্তি"
+        org_candidate = clean.split()[0] if clean else "সরকারি প্রতিষ্ঠান"
 
-    if not scraped_posts:
-        vac_match = re.search(r'(\d+|[০-৯]+)\s*(?:টি\s*)?পদে', clean)
-        vac_str = (vac_match.group(1)) if vac_match else "০১"
-        scraped_posts = [{"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": vac_str, "qualification": "বিজ্ঞপ্তি অনুযায়ী"}]
-
-    fallback_script = f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে আবেদন সম্পন্ন করতে পারেন। ঘরে বসে যেকোনো চাকরির আবেদন সহজে ও নির্ভুলভাবে সম্পন্ন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।"
+    vac_m = re.search(r'(\d+|[০-৯]+)\s*পদে', clean)
+    vac_str = vac_m.group(1) if vac_m else "বিভিন্ন"
 
     return {
         "org_name": org_candidate,
-        "headline": "নিয়োগ বিজ্ঞপ্তি",
+        "poster_headline_1": f"{org_candidate}র বিশাল নিয়োগ",
+        "poster_headline_2": "সুযোগ!",
+        "poster_p1_lines": [f"প্রয়োজনীয় শিক্ষাগত যোগ্যতায় {org_candidate}রে", f"{vac_str} পদে আবেদনের দুর্দান্ত সুযোগ।"],
+        "poster_fee_line": "আবেদন ফি বিজ্ঞপ্তিমতে।",
+        "poster_p3_lines": ["👥 বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে", "আগ্রহী প্রার্থীরা আবেদন করতে পারবেন।"],
         "start_date": st_d,
         "end_date": ed_d,
-        "posts": scraped_posts,
-        "voiceover_script": fallback_script,
-        "optimized_title": clean[:90],
-        "video_description": f"{clean}\n\nআবেদন করতে যোগাযোগ করুন Whatsapp: +8801540503092"
+        "posts": scraped_posts or [{"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": "০১", "qualification": "বিজ্ঞপ্তি অনুযায়ী"}],
+        "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা আবেদন করতে পারেন। ঘরে বসে নির্ভুলভাবে আবেদন করতে স্ক্রিনে দেওয়া নাম্বারে হোয়াটসঅ্যাপ করুন।",
+        "scripts": [],
+        "optimized_title": clean[:90]
     }
 
 def normalize_eight_scripts(data):
@@ -243,58 +232,53 @@ def normalize_eight_scripts(data):
     return data
 
 # =========================================================================
-# 🌟 মাস্টার এআই কো-অর্ডিনেটর: OpenRouter ➔ Groq ➔ Cerebras ➔ Ollama
+# 🌟 এআই প্রম্পট: পোস্টার ও স্ক্রিপ্ট উভয় ডাটা সংগ্রহ
 # =========================================================================
 def generate_job_data_and_script(title, article_text, raw_html, image_paths, memory=None):
     clean_title = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
 
-    prompt = f"""You are a professional Bengali Job Circular Content Engine and Voiceover Writer.
-Analyze this circular and circular images:
+    prompt = f"""You are a professional Bengali Job Circular Visual Poster Designer and Voiceover Writer.
+Analyze this circular details:
 
 Content:
 {full_content}
 
-CRITICAL RULES:
-1. MULTI-SCRIPT GENERATION:
-   - Provide "scripts": Array of 8 UNIQUE spoken Bengali voiceover scripts (each 100-130 words).
-   - Each script must have a DIFFERENT hook and sentence structure.
-   - All 8 scripts MUST strictly end with this CTA: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে আমাদের ইনবক্স করুন অথবা প্রোফাইল বায়ো দেখুন।"
-   - NO years (2026/২০২৬), NO phone digits, NO website mentions, NO like/subscribe mentions.
+CRITICAL RULES FOR POSTER & SCRIPTS:
+1. POSTER LAYOUT EXTRACTION (VERY CONCISE & EXACT):
+   - "poster_headline_1": Short first line in Bengali (e.g. "প্রাণিসম্পদ অধিদপ্তরের বিশাল নিয়োগ")
+   - "poster_headline_2": Short punchy hook (e.g. "সুযোগ!" or "বড় সুযোগ!")
+   - "poster_p1_lines": Array of 1-2 short punchy Bengali lines about qualification & vacancies (e.g. ["এসএসসি পাশে প্রাণিসম্পদ অধিদপ্তরে", "৫৩৮ পদে আবেদনের শেষ সুযোগ।"])
+   - "poster_fee_line": e.g. "রাত ১২:০০ টা পর্যন্ত। আবেদন ফি বিজ্ঞপ্তিমতে।"
+   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts & vacancy counts (e.g. ["👥 সিমেন ক্যারিয়ার – ৩২ টি এবং অফিস", "সহায়ক – ৫০৬ টি পদে আবেদন করা যাবে।"])
 
-2. DATA EXTRACTION:
-   - "org_name": Official institution/company name.
-   - "start_date": e.g. "০১ অক্টোবর" (Without year).
-   - "end_date": e.g. "৩০ অক্টোবর" (Without year).
-   - "posts": List of post objects: {{"post_name": "...", "vacancy": "০১", "qualification": "..."}}.
+2. SCRIPTS:
+   - Provide "scripts": Array of 8 UNIQUE spoken Bengali voiceover scripts (100-120 words each).
+   - Strict Outro CTA: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে দেওয়া নাম্বারে হোয়াটসঅ্যাপে মেসেজ দিন।"
+
+3. DATA:
+   - "org_name": Official organization name.
+   - "start_date": e.g. "০১ অক্টোবর".
+   - "end_date": e.g. "০৬ অক্টোবর".
+   - "posts": Array of {{"post_name": "...", "vacancy": "০১", "qualification": "..."}}.
 
 Return strictly valid JSON:
 {{
   "org_name": "...",
+  "poster_headline_1": "...",
+  "poster_headline_2": "সুযোগ!",
+  "poster_p1_lines": ["..."],
+  "poster_fee_line": "...",
+  "poster_p3_lines": ["..."],
   "start_date": "...",
   "end_date": "...",
-  "posts": [
-    {{"post_name": "...", "vacancy": "০১", "qualification": "..."}}
-  ],
-  "scripts": [
-    "স্ক্রিপ্ট ১...",
-    "স্ক্রিপ্ট ২...",
-    "স্ক্রিপ্ট ৩...",
-    "স্ক্রিপ্ট ৪...",
-    "স্ক্রিপ্ট ৫...",
-    "স্ক্রিপ্ট ৬...",
-    "স্ক্রিপ্ট ৭...",
-    "স্ক্রিপ্ট ৮..."
-  ],
-  "optimized_title": "...",
-  "video_description": "..."
+  "posts": [{{"post_name": "...", "vacancy": "০১", "qualification": "..."}}],
+  "scripts": ["..."]
 }}"""
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ১: OpenRouter Cloud API (১ম অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ১. OpenRouter Cloud API (১ম অগ্রাধিকার)
     openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
     if openrouter_keys:
         total_k = len(openrouter_keys)
@@ -326,19 +310,16 @@ Return strictly valid JSON:
                     resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=90)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                        if data and data.get("org_name") and data.get("posts"):
+                        if data and data.get("org_name"):
                             save_key_index("openrouter", k_idx, total_k)
                             print(f"  ✅ [OpenRouter SUCCESS] Model: '{model}' (Key #{k_idx+1})")
                             return normalize_eight_scripts(data)
                     elif resp.status_code in [401, 402, 429]:
-                        print(f"  ⚠️ OpenRouter Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
                         save_key_index("openrouter", (k_idx + 1) % total_k, total_k)
                         break
                 except Exception: pass
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ২: Groq Cloud API (২য় অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ২. Groq Cloud API (২য় অগ্রাধিকার)
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k = len(groq_keys)
@@ -354,7 +335,7 @@ Return strictly valid JSON:
                 payload = {
                     "model": g_model,
                     "messages": [
-                        {"role": "system", "content": "You are a professional Bengali job circular analyst. Return strictly valid JSON containing 8 distinct voiceover scripts ending with inbox/bio CTA."},
+                        {"role": "system", "content": "You are a professional Bengali job circular visual poster and voiceover writer. Return strictly valid JSON."},
                         {"role": "user", "content": prompt}
                     ],
                     "response_format": {"type": "json_object"},
@@ -365,19 +346,16 @@ Return strictly valid JSON:
                     resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=80)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                        if data and data.get("org_name") and data.get("posts"):
+                        if data and data.get("org_name"):
                             save_key_index("groq", k_idx, total_k)
                             print(f"  ✅ [Groq SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
                             return normalize_eight_scripts(data)
                     elif resp.status_code in [401, 402, 429]:
-                        print(f"  ⚠️ Groq Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
                         save_key_index("groq", (k_idx + 1) % total_k, total_k)
                         break
                 except Exception: pass
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ৩: Cerebras Cloud API (৩য় অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ৩. Cerebras Cloud API (৩য় অগ্রাধিকার)
     cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
     if cerebras_keys:
         total_k = len(cerebras_keys)
@@ -393,7 +371,7 @@ Return strictly valid JSON:
                 payload = {
                     "model": c_model,
                     "messages": [
-                        {"role": "system", "content": "You are a Bengali job circular analyst. Return strictly valid JSON with 8 voiceover scripts ending with inbox/bio CTA."},
+                        {"role": "system", "content": "You are a professional Bengali job circular visual poster and voiceover writer. Return strictly valid JSON."},
                         {"role": "user", "content": prompt}
                     ],
                     "response_format": {"type": "json_object"},
@@ -404,19 +382,16 @@ Return strictly valid JSON:
                     resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload, timeout=80)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                        if data and data.get("org_name") and data.get("posts"):
+                        if data and data.get("org_name"):
                             save_key_index("cerebras", k_idx, total_k)
                             print(f"  ✅ [Cerebras SUCCESS] Model: '{c_model}' (Key #{k_idx+1})")
                             return normalize_eight_scripts(data)
                     elif resp.status_code in [401, 402, 429]:
-                        print(f"  ⚠️ Cerebras Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
                         save_key_index("cerebras", (k_idx + 1) % total_k, total_k)
                         break
                 except Exception: pass
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ৪: Ollama Cloud API (সর্বশেষ অগ্রাধিকার - Gemma মডেল অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ৪. Ollama Cloud API (সর্বশেষ অগ্রাধিকার)
     ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -440,17 +415,15 @@ Return strictly valid JSON:
                     resp = requests.post(ollama_endpoint, headers=headers, json=payload, timeout=90)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
-                        if data and data.get("org_name") and data.get("posts"):
+                        if data and data.get("org_name"):
                             save_key_index("ollama", k_idx, total_k)
                             print(f"  ✅ [Ollama SUCCESS] Model: '{model}' (Key #{k_idx+1})")
                             return normalize_eight_scripts(data)
                     elif resp.status_code in [401, 402, 429]:
-                        print(f"  ⚠️ Ollama Key #{k_idx+1} limit/auth notice (HTTP {resp.status_code}). Switching key...")
                         save_key_index("ollama", (k_idx + 1) % total_k, total_k)
                         break
                 except Exception: pass
 
-    # চূড়ান্ত স্মার্ট ফলব্যাক
-    print("  ⚠️ [Notice] All Cloud AI Platforms exhausted/unavailable. Utilizing Smart Local Fallback...")
+    print("  ⚠️ [Notice] Utilizing Local Smart Poster Fallback...")
     fallback = smart_fallback_data(title, article_text, raw_html)
     return normalize_eight_scripts(fallback)
