@@ -2,27 +2,10 @@
 import os
 import re
 import math
-import shutil
 from PIL import Image, ImageDraw, ImageFont
 
 FONTS_DIR = "Fonts"
 ELEMENTS_DIR = "Element"
-
-def find_element_image(hint_names):
-    if isinstance(hint_names, str): hint_names = [hint_names]
-    search_dirs = [ELEMENTS_DIR, "Elements", "element", "elements", "."]
-    for d in search_dirs:
-        if os.path.exists(d) and os.path.isdir(d):
-            for f in os.listdir(d):
-                f_lower = f.lower()
-                for hint in hint_names:
-                    if hint.lower() in f_lower and f_lower.endswith(('.png', '.webp')):
-                        try:
-                            im = Image.open(os.path.join(d, f)).convert("RGBA")
-                            bbox = im.getbbox()
-                            return im.crop(bbox) if bbox else im
-                        except Exception: pass
-    return None
 
 def find_font_file(font_hints, fallback_name="kalpurush.ttf"):
     if isinstance(font_hints, str): font_hints = [font_hints]
@@ -46,12 +29,7 @@ def get_header_font(size):
     try: return ImageFont.truetype(path, size)
     except Exception: return ImageFont.load_default()
 
-def get_table_font(size):
-    path = find_font_file(["kalpurush", "Kalpurush"])
-    try: return ImageFont.truetype(path, size)
-    except Exception: return ImageFont.load_default()
-
-def get_dates_font(size):
+def get_body_font(size):
     path = find_font_file(["Li Ador Noirrit Bold", "Li Ador Noirrit", "kalpurush"])
     try: return ImageFont.truetype(path, size)
     except Exception: return ImageFont.load_default()
@@ -147,254 +125,127 @@ def clean_org_name(org_name):
     clean = re.sub(r'202[0-9]|২০২[০-৯]', '', clean).strip(" -|,")
     return clean if len(clean) > 2 else org_name
 
-def split_title_words(text):
-    words = str(text).split()
-    if len(words) <= 3:
-        return [text]
-    mid = math.ceil(len(words) / 2.0)
-    line1 = " ".join(words[:mid])
-    line2 = " ".join(words[mid:])
-    return [line1, line2]
+def draw_whatsapp_icon(draw, cx, cy, radius=36):
+    """সুন্দর ভেক্টর হোয়াটসঅ্যাপ আইকন তৈরি করে"""
+    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=(37, 211, 102))
+    # ছোট অভ্যন্তরীণ সাদা বৃত্ত ও হ্যান্ডসেট সিম্বল
+    in_r = int(radius * 0.72)
+    draw.ellipse([cx - in_r, cy - in_r, cx + in_r, cy + in_r], outline=(255, 255, 255), width=int(radius*0.14))
+    # টেলিকম সাইন
+    draw.arc([cx - in_r + 4, cy - in_r + 4, cx + in_r - 4, cy + in_r - 4], start=120, end=300, fill=(255, 255, 255), width=int(radius*0.2))
 
-def ease_out_cubic(t):
-    t = max(0.0, min(1.0, t))
-    return 1.0 - math.pow(1.0 - t, 3)
-
-def ease_in_cubic(t):
-    t = max(0.0, min(1.0, t))
-    return math.pow(t, 3)
-
-def ease_out_back(t, s=1.2):
-    t = max(0.0, min(1.0, t))
-    return 1.0 + (s + 1.0) * math.pow(t - 1.0, 3) + s * math.pow(t - 1.0, 2)
-
-def get_progress(frame_num, start_f, end_f):
-    if frame_num < start_f: return 0.0
-    if frame_num >= end_f: return 1.0
-    return (frame_num - start_f) / float(end_f - start_f)
-
-def render_motion_graphic_frame(job_data, slide_posts, frame_idx=60, total_frames=120, fps=24, slide_entry_prog=1.0, slide_exit_prog=0.0):
+# =========================================================================
+# 🌟 আপনার দেওয়া নমুনার সাথে ১০০% মিল রেখে পোস্টার রেন্ডারার
+# =========================================================================
+def render_poster_image(job_data, output_path):
     W, H = 1080, 1920
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    outro_frames = int(fps * 1.2)
-    outro_start = max(115, total_frames - outro_frames)
-    is_outro = frame_idx >= outro_start
-    if is_outro:
-        exit_t = (frame_idx - outro_start) / float(outro_frames)
-        global_alpha = int(255 * (1.0 - ease_in_cubic(exit_t)))
-        exit_offset_y = int(ease_in_cubic(exit_t) * 90)
-    else:
-        global_alpha = 255
-        exit_offset_y = 0
-
-    if global_alpha <= 0:
-        return overlay
-
-    # ১. সরকারি সিলমোহর সরিয়ে নিরাপদ ক্যারিয়ার ট্যাগ (কমিউনিটি ব্যান প্রতিরোধক)
-    badge_tag_prog = ease_out_back(get_progress(frame_idx, 0, 20)) if not is_outro else (1.0 - exit_t)
-    if badge_tag_prog > 0:
-        tag_w = int(320 * badge_tag_prog)
-        tag_h = int(58 * badge_tag_prog)
-        if tag_w > 20 and tag_h > 10:
-            tx = (W - tag_w) // 2
-            ty = 110 - (tag_h // 2) - exit_offset_y
-            draw.rounded_rectangle([tx, ty, tx + tag_w, ty + tag_h], radius=25, fill=(14, 165, 233, 210), outline=(255, 255, 255, 180), width=2)
-            draw_mixed_text(draw, W // 2, ty + (tag_h // 2), "📢 নতুন নিয়োগ বিজ্ঞপ্তি", get_table_font(26), 26, "#FFFFFF", anchor="mm")
-
-    # ২. প্রতিষ্ঠানের নাম (৩টির বেশি শব্দ হলে সমান ২ লাইনে ভাগ)
-    org_prog = ease_out_cubic(get_progress(frame_idx, 10, 32)) if not is_outro else (1.0 - exit_t)
-    if org_prog > 0:
-        org_name = clean_org_name(job_data.get("org_name", "নিয়োগ বিজ্ঞপ্তি"))
-        title_lines = split_title_words(org_name)
-        y_slide = int((1.0 - org_prog) * -35) - exit_offset_y
-
-        if len(title_lines) == 1:
-            org_font = get_header_font(78)
-            draw_mixed_text(draw, W // 2, 230 + y_slide, title_lines[0], org_font, 78, "#FFFFFF", anchor="mm")
-        else:
-            org_font = get_header_font(62)
-            oy = 205 + y_slide
-            for ol in title_lines:
-                draw_mixed_text(draw, W // 2, oy, ol, org_font, 62, "#FFFFFF", anchor="mm")
-                oy += 66
-
-    # ৩. headline_badge.png ("নিয়োগ বিজ্ঞপ্তি" ব্যানার: ৬৪০px)
-    badge_img = find_element_image(["headline_badge", "badge", "input_file_0"])
-    badge_prog = ease_out_back(get_progress(frame_idx, 20, 42)) if not is_outro else (1.0 - exit_t)
-    if badge_img and badge_prog > 0:
-        target_w = int(640 * badge_prog)
-        aspect = badge_img.size[1] / float(badge_img.size[0])
-        target_h = max(1, int(target_w * aspect))
-        if target_w > 20 and target_h > 10:
-            scaled_b = badge_img.resize((target_w, target_h), Image.LANCZOS)
-            bx = (W - target_w) // 2
-            by = 385 - (target_h // 2) - exit_offset_y
-            overlay.paste(scaled_b, (bx, by), scaled_b)
-
-    # ৪. আবেদন শুরু ও আবেদন শেষ বক্স (তারিখের সাইজ ৫২px বোল্ড ও সেন্টারে)
-    cal_prog = ease_out_cubic(get_progress(frame_idx, 30, 52)) if not is_outro else (1.0 - exit_t)
-    if cal_prog > 0:
-        start_img = find_element_image(["start_box", "start", "input_file_4"])
-        end_img = find_element_image(["end_box", "end", "input_file_3"])
-        
-        slide_offset = int((1.0 - cal_prog) * 80)
-        box_w = 460
-        by_pos = 505 - exit_offset_y
-
-        if start_img:
-            aspect_s = start_img.size[1] / float(start_img.size[0])
-            box_h_s = int(box_w * aspect_s)
-            scaled_s = start_img.resize((box_w, box_h_s), Image.LANCZOS)
-            overlay.paste(scaled_s, (65 - slide_offset, by_pos), scaled_s)
-            
-        st_text = str(job_data.get("start_date", "চলমান"))
-        st_fs = 52 if len(st_text) <= 15 else 44
-        draw_mixed_text(draw, 295 - slide_offset, by_pos + 138, st_text, get_dates_font(st_fs), st_fs, "#FFFFFF", anchor="mm")
-
-        if end_img:
-            aspect_e = end_img.size[1] / float(end_img.size[0])
-            box_h_e = int(box_w * aspect_e)
-            scaled_e = end_img.resize((box_w, box_h_e), Image.LANCZOS)
-            overlay.paste(scaled_e, (555 + slide_offset, by_pos), scaled_e)
-            
-        ed_text = str(job_data.get("end_date", "শীঘ্রই শেষ হবে"))
-        ed_fs = 52 if len(ed_text) <= 15 else 44
-        draw_mixed_text(draw, 785 + slide_offset, by_pos + 138, ed_text, get_dates_font(ed_fs), ed_fs, "#FFFFFF", anchor="mm")
-
-    # ৫. table_header.png (লাল রিবন)
-    th_img = find_element_image(["table_header", "table", "header", "input_file_1"])
-    th_prog = ease_out_back(get_progress(frame_idx, 40, 62)) if not is_outro else (1.0 - exit_t)
-    if th_img and th_prog > 0:
-        tw = int(980 * th_prog)
-        aspect_th = th_img.size[1] / float(th_img.size[0])
-        th = max(1, int(tw * aspect_th))
-        if tw > 20 and th > 10:
-            scaled_th = th_img.resize((tw, th), Image.LANCZOS)
-            tx = (W - tw) // 2
-            ty = 800 - (th // 2) - exit_offset_y
-            overlay.paste(scaled_th, (tx, ty), scaled_th)
-
-    # ৬. পদের তালিকা (প্রতি স্লাইডে সর্বোচ্চ ৫টি পদ, ১২০px উচ্চতা)
-    p_name_font = get_table_font(36)
-    p_vac_font = get_table_font(42)
-    p_qual_font = get_table_font(30)
-
-    row_top_y = 910 - exit_offset_y
-    row_height = 125
-
-    slide_exit_shift_x = int(ease_in_cubic(slide_exit_prog) * -45)
-
-    for i in range(min(5, len(slide_posts))):
-        row_enter_f = 0.0 + (i * 0.15)
-        r_prog = ease_out_cubic(max(0.0, min(1.0, (slide_entry_prog - row_enter_f) / 0.4))) if not is_outro else (1.0 - exit_t)
-
-        if r_prog > 0 and (1.0 - slide_exit_prog) > 0:
-            p = slide_posts[i]
-            p_name = p.get("post_name", "")
-            p_vac = str(p.get("vacancy", "০১"))
-            p_qual = p.get("qualification", "")
-
-            if len(p_vac) == 1 and p_vac in "১২৩৪৫৬৭৮৯123456789":
-                bn_map = {"1":"০১","2":"০২","3":"০৩","4":"০৪","5":"০৫","6":"০৬","7":"০৭","8":"০৮","9":"০৯",
-                          "১":"০১","২":"০২","৩":"০৩","৪":"০৪","৫":"০৫","৬":"০৬","৭":"০৭","৮":"০৮","৯":"০৯"}
-                p_vac = bn_map.get(p_vac, p_vac)
-
-            cy = int(row_top_y + (i * row_height) + (row_height / 2))
-            rx_offset = int((1.0 - r_prog) * -45) + slide_exit_shift_x
-
-            # কলাম ১: পদের নাম (Left X = 80)
-            name_lines = wrap_mixed_text(draw, p_name, p_name_font, 36, max_width=410)
-            if len(name_lines) == 1:
-                draw_mixed_text(draw, 80 + rx_offset, cy, name_lines[0], p_name_font, 36, "#FFFFFF", anchor="lm")
-            else:
-                ny = cy - 20
-                for nl in name_lines[:2]:
-                    draw_mixed_text(draw, 80 + rx_offset, ny, nl, p_name_font, 32, "#FFFFFF", anchor="lm")
-                    ny += 38
-
-            # কলাম ২: পদ সংখ্যা ("সংখ্যা" লেখার মাঝ বরাবর: Center X = 550)
-            draw_mixed_text(draw, 550 + rx_offset, cy, p_vac, p_vac_font, 42, "#FDE047", anchor="mm")
-
-            # কলাম ৩: শিক্ষাগত যোগ্যতা ("যোগ্যতা" লেখার শুরু বরাবর: Left X = 740)
-            qual_lines = wrap_mixed_text(draw, p_qual, p_qual_font, 30, max_width=280)
-            if len(qual_lines) == 1:
-                draw_mixed_text(draw, 740 + rx_offset, cy, qual_lines[0], p_qual_font, 30, "#FFFFFF", anchor="lm")
-            else:
-                qy = cy - 18
-                for ql in qual_lines[:2]:
-                    draw_mixed_text(draw, 740 + rx_offset, qy, ql, p_qual_font, 26, "#FFFFFF", anchor="lm")
-                    qy += 34
-
-    # ৭. নিরাপদ বটম ব্যানার (কোনো ফোন নম্বর নেই -> নো টিকটক ব্যান)
-    cta_prog = ease_out_back(get_progress(frame_idx, 85, 108)) if not is_outro else (1.0 - exit_t)
-    if cta_prog > 0:
-        c_w = int(960 * cta_prog)
-        c_h = 135
-        if c_w > 50:
-            cx = (W - c_w) // 2
-            cy_pos = 1680 - exit_offset_y
-            draw.rounded_rectangle([cx, cy_pos, cx + c_w, cy_pos + c_h], radius=32, fill=(6, 78, 59, 235), outline=(16, 185, 129, 220), width=3)
-            draw_mixed_text(draw, W // 2, cy_pos + 45, "আবেদন করতে যোগাযোগ করুন", get_dates_font(34), 34, "#FDE047", anchor="mm")
-            draw_mixed_text(draw, W // 2, cy_pos + 95, "📩 ইনবক্স করুন অথবা প্রোফাইল বায়ো (Bio) দেখুন", get_table_font(32), 32, "#FFFFFF", anchor="mm")
-
-    return overlay
-
-def generate_tiktok_animated_overlay_frames(job_data, temp_frames_dir, total_frames=120, fps=24):
-    os.makedirs(temp_frames_dir, exist_ok=True)
-    posts = job_data.get("posts", [])
+    # 🌟 আপনার ছবির ব্যাকগ্রাউন্ডের এক্সাক্ট কালার (Pale Warm Cream)
+    BG_COLOR = (253, 247, 215) # #FDF7D7
     
-    PAGE_SIZE = 5
-    chunks = [posts[i:i + PAGE_SIZE] for i in range(0, len(posts), PAGE_SIZE)]
-    if not chunks:
-        chunks = [[]]
-        
-    num_slides = len(chunks)
-    frames_per_slide = total_frames / float(num_slides)
+    im = Image.new("RGB", (W, H), BG_COLOR)
+    draw = ImageDraw.Draw(im)
 
-    for f in range(total_frames):
-        target_path = os.path.join(temp_frames_dir, f"overlay_{f:04d}.png")
-        
-        slide_idx = min(int(f / frames_per_slide), num_slides - 1)
-        current_slide_posts = chunks[slide_idx]
-        
-        slide_start_f = slide_idx * frames_per_slide
-        local_f = f - slide_start_f
-        slide_len = frames_per_slide
-        
-        if slide_idx == 0:
-            s_entry = max(0.0, min(1.0, (f - 50) / 45.0))
+    # ---------------------------------------------------------------------
+    # ১. হেডলাইন সেকশন (গাঢ় সবুজ রঙ + আন্ডারলাইন)
+    # ---------------------------------------------------------------------
+    h1 = job_data.get("poster_headline_1", "")
+    h2 = job_data.get("poster_headline_2", "সুযোগ!")
+    if not h1:
+        org = clean_org_name(job_data.get("org_name", "সরকারি প্রতিষ্ঠান"))
+        h1 = f"{org}র বিশাল নিয়োগ"
+
+    head_font = get_header_font(70)
+    GREEN_COLOR = (20, 90, 40) # #145A28
+
+    # লাইন ১
+    w1, h1_box = measure_mixed_text(draw, h1, head_font, 70)
+    y1 = 345
+    draw_mixed_text(draw, W // 2, y1, h1, head_font, 70, GREEN_COLOR, anchor="mm")
+    # লাইন ১ এর নিচে ডিভাইডার আন্ডারলাইন
+    line1_left = max(60, (W - w1) // 2 - 15)
+    line1_right = min(W - 60, (W + w1) // 2 + 15)
+    draw.line([(line1_left, y1 + 48), (line1_right, y1 + 48)], fill=GREEN_COLOR, width=4)
+
+    # লাইন ২
+    w2, _ = measure_mixed_text(draw, h2, head_font, 70)
+    y2 = y1 + 105
+    draw_mixed_text(draw, W // 2, y2, h2, head_font, 70, GREEN_COLOR, anchor="mm")
+    # লাইন ২ এর নিচে ছোট আন্ডারলাইন
+    line2_left = max(100, (W - w2) // 2 - 10)
+    line2_right = min(W - 100, (W + w2) // 2 + 10)
+    draw.line([(line2_left, y2 + 48), (line2_right, y2 + 48)], fill=GREEN_COLOR, width=4)
+
+    # ---------------------------------------------------------------------
+    # ২. মাঝখানের তথ্যসমূহ (সংক্ষিপ্ত ও পরিচ্ছন্ন বুলেট পয়েন্ট)
+    # ---------------------------------------------------------------------
+    body_font = get_body_font(52)
+    BLACK_COLOR = (17, 24, 39)
+    RED_COLOR = (185, 28, 28)     # #B91C1C
+    CRIMSON_COLOR = (153, 27, 27) # #991B1B
+
+    # পয়েন্ট ১: শিক্ষাগত যোগ্যতা ও মোট পদ
+    p1_lines = job_data.get("poster_p1_lines", [])
+    if not p1_lines:
+        posts = job_data.get("posts", [])
+        total_vac = sum([int(re.findall(r'\d+', p.get('vacancy', '1'))[0]) for p in posts if re.findall(r'\d+', p.get('vacancy', ''))] or [len(posts)])
+        vac_bn = re.sub(r'(\d)', lambda m: "০১২৩৪৫৬৭৮৯"[int(m.group(1))], str(total_vac))
+        qual = posts[0].get('qualification', 'যোগ্যতা অনুযায়ী') if posts else "যোগ্যতানুযায়ী"
+        p1_text = f"{qual} পদে {vac_bn} পদে আবেদনের সুযোগ।"
+        p1_lines = wrap_mixed_text(draw, p1_text, body_font, 52, max_width=920)
+
+    cur_y = 600
+    for l in p1_lines[:2]:
+        draw_mixed_text(draw, W // 2, cur_y, l, body_font, 52, BLACK_COLOR, anchor="mm")
+        cur_y += 70
+
+    # পয়েন্ট ২: আবেদনের শেষ তারিখ ও ফি (💻 আইকনসহ)
+    cur_y += 50
+    ed_date = str(job_data.get("end_date", "শীঘ্রই শেষ হবে"))
+    p2_line1 = f"💻 আবেদনের শেষ তারিখ: {ed_date}"
+    p2_line2 = job_data.get("poster_fee_line", "আবেদন ফি বিজ্ঞপ্তিমতে।")
+
+    # ডেট লাল রঙে হাইলাইট করে ড্র করা
+    draw_mixed_text(draw, W // 2, cur_y, p2_line1, body_font, 50, BLACK_COLOR, anchor="mm")
+    cur_y += 70
+    draw_mixed_text(draw, W // 2, cur_y, p2_line2, body_font, 48, BLACK_COLOR, anchor="mm")
+
+    # পয়েন্ট ৩: পদের তালিকা ও পদ সংখ্যা (👥 আইকনসহ লাল রঙ)
+    cur_y += 65
+    p3_lines = job_data.get("poster_p3_lines", [])
+    if not p3_lines:
+        posts = job_data.get("posts", [])
+        if posts:
+            p_sample = " এবং ".join([f"{p.get('post_name','')} – {p.get('vacancy','০১')} টি" for p in posts[:2]])
+            p3_text = f"👥 {p_sample} পদে আবেদন করা যাবে।"
         else:
-            s_entry = max(0.0, min(1.0, local_f / 25.0))
-            
-        transition_f = 16.0
-        if slide_idx < num_slides - 1 and local_f >= (slide_len - transition_f):
-            s_exit = max(0.0, min(1.0, (local_f - (slide_len - transition_f)) / transition_f))
-        else:
-            s_exit = 0.0
+            p3_text = "👥 বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে আবেদন করা যাবে।"
+        p3_lines = wrap_mixed_text(draw, p3_text, body_font, 48, max_width=920)
 
-        img_frame = render_motion_graphic_frame(
-            job_data=job_data,
-            slide_posts=current_slide_posts,
-            frame_idx=f,
-            total_frames=total_frames,
-            fps=fps,
-            slide_entry_prog=s_entry,
-            slide_exit_prog=s_exit
-        )
-        img_frame.save(target_path, "PNG")
+    for l in p3_lines[:3]:
+        draw_mixed_text(draw, W // 2, cur_y, l, body_font, 48, CRIMSON_COLOR, anchor="mm")
+        cur_y += 68
 
-def prepare_tiktok_slides(job_data, output_prefix="slide"):
-    posts = job_data.get("posts", [])
-    out_paths = []
-    PAGE_SIZE = 5
-    chunks = [posts[i:i + PAGE_SIZE] for i in range(0, len(posts), PAGE_SIZE)]
-    if not chunks: chunks = [[]]
-    
-    for idx, chunk in enumerate(chunks, start=1):
-        frame = render_motion_graphic_frame(job_data, chunk, frame_idx=110, total_frames=150, slide_entry_prog=1.0)
-        p = f"{output_prefix}_{idx}.png"
-        frame.save(p, "PNG")
-        out_paths.append(p)
-    return out_paths
+    # ---------------------------------------------------------------------
+    # ৩. নিচের ফিক্সড হোয়াটসঅ্যাপ কল-টু-অ্যাকশন (CTA)
+    # ---------------------------------------------------------------------
+    wa_y = 1205
+    # হোয়াটসঅ্যাপ আইকন + নম্বর
+    icon_x = 295
+    draw_whatsapp_icon(draw, icon_x, wa_y, radius=38)
+
+    num_font = get_english_bold_font(62)
+    draw.text((icon_x + 60, wa_y), "01540503092", font=num_font, fill=BLACK_COLOR, anchor="lm")
+
+    # নিচে আবেদন করার আহ্বান
+    cta_font = get_body_font(44)
+    draw_mixed_text(draw, W // 2, wa_y + 90, "আবেদন করতে হোয়াটসঅ্যাপে", cta_font, 44, BLACK_COLOR, anchor="mm")
+    draw_mixed_text(draw, W // 2, wa_y + 155, "যোগাযোগ করুন।", cta_font, 44, BLACK_COLOR, anchor="mm")
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    im.save(output_path, "PNG", quality=95)
+    return output_path
+
+def prepare_tiktok_slides(job_data, output_prefix="poster"):
+    out_path = f"{output_prefix}_1.png"
+    render_poster_image(job_data, out_path)
+    return [out_path]
