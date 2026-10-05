@@ -10,10 +10,9 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from config_manager import (
-    CONFIG_FILE, MEMORY_FILE, SKIPPED_OFFLINE_FILE, HEADERS,
+    CONFIG_FILE, MEMORY_FILE, HEADERS,
     load_json, save_json, get_credential,
-    clean_text, clean_telegram_id, check_if_offline_application,
-    sanitize_filename, load_skipped_offline_urls, record_skipped_offline_job
+    clean_text, clean_telegram_id, sanitize_filename
 )
 from ai_service import generate_job_data_and_script
 from audio_engine import generate_voiceover_audio_pipeline
@@ -85,6 +84,7 @@ async def process_sync(config, memory):
         elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
         elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
+    # ফ্লেক্সিবল ভিডিও কাউন্ট নির্ধারণ
     main_needed_count = max(len(fb_dest_ids), len(yt_targets), 1)
     tiktok_needed_count = len(tiktok_targets)
     total_audio_needed = min(8, max(main_needed_count, tiktok_needed_count))
@@ -108,9 +108,6 @@ async def process_sync(config, memory):
     for k, v in memory.items():
         if isinstance(v, list) and k.startswith("route_"):
             processed_set.update(v)
-
-    skipped_offline_urls = load_skipped_offline_urls()
-    processed_set.update(skipped_offline_urls)
 
     for feed_url in source_feed_urls:
         feed = fetch_feed_entries(feed_url)
@@ -143,27 +140,10 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # 🌟 এআই প্রসেসিং (Ollama -> OpenRouter -> Groq -> Cerebras)
+            # 🌟 এআই প্রসেসিং (OpenRouter -> Groq -> Cerebras -> Ollama)
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
-            # অফলাইন আবেদন যাচাই ফিল্টার (ডাকযোগ / কুরিয়ার / সরাসরি)
-            is_offline, offline_reason = check_if_offline_application(web_text or raw_desc_clean, web_html, job_data, article_title)
-            if is_offline:
-                print(f"\n🚫 [OFFLINE CIRCULAR DETECTED] Skipping '{article_title}'")
-                print(f"   Reason: {offline_reason}")
-                print(f"   Action: No video will be generated.")
-
-                for dp in downloaded_imgs:
-                    if os.path.exists(dp): os.remove(dp)
-
-                record_skipped_offline_job(entry_link, article_title, offline_reason)
-                processed_set.add(entry_link)
-                memory["processed_articles"] = list(processed_set)[-300:]
-                save_json(MEMORY_FILE, memory)
-                print(f"  💾 [SAVED TO JSON] Link recorded in '{SKIPPED_OFFLINE_FILE}' and memory.")
-                continue
-
-            print(f"\n🔥 [ONLINE JOB VERIFIED - CREATING CONTENT] '{article_title}'")
+            print(f"\n🔥 [CREATING CONTENT FOR CIRCULAR] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
             # প্রয়োজনীয় সংখ্যক অডিও জেনারেশন
@@ -238,7 +218,7 @@ async def process_sync(config, memory):
             for dp in downloaded_imgs:
                 if os.path.exists(dp): os.remove(dp)
 
-            # মেমোরি সেভ
+            # মেমোরি সেভ (ডুপ্লিকেট ভিডিও প্রতিরোধক)
             processed_set.add(entry_link)
             memory["processed_articles"] = list(processed_set)[-300:]
             save_json(MEMORY_FILE, memory)
