@@ -2,6 +2,7 @@
 import sys
 import os
 import re
+import time
 import random
 import shutil
 import asyncio
@@ -68,11 +69,11 @@ async def process_sync(config, memory):
             if await tg_client.is_user_authorized():
                 print("  [+] Telegram Client Authenticated!")
             else:
-                print("  ⚠️ Telegram Session expired/unauthorized. Disabling Telegram for this run.")
+                print("  ⚠️ Telegram Session unauthorized. Disabling Telegram.")
                 await tg_client.disconnect()
                 tg_client = None
         except Exception as e:
-            print(f"  ⚠️ Telegram connection notice: {e}")
+            print(f"  ⚠️ Telegram notice: {e}")
             tg_client = None
 
     # ২. কানেক্টেড অ্যাকাউন্টসমূহ
@@ -104,7 +105,7 @@ async def process_sync(config, memory):
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
-    print(f"\n⚙️ [Master Automation Status - Active & Unlimited Mode]")
+    print(f"\n⚙️ [Master Automation Status - Active & Protected]")
     print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
     print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
     print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
@@ -144,7 +145,6 @@ async def process_sync(config, memory):
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
                 try:
-                    # 🌟 নো টাইমআউট
                     ir = requests.get(u, headers=HEADERS)
                     if ir.status_code == 200:
                         p = f"tmp_raw_{hash(entry_link)}_{i_idx}.jpg"
@@ -165,6 +165,8 @@ async def process_sync(config, memory):
                 s_text = scripts[idx % len(scripts)]
                 if generate_voiceover_audio_pipeline(s_text, audio_file, memory=memory):
                     generated_audios.append(audio_file)
+                # 🌟 প্রতিটি অডিও কলের মাঝে ২ সেকেন্ডের ছোট বিরতি যাতে গুগল সার্ভার স্টল না হয়
+                time.sleep(2)
 
             if not generated_audios:
                 print("  ❌ [ERROR] Could not generate audio. Skipping...")
