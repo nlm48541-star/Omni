@@ -6,6 +6,7 @@ import base64
 import random
 import shutil
 import requests
+import concurrent.futures
 
 TRACKER_FILE = "key_tracker.json"
 
@@ -108,8 +109,30 @@ def save_key_index(platform, index, total_keys):
     except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (১ম অগ্রাধিকার)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (৬০ সেকেন্ড সেফটি গার্ড সহ)
 # =========================================================================
+def _call_gemini_api_direct(api_key, speech_text, voice_candidate, delivery_style):
+    from google import genai
+    client = genai.Client(api_key=api_key)
+    return client.interactions.create(
+        model="gemini-3.8-flash-tts",
+        input=[{
+            "type": "user_input",
+            "content": [{
+                "type": "text",
+                "text": speech_text,
+                "annotations": [{
+                    "type": "speech_metadata",
+                    "style": delivery_style
+                }]
+            }]
+        }],
+        response_format={"type": "audio"},
+        generation_config={
+            "speech_config": [{"voice": voice_candidate}]
+        }
+    )
+
 def synthesize_with_gemini(speech_text, output_audio_path):
     gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
     if not gemini_keys:
@@ -124,7 +147,7 @@ def synthesize_with_gemini(speech_text, output_audio_path):
     delivery_style = os.environ.get("GEMINI_DELIVERY_STYLE", "Natural, calm, warm and articulate Bengali pronunciation").strip()
 
     try:
-        from google import genai
+        import google.genai
     except ImportError:
         print("  ⚠️ 'google-genai' library not installed.")
         return False
@@ -142,25 +165,10 @@ def synthesize_with_gemini(speech_text, output_audio_path):
         for voice_candidate in voices_to_try:
             start_t = time.time()
             try:
-                client = genai.Client(api_key=api_key)
-                interaction = client.interactions.create(
-                    model="gemini-3.8-flash-tts",
-                    input=[{
-                        "type": "user_input",
-                        "content": [{
-                            "type": "text",
-                            "text": speech_text,
-                            "annotations": [{
-                                "type": "speech_metadata",
-                                "style": delivery_style
-                            }]
-                        }]
-                    }],
-                    response_format={"type": "audio"},
-                    generation_config={
-                        "speech_config": [{"voice": voice_candidate}]
-                    }
-                )
+                # 🌟 কোনো অবস্থাতেই যাতে ৬ ঘণ্টা আটকে না থাকে (সর্বোচ্চ ৬০ সেকেন্ড)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_call_gemini_api_direct, api_key, speech_text, voice_candidate, delivery_style)
+                    interaction = future.result(timeout=60)
 
                 if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
                     audio_bytes = base64.b64decode(interaction.output_audio.data)
@@ -172,6 +180,10 @@ def synthesize_with_gemini(speech_text, output_audio_path):
                         elapsed = round(time.time() - start_t, 2)
                         print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS! (Voice: '{voice_candidate}' in {elapsed}s)")
                         return True
+            except concurrent.futures.TimeoutError:
+                print(f"  ⚠️ Gemini Key #{k_idx+1} socket stalled (>60s). Skipping to next key/engine immediately...")
+                save_key_index("gemini", (k_idx + 1) % total_k, total_k)
+                break
             except Exception as e:
                 err_msg = str(e)
                 if "voice was not found" in err_msg or "404" in err_msg:
@@ -187,7 +199,7 @@ def synthesize_with_gemini(speech_text, output_audio_path):
     return False
 
 # =========================================================================
-# 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার - নো টাইমআউট)
+# 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার)
 # =========================================================================
 def synthesize_with_elevenlabs(speech_text, output_audio_path):
     eleven_keys = parse_multi_keys(["ELEVENLABS_API_KEYS", "ELEVENLABS_API_KEY"])
@@ -213,7 +225,6 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
         headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": api_key}
 
         try:
-            # 🌟 নো টাইমআউট
             resp = requests.post(tts_url, json=payload, headers=headers)
             if resp.status_code == 200 and len(resp.content) > 1000:
                 os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
@@ -272,7 +283,7 @@ def generate_voiceover_audio_pipeline(text, output_audio_path, memory=None):
     words = len(speech_text.split())
 
     print("\n" + "="*65)
-    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active (Unlimited Time)")
+    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active")
     print(f"📊 [Text Stats] Chars: {clean_chars} | Words: {words}")
     print(f"📝 [Preview]: \"{speech_text[:120]}...\"")
     print("="*65)
