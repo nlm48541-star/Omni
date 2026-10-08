@@ -109,11 +109,13 @@ def save_key_index(platform, index, total_keys):
     except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (৬০ সেকেন্ড সেফটি গার্ড সহ)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (নন-ব্লকিং ও অটো-রোটেশন)
 # =========================================================================
 def _call_gemini_api_direct(api_key, speech_text, voice_candidate, delivery_style):
     from google import genai
-    client = genai.Client(api_key=api_key)
+    from google.genai import types
+    # 🌟 এসডিকে লেভেলে ৪৫ সেকেন্ড হার্ড টাইমআউট
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=45_000))
     return client.interactions.create(
         model="gemini-3.8-flash-tts",
         input=[{
@@ -164,11 +166,11 @@ def synthesize_with_gemini(speech_text, output_audio_path):
 
         for voice_candidate in voices_to_try:
             start_t = time.time()
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                # 🌟 কোনো অবস্থাতেই যাতে ৬ ঘণ্টা আটকে না থাকে (সর্বোচ্চ ৬০ সেকেন্ড)
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(_call_gemini_api_direct, api_key, speech_text, voice_candidate, delivery_style)
-                    interaction = future.result(timeout=60)
+                future = executor.submit(_call_gemini_api_direct, api_key, speech_text, voice_candidate, delivery_style)
+                # ৪৫ সেকেন্ডের মধ্যে রেসপন্স না পেলে সরাসরি পরবর্তী কী-তে সুইচ করবে
+                interaction = future.result(timeout=45)
 
                 if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
                     audio_bytes = base64.b64decode(interaction.output_audio.data)
@@ -176,15 +178,19 @@ def synthesize_with_gemini(speech_text, output_audio_path):
                         os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                         with open(output_audio_path, "wb") as f:
                             f.write(audio_bytes)
-                        save_key_index("gemini", k_idx, total_k)
+                        # 🌟 সফল হলে পরবর্তী অডিওর জন্য সরাসরি পরের কী সেভ করা (যাতে একই কি বারবার কল না হয়)
+                        save_key_index("gemini", (k_idx + 1) % total_k, total_k)
                         elapsed = round(time.time() - start_t, 2)
                         print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS! (Voice: '{voice_candidate}' in {elapsed}s)")
+                        executor.shutdown(wait=False)
                         return True
             except concurrent.futures.TimeoutError:
-                print(f"  ⚠️ Gemini Key #{k_idx+1} socket stalled (>60s). Skipping to next key/engine immediately...")
+                print(f"  ⚠️ Gemini Key #{k_idx+1} socket stalled (>45s). Immediately switching to next key...")
                 save_key_index("gemini", (k_idx + 1) % total_k, total_k)
+                executor.shutdown(wait=False, cancel_futures=True)
                 break
             except Exception as e:
+                executor.shutdown(wait=False)
                 err_msg = str(e)
                 if "voice was not found" in err_msg or "404" in err_msg:
                     continue
@@ -225,12 +231,12 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
         headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": api_key}
 
         try:
-            resp = requests.post(tts_url, json=payload, headers=headers)
+            resp = requests.post(tts_url, json=payload, headers=headers, timeout=60)
             if resp.status_code == 200 and len(resp.content) > 1000:
                 os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                 with open(output_audio_path, "wb") as f:
                     f.write(resp.content)
-                save_key_index("elevenlabs", k_idx, total_k)
+                save_key_index("elevenlabs", (k_idx + 1) % total_k, total_k)
                 print(f"  ✅ [SUCCESS] Generated via ElevenLabs Key #{k_idx+1}!")
                 return True
             elif resp.status_code in [401, 402, 429]:
