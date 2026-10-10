@@ -32,7 +32,6 @@ jobs:
 
       - name: Execute OmniSync Master Engine
         env:
-          # নন-ইন্টারেক্টিভ ও রিয়েল-টাইম কনসোল ফ্ল্যাগ
           CI: "true"
           DEBIAN_FRONTEND: "noninteractive"
           PYTHONUNBUFFERED: "1"
@@ -46,31 +45,42 @@ jobs:
           FB_TOKEN: ${{ secrets.FB_TOKEN }}
           RENDER_WA_URL: ${{ secrets.RENDER_WA_URL }}
 
-          # YouTube মাল্টি-চ্যানেল সেটিংস (১ থেকে ৮টি চ্যানেল)
-          YT_CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          YT_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-          YT_CLIENT_ID_2: ${{ secrets.CLIENT_ID_2 }}
-          YT_CLIENT_SECRET_2: ${{ secrets.CLIENT_SECRET_2 }}
-          YT_REFRESH_TOKEN_2: ${{ secrets.REFRESH_TOKEN_2 }}
-          YT_CLIENT_ID_3: ${{ secrets.CLIENT_ID_3 }}
-          YT_CLIENT_SECRET_3: ${{ secrets.CLIENT_SECRET_3 }}
-          YT_REFRESH_TOKEN_3: ${{ secrets.REFRESH_TOKEN_3 }}
-          YT_CLIENT_ID_4: ${{ secrets.CLIENT_ID_4 }}
-          YT_CLIENT_SECRET_4: ${{ secrets.CLIENT_SECRET_4 }}
-          YT_REFRESH_TOKEN_4: ${{ secrets.REFRESH_TOKEN_4 }}
-          YT_CLIENT_ID_5: ${{ secrets.CLIENT_ID_5 }}
-          YT_CLIENT_SECRET_5: ${{ secrets.CLIENT_SECRET_5 }}
-          YT_REFRESH_TOKEN_5: ${{ secrets.REFRESH_TOKEN_5 }}
-          YT_CLIENT_ID_6: ${{ secrets.CLIENT_ID_6 }}
-          YT_CLIENT_SECRET_6: ${{ secrets.CLIENT_SECRET_6 }}
-          YT_REFRESH_TOKEN_6: ${{ secrets.REFRESH_TOKEN_6 }}
-          YT_CLIENT_ID_7: ${{ secrets.CLIENT_ID_7 }}
-          YT_CLIENT_SECRET_7: ${{ secrets.CLIENT_SECRET_7 }}
-          YT_REFRESH_TOKEN_7: ${{ secrets.REFRESH_TOKEN_7 }}
-          YT_CLIENT_ID_8: ${{ secrets.CLIENT_ID_8 }}
-          YT_CLIENT_SECRET_8: ${{ secrets.CLIENT_SECRET_8 }}
-          YT_REFRESH_TOKEN_8: ${{ secrets.REFRESH_TOKEN_8 }}
+          # 🌟 YouTube মাল্টি-চ্যানেল সেটিংস (যে কোনো নামের ফরম্যাট সাপোর্ট করবে)
+          YT_CLIENT_ID_1: ${{ secrets.YT_CLIENT_ID_1 || secrets.CLIENT_ID_1 || secrets.YT_CLIENT_ID || secrets.CLIENT_ID }}
+          YT_CLIENT_SECRET_1: ${{ secrets.YT_CLIENT_SECRET_1 || secrets.CLIENT_SECRET_1 || secrets.YT_CLIENT_SECRET || secrets.CLIENT_SECRET }}
+          YT_REFRESH_TOKEN_1: ${{ secrets.YT_REFRESH_TOKEN_1 || secrets.REFRESH_TOKEN_1 || secrets.YT_REFRESH_TOKEN || secrets.REFRESH_TOKEN }}
+
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID || secrets.CLIENT_ID || secrets.YT_CLIENT_ID_1 || secrets.CLIENT_ID_1 }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET || secrets.CLIENT_SECRET || secrets.YT_CLIENT_SECRET_1 || secrets.CLIENT_SECRET_1 }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN || secrets.REFRESH_TOKEN || secrets.YT_REFRESH_TOKEN_1 || secrets.REFRESH_TOKEN_1 }}
+
+          YT_CLIENT_ID_2: ${{ secrets.YT_CLIENT_ID_2 || secrets.CLIENT_ID_2 }}
+          YT_CLIENT_SECRET_2: ${{ secrets.YT_CLIENT_SECRET_2 || secrets.CLIENT_SECRET_2 }}
+          YT_REFRESH_TOKEN_2: ${{ secrets.YT_REFRESH_TOKEN_2 || secrets.REFRESH_TOKEN_2 }}
+
+          YT_CLIENT_ID_3: ${{ secrets.YT_CLIENT_ID_3 || secrets.CLIENT_ID_3 }}
+          YT_CLIENT_SECRET_3: ${{ secrets.YT_CLIENT_SECRET_3 || secrets.CLIENT_SECRET_3 }}
+          YT_REFRESH_TOKEN_3: ${{ secrets.YT_REFRESH_TOKEN_3 || secrets.REFRESH_TOKEN_3 }}
+
+          YT_CLIENT_ID_4: ${{ secrets.YT_CLIENT_ID_4 || secrets.CLIENT_ID_4 }}
+          YT_CLIENT_SECRET_4: ${{ secrets.YT_CLIENT_SECRET_4 || secrets.CLIENT_SECRET_4 }}
+          YT_REFRESH_TOKEN_4: ${{ secrets.YT_REFRESH_TOKEN_4 || secrets.REFRESH_TOKEN_4 }}
+
+          YT_CLIENT_ID_5: ${{ secrets.YT_CLIENT_ID_5 || secrets.CLIENT_ID_5 }}
+          YT_CLIENT_SECRET_5: ${{ secrets.YT_CLIENT_SECRET_5 || secrets.CLIENT_SECRET_5 }}
+          YT_REFRESH_TOKEN_5: ${{ secrets.YT_REFRESH_TOKEN_5 || secrets.REFRESH_TOKEN_5 }}
+
+          YT_CLIENT_ID_6: ${{ secrets.YT_CLIENT_6 || secrets.CLIENT_ID_6 }}
+          YT_CLIENT_SECRET_6: ${{ secrets.YT_CLIENT_SECRET_6 || secrets.CLIENT_SECRET_6 }}
+          YT_REFRESH_TOKEN_6: ${{ secrets.REFRESH_TOKEN_6 || secrets.YT_REFRESH_TOKEN_6 }}
+
+          YT_CLIENT_ID_7: ${{ secrets.YT_CLIENT_ID_7 || secrets.CLIENT_ID_7 }}
+          YT_CLIENT_SECRET_7: ${{ secrets.YT_CLIENT_SECRET_7 || secrets.CLIENT_SECRET_7 }}
+          YT_REFRESH_TOKEN_7: ${{ secrets.REFRESH_TOKEN_7 || secrets.YT_REFRESH_TOKEN_7 }}
+
+          YT_CLIENT_ID_8: ${{ secrets.YT_CLIENT_ID_8 || secrets.CLIENT_ID_8 }}
+          YT_CLIENT_SECRET_8: ${{ secrets.YT_CLIENT_SECRET_8 || secrets.CLIENT_SECRET_8 }}
+          YT_REFRESH_TOKEN_8: ${{ secrets.REFRESH_TOKEN_8 || secrets.YT_REFRESH_TOKEN_8 }}
 
           # TikTok / Buffer ৩টি অ্যাকাউন্ট ও মাল্টি-প্রোফাইল সেটিংস
           BUFFER_TOKEN_1: ${{ secrets.BUFFER_TOKEN_1 }}
