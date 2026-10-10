@@ -275,7 +275,7 @@ Return strictly valid JSON:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ১. OpenRouter Cloud API (১ম অগ্রাধিকার - নো টাইমআউট)
+    # ১. OpenRouter Cloud API (১ম অগ্রাধিকার)
     openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
     if openrouter_keys:
         total_k = len(openrouter_keys)
@@ -304,8 +304,7 @@ Return strictly valid JSON:
                     "temperature": 0.3
                 }
                 try:
-                    # 🌟 নো টাইমআউট
-                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=90)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if data and data.get("org_name"):
@@ -317,7 +316,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ২. Groq Cloud API (২য় অগ্রাধিকার - নো টাইমআউট)
+    # ২. Groq Cloud API (২য় অগ্রাধিকার)
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k = len(groq_keys)
@@ -341,8 +340,7 @@ Return strictly valid JSON:
                     "max_tokens": 3000
                 }
                 try:
-                    # 🌟 নো টাইমআউট
-                    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+                    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=80)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if data and data.get("org_name"):
@@ -354,7 +352,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ৩. Cerebras Cloud API (৩য় অগ্রাধিকার - নো টাইমআউট)
+    # ৩. Cerebras Cloud API (৩য় অগ্রাধিকার)
     cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
     if cerebras_keys:
         total_k = len(cerebras_keys)
@@ -378,8 +376,7 @@ Return strictly valid JSON:
                     "max_tokens": 3000
                 }
                 try:
-                    # 🌟 নো টাইমআউট
-                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload)
+                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload, timeout=80)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if data and data.get("org_name"):
@@ -391,7 +388,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ৪. Ollama Cloud API (সর্বশেষ অগ্রাধিকার - নো টাইমআউট)
+    # ৪. Ollama Cloud API (সর্বশেষ অগ্রাধিকার)
     ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
     if ollama_keys:
         total_k = len(ollama_keys)
@@ -412,8 +409,7 @@ Return strictly valid JSON:
                     "options": {"temperature": 0.3}
                 }
                 try:
-                    # 🌟 নো টাইমআউট
-                    resp = requests.post(ollama_endpoint, headers=headers, json=payload)
+                    resp = requests.post(ollama_endpoint, headers=headers, json=payload, timeout=90)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if data and data.get("org_name"):
