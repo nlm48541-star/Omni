@@ -56,7 +56,7 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # ১. টেলিগ্রাম ক্লায়েন্ট
+    # 🌟 টেলিগ্রাম ফিক্স: নন-ব্লকিং লগইন (ইনপুটের অপেক্ষায় কখনোই হ্যাং হবে না)
     tg_session = get_credential(config, "tg_session", "TG_SESSION")
     tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
     tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
@@ -69,14 +69,14 @@ async def process_sync(config, memory):
             if await tg_client.is_user_authorized():
                 print("  [+] Telegram Client Authenticated!")
             else:
-                print("  ⚠️ Telegram Session unauthorized. Disabling Telegram.")
+                print("  ⚠️ Telegram Session unauthorized. Skipping Telegram.")
                 await tg_client.disconnect()
                 tg_client = None
         except Exception as e:
             print(f"  ⚠️ Telegram notice: {e}")
             tg_client = None
 
-    # ২. কানেক্টেড অ্যাকাউন্টসমূহ
+    # কানেক্টেড অ্যাকাউন্টসমূহ
     yt_targets = get_all_youtube_targets(config)
     tiktok_targets = get_all_tiktok_buffer_targets(config)
 
@@ -105,7 +105,7 @@ async def process_sync(config, memory):
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
-    print(f"\n⚙️ [Master Automation Status - Active & Protected]")
+    print(f"\n⚙️ [Master Automation Status]")
     print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
     print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
     print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
@@ -120,6 +120,7 @@ async def process_sync(config, memory):
         if isinstance(v, list) and k.startswith("route_"):
             processed_set.update(v)
 
+    # 🌟 ফিডের সমস্ত নতুন আর্টিকেল আগের মতোই স্বাভাবিকভাবে প্রসেস হবে
     for feed_url in source_feed_urls:
         print(f"\n[~] Scanning Source Feed: {feed_url}")
         feed = fetch_feed_entries(feed_url)
@@ -145,14 +146,14 @@ async def process_sync(config, memory):
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
                 try:
-                    ir = requests.get(u, headers=HEADERS)
+                    ir = requests.get(u, headers=HEADERS, timeout=30)
                     if ir.status_code == 200:
                         p = f"tmp_raw_{hash(entry_link)}_{i_idx}.jpg"
                         with open(p, 'wb') as f: f.write(ir.content)
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # এআই প্রসেসিং
+            # এআই দিয়ে পোস্টার ও স্ক্রিপ্ট তৈরি
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, memory=memory)
 
             print(f"\n🔥 [CREATING POSTER CONTENT] '{article_title}'")
@@ -165,8 +166,6 @@ async def process_sync(config, memory):
                 s_text = scripts[idx % len(scripts)]
                 if generate_voiceover_audio_pipeline(s_text, audio_file, memory=memory):
                     generated_audios.append(audio_file)
-                # 🌟 প্রতিটি অডিও কলের মাঝে ২ সেকেন্ডের ছোট বিরতি যাতে গুগল সার্ভার স্টল না হয়
-                time.sleep(2)
 
             if not generated_audios:
                 print("  ❌ [ERROR] Could not generate audio. Skipping...")
