@@ -6,7 +6,6 @@ import base64
 import random
 import shutil
 import requests
-import concurrent.futures
 
 TRACKER_FILE = "key_tracker.json"
 
@@ -109,32 +108,8 @@ def save_key_index(platform, index, total_keys):
     except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (নন-ব্লকিং ও অটো-রোটেশন)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (১ম অগ্রাধিকার)
 # =========================================================================
-def _call_gemini_api_direct(api_key, speech_text, voice_candidate, delivery_style):
-    from google import genai
-    from google.genai import types
-    # 🌟 এসডিকে লেভেলে ৪৫ সেকেন্ড হার্ড টাইমআউট
-    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=45_000))
-    return client.interactions.create(
-        model="gemini-3.8-flash-tts",
-        input=[{
-            "type": "user_input",
-            "content": [{
-                "type": "text",
-                "text": speech_text,
-                "annotations": [{
-                    "type": "speech_metadata",
-                    "style": delivery_style
-                }]
-            }]
-        }],
-        response_format={"type": "audio"},
-        generation_config={
-            "speech_config": [{"voice": voice_candidate}]
-        }
-    )
-
 def synthesize_with_gemini(speech_text, output_audio_path):
     gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
     if not gemini_keys:
@@ -149,7 +124,7 @@ def synthesize_with_gemini(speech_text, output_audio_path):
     delivery_style = os.environ.get("GEMINI_DELIVERY_STYLE", "Natural, calm, warm and articulate Bengali pronunciation").strip()
 
     try:
-        import google.genai
+        from google import genai
     except ImportError:
         print("  ⚠️ 'google-genai' library not installed.")
         return False
@@ -166,11 +141,26 @@ def synthesize_with_gemini(speech_text, output_audio_path):
 
         for voice_candidate in voices_to_try:
             start_t = time.time()
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                future = executor.submit(_call_gemini_api_direct, api_key, speech_text, voice_candidate, delivery_style)
-                # ৪৫ সেকেন্ডের মধ্যে রেসপন্স না পেলে সরাসরি পরবর্তী কী-তে সুইচ করবে
-                interaction = future.result(timeout=45)
+                client = genai.Client(api_key=api_key)
+                interaction = client.interactions.create(
+                    model="gemini-3.8-flash-tts",
+                    input=[{
+                        "type": "user_input",
+                        "content": [{
+                            "type": "text",
+                            "text": speech_text,
+                            "annotations": [{
+                                "type": "speech_metadata",
+                                "style": delivery_style
+                            }]
+                        }]
+                    }],
+                    response_format={"type": "audio"},
+                    generation_config={
+                        "speech_config": [{"voice": voice_candidate}]
+                    }
+                )
 
                 if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
                     audio_bytes = base64.b64decode(interaction.output_audio.data)
@@ -178,19 +168,11 @@ def synthesize_with_gemini(speech_text, output_audio_path):
                         os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                         with open(output_audio_path, "wb") as f:
                             f.write(audio_bytes)
-                        # 🌟 সফল হলে পরবর্তী অডিওর জন্য সরাসরি পরের কী সেভ করা (যাতে একই কি বারবার কল না হয়)
                         save_key_index("gemini", (k_idx + 1) % total_k, total_k)
                         elapsed = round(time.time() - start_t, 2)
                         print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS! (Voice: '{voice_candidate}' in {elapsed}s)")
-                        executor.shutdown(wait=False)
                         return True
-            except concurrent.futures.TimeoutError:
-                print(f"  ⚠️ Gemini Key #{k_idx+1} socket stalled (>45s). Immediately switching to next key...")
-                save_key_index("gemini", (k_idx + 1) % total_k, total_k)
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
             except Exception as e:
-                executor.shutdown(wait=False)
                 err_msg = str(e)
                 if "voice was not found" in err_msg or "404" in err_msg:
                     continue
@@ -240,7 +222,7 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
                 print(f"  ✅ [SUCCESS] Generated via ElevenLabs Key #{k_idx+1}!")
                 return True
             elif resp.status_code in [401, 402, 429]:
-                print(f"  ⚠️ ElevenLabs Key #{k_idx+1} quota/limit (HTTP {resp.status_code}). Switching key...")
+                print(f"  ⚠️ ElevenLabs Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
                 save_key_index("elevenlabs", (k_idx + 1) % total_k, total_k)
                 continue
         except Exception:
