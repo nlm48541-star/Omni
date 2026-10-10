@@ -32,6 +32,9 @@ jobs:
 
       - name: Execute OmniSync Master Engine
         env:
+          # নন-ইন্টারেক্টিভ ও রিয়েল-টাইম কনসোল ফ্ল্যাগ
+          CI: "true"
+          DEBIAN_FRONTEND: "noninteractive"
           PYTHONUNBUFFERED: "1"
 
           # টেলিগ্রাম সেটিংস
