@@ -5,9 +5,14 @@ import time
 import base64
 import random
 import shutil
+import socket
 import requests
 
+# 🌟 গ্লোবাল নেটওয়ার্ক সকেট গার্ড: ১০ মিনিট (৬০০ সেকেন্ড)
+socket.setdefaulttimeout(600.0)
+
 TRACKER_FILE = "key_tracker.json"
+CURRENT_GEMINI_KEY_INDEX = None
 
 PHONE_DIGIT_WORDS = {
     '0': "জিরো", '1': "ওয়ান", '2': "টু", '3': "থ্রি", '4': "ফোর",
@@ -108,15 +113,19 @@ def save_key_index(platform, index, total_keys):
     except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (১ম অগ্রাধিকার)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (১০ মিনিট টাইমআউট ও পার-অডিও রোটেশন)
 # =========================================================================
 def synthesize_with_gemini(speech_text, output_audio_path):
+    global CURRENT_GEMINI_KEY_INDEX
+
     gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
     if not gemini_keys:
         return False
 
     total_k = len(gemini_keys)
-    start_idx = get_saved_key_index("gemini", total_k)
+    if CURRENT_GEMINI_KEY_INDEX is None:
+        CURRENT_GEMINI_KEY_INDEX = get_saved_key_index("gemini", total_k)
+
     print(f"\n--- [Priority 1: Gemini 3.8 Flash TTS] ({total_k} keys detected) ---")
 
     custom_voice = os.environ.get("GEMINI_VOICE_ID", "").strip()
@@ -125,12 +134,14 @@ def synthesize_with_gemini(speech_text, output_audio_path):
 
     try:
         from google import genai
-    except ImportError:
-        print("  ⚠️ 'google-genai' library not installed.")
-        return False
+        from google.genai import types
+        # 🌟 ১০ মিনিট (৬০০,০০০ মিলিসেকেন্ড) টাইমআউট
+        http_config = types.HttpOptions(timeout=600_000)
+    except Exception:
+        http_config = None
 
     for offset in range(total_k):
-        k_idx = (start_idx + offset) % total_k
+        k_idx = (CURRENT_GEMINI_KEY_INDEX + offset) % total_k
         api_key = gemini_keys[k_idx]
         masked = mask_key(api_key)
         print(f"  🚀 Attempting Gemini Key #{k_idx+1}/{total_k} ({masked})")
@@ -142,7 +153,11 @@ def synthesize_with_gemini(speech_text, output_audio_path):
         for voice_candidate in voices_to_try:
             start_t = time.time()
             try:
-                client = genai.Client(api_key=api_key)
+                if http_config:
+                    client = genai.Client(api_key=api_key, http_options=http_config)
+                else:
+                    client = genai.Client(api_key=api_key)
+
                 interaction = client.interactions.create(
                     model="gemini-3.8-flash-tts",
                     input=[{
@@ -168,7 +183,11 @@ def synthesize_with_gemini(speech_text, output_audio_path):
                         os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                         with open(output_audio_path, "wb") as f:
                             f.write(audio_bytes)
-                        save_key_index("gemini", (k_idx + 1) % total_k, total_k)
+                        
+                        # পরবর্তী অডিওর জন্য সরাসরি পরের কী সেট করা
+                        CURRENT_GEMINI_KEY_INDEX = (k_idx + 1) % total_k
+                        save_key_index("gemini", CURRENT_GEMINI_KEY_INDEX, total_k)
+                        
                         elapsed = round(time.time() - start_t, 2)
                         print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS! (Voice: '{voice_candidate}' in {elapsed}s)")
                         return True
@@ -176,12 +195,10 @@ def synthesize_with_gemini(speech_text, output_audio_path):
                 err_msg = str(e)
                 if "voice was not found" in err_msg or "404" in err_msg:
                     continue
-                elif "429" in err_msg or "quota" in err_msg.lower() or "limit" in err_msg.lower():
-                    print(f"  ⚠️ Gemini Key #{k_idx+1} quota/rate limit. Switching key...")
-                    save_key_index("gemini", (k_idx + 1) % total_k, total_k)
-                    break
                 else:
-                    print(f"  ⚠️ Gemini Key #{k_idx+1} error: {e}")
+                    print(f"  ⚠️ Gemini Key #{k_idx+1} notice ({err_msg[:120]}). Switching to next key...")
+                    CURRENT_GEMINI_KEY_INDEX = (k_idx + 1) % total_k
+                    save_key_index("gemini", CURRENT_GEMINI_KEY_INDEX, total_k)
                     break
 
     return False
@@ -213,7 +230,7 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
         headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": api_key}
 
         try:
-            resp = requests.post(tts_url, json=payload, headers=headers, timeout=60)
+            resp = requests.post(tts_url, json=payload, headers=headers)
             if resp.status_code == 200 and len(resp.content) > 1000:
                 os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                 with open(output_audio_path, "wb") as f:
@@ -222,7 +239,7 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path):
                 print(f"  ✅ [SUCCESS] Generated via ElevenLabs Key #{k_idx+1}!")
                 return True
             elif resp.status_code in [401, 402, 429]:
-                print(f"  ⚠️ ElevenLabs Key #{k_idx+1} limit (HTTP {resp.status_code}). Switching key...")
+                print(f"  ⚠️ ElevenLabs Key #{k_idx+1} notice (HTTP {resp.status_code}). Switching key...")
                 save_key_index("elevenlabs", (k_idx + 1) % total_k, total_k)
                 continue
         except Exception:
@@ -271,7 +288,7 @@ def generate_voiceover_audio_pipeline(text, output_audio_path, memory=None):
     words = len(speech_text.split())
 
     print("\n" + "="*65)
-    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active")
+    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active (10-Min Socket Guard)")
     print(f"📊 [Text Stats] Chars: {clean_chars} | Words: {words}")
     print(f"📝 [Preview]: \"{speech_text[:120]}...\"")
     print("="*65)
