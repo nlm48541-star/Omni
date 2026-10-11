@@ -116,6 +116,7 @@ async def process_sync(config, memory):
     print(f"   ├─ Active YouTube Channels  : {len(yt_targets)}")
     print(f"   ├─ Active Facebook Pages    : {len(fb_dest_ids)}")
     print(f"   ├─ Active TikTok Accounts   : {tiktok_needed_count}")
+    print(f"   ├─ Active Telegram Channels : {len(tg_dest_ids)}")
     print(f"   ├─ Total Required Audios    : {total_audio_needed}")
     print(f"   └─ Google Drive Save Mode   : {'✅ ENABLED (ON)' if save_to_gdrive else '⚠️ DISABLED (OFF)'}")
 
@@ -237,15 +238,19 @@ async def process_sync(config, memory):
                 except Exception as e:
                     print(f"  ⚠️ [TikTok Video #{t_idx+1} Notice] {e}")
 
-            # ৪. Telegram আপলোড
-            if tg_client:
-                try:
-                    clean_tg = clean_telegram_id(tg_dest_ids[0]) if tg_dest_ids else ""
-                    if clean_tg:
-                        if downloaded_imgs: await tg_client.send_file(clean_tg, downloaded_imgs, caption=fb_yt_post_text)
-                        else: await tg_client.send_message(clean_tg, fb_yt_post_text)
-                except Exception as e:
-                    print(f"  ⚠️ [Telegram Notice] {e}")
+            # 🌟 ৪. Telegram আপলোড (সবগুলো চ্যানেলেই লুপ আকারে পোস্ট পাঠানো)
+            if tg_client and tg_dest_ids:
+                for tg_id in tg_dest_ids:
+                    try:
+                        clean_tg = clean_telegram_id(tg_id)
+                        if clean_tg:
+                            print(f"  [+] Posting to Telegram Channel: @{clean_tg}")
+                            if downloaded_imgs:
+                                await tg_client.send_file(clean_tg, downloaded_imgs, caption=fb_yt_post_text)
+                            else:
+                                await tg_client.send_message(clean_tg, fb_yt_post_text)
+                    except Exception as e:
+                        print(f"  ⚠️ [Telegram Channel @{clean_tg} Notice] {e}")
 
             # ৫. WhatsApp আপলোড
             for did in wa_dest_ids:
