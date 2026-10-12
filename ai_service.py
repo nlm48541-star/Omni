@@ -11,7 +11,6 @@ TRACKER_FILE = "key_tracker.json"
 
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "https://api.ollama.com").rstrip("/")
 
-# 🌟 OpenRouter মডেল লিস্ট (১ম অগ্রাধিকার)
 OPENROUTER_MODELS = [
     "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
@@ -19,19 +18,16 @@ OPENROUTER_MODELS = [
     "mistralai/mistral-small-24b-instruct-2501"
 ]
 
-# 🌟 Groq Cloud মডেল লিস্ট (২য় অগ্রাধিকার)
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant"
 ]
 
-# 🌟 Cerebras Cloud মডেল লিস্ট (৩য় অগ্রাধিকার)
 CEREBRAS_MODELS = [
     "llama3.3-70b",
     "llama3.1-8b"
 ]
 
-# 🌟 Ollama Cloud মডেল লিস্ট (সর্বশেষ অগ্রাধিকার - Gemma প্রাধান্যসহ)
 OLLAMA_MODELS = [
     "gemma4:31b",
     "gemma4",
@@ -44,9 +40,6 @@ OLLAMA_MODELS = [
     "minimax-m3"
 ]
 
-# =========================================================================
-# 🌟 কি পার্সিং ও ট্র্যাকার হেল্পার (এন্টার/নিউলাইন সাপোর্ট ও ইনডেক্স সেভ)
-# =========================================================================
 def parse_multi_keys(env_var_names):
     if isinstance(env_var_names, str):
         env_var_names = [env_var_names]
@@ -82,10 +75,6 @@ def save_key_index(platform, index, total_keys):
         with open(TRACKER_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception: pass
-
-def mask_key(k):
-    if not k or len(k) <= 8: return "****"
-    return k[:4] + "..." + k[-4:]
 
 def get_ollama_chat_endpoint():
     raw = os.environ.get("OLLAMA_API_URL", "").strip()
@@ -198,11 +187,11 @@ def smart_fallback_data(title, article_text="", raw_html=""):
 
     return {
         "org_name": org_candidate,
-        "poster_headline_1": f"{org_candidate}র বিশাল নিয়োগ",
+        "poster_headline_1": f"{org_candidate} বিশাল নিয়োগ",
         "poster_headline_2": "সুযোগ!",
         "poster_p1_lines": [f"প্রয়োজনীয় শিক্ষাগত যোগ্যতায় {org_candidate}রে", f"{vac_str} পদে আবেদনের দুর্দান্ত সুযোগ।"],
         "poster_fee_line": "আবেদন ফি বিজ্ঞপ্তিমতে।",
-        "poster_p3_lines": ["👥 বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে", "আগ্রহী প্রার্থীরা আবেদন করতে পারবেন।"],
+        "poster_p3_lines": ["বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে", "আগ্রহী প্রার্থীরা আবেদন করতে পারবেন।"],
         "start_date": st_d,
         "end_date": ed_d,
         "posts": scraped_posts or [{"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": "০১", "qualification": "বিজ্ঞপ্তি অনুযায়ী"}],
@@ -211,7 +200,6 @@ def smart_fallback_data(title, article_text="", raw_html=""):
         "optimized_title": clean[:90]
     }
 
-# 🌟 ডাইনামিক সংখ্যার স্ক্রিপ্ট নরমালাইজার
 def normalize_scripts_count(data, target_count):
     scripts = data.get("scripts", [])
     single = data.get("voiceover_script", "")
@@ -226,9 +214,7 @@ def normalize_scripts_count(data, target_count):
         "যোগ্যতা অনুযায়ী এখনই আবেদন করুন, আকর্ষণীয় ক্যারিয়ার গড়ার দারুণ সুযোগ।",
         "বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে বিপুল সংখ্যক লোকবল নেওয়া হচ্ছে।",
         "আপনার স্বপ্নের চাকরির সন্ধান পেতে এখনই বিস্তারিত জেনে নিন।",
-        "নতুন প্রকাশিত এই চাকরির সার্কুলারে দ্রুত আবেদন সম্পন্ন করতে পারেন।",
-        "সরাসরি ক্যারিয়ার গড়ার দারুণ এক সুযোগ এসেছে চাকরিপ্রার্থীদের জন্য।",
-        "স্বনামধন্য এই প্রতিষ্ঠানে আকর্ষণীয় সুযোগ-সুবিধায় নিয়োগ চলছে।"
+        "নতুন প্রকাশিত এই চাকরির সার্কুলারে দ্রুত আবেদন সম্পন্ন করতে পারেন।"
     ]
     base_text = scripts[0] if scripts else "নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। আগ্রহী প্রার্থীরা প্রয়োজনীয় যোগ্যতা নিয়ে দ্রুত আবেদন সম্পন্ন করতে পারেন।"
     clean_base = re.sub(r'^(?:.*?)(?=এর জন্য|এ বিভিন্ন|পদে|বিজ্ঞপ্তি)', '', base_text).strip()
@@ -246,9 +232,6 @@ def normalize_scripts_count(data, target_count):
     data["voiceover_script"] = final_list[0]
     return data
 
-# =========================================================================
-# 🌟 মাস্টার এআই কো-অর্ডিনেটর: OpenRouter ➔ Groq ➔ Cerebras ➔ Ollama
-# =========================================================================
 def generate_job_data_and_script(title, article_text, raw_html, image_paths, scripts_count=8, memory=None):
     clean_title = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
@@ -259,31 +242,32 @@ Analyze this circular details:
 Content:
 {full_content}
 
-CRITICAL RULES:
+CRITICAL RULES FOR POSTER & SCRIPTS (STRICT NO EMOJIS):
 1. POSTER LAYOUT EXTRACTION:
-   - "poster_headline_1": Short first line in Bengali (e.g. "প্রাণিসম্পদ অধিদপ্তরের বিশাল নিয়োগ")
-   - "poster_headline_2": Short punchy hook (e.g. "সুযোগ!" or "বড় সুযোগ!")
-   - "poster_p1_lines": Array of 1-2 short punchy Bengali lines about qualification & vacancies.
-   - "poster_fee_line": e.g. "রাত ১২:০০ টা পর্যন্ত। আবেদন ফি বিজ্ঞপ্তিমতে।"
-   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts & vacancy counts.
+   - "poster_headline_1": Short first line in Bengali (e.g. "কুমিল্লা বিশ্ববিদ্যালয়ে বিশাল নিয়োগ")
+   - "poster_headline_2": Short punchy hook (e.g. "বড় সুযোগ!")
+   - "poster_p1_lines": Array of 1-2 short punchy Bengali lines about qualification & vacancies (e.g. ["৩৫টি পদে শিক্ষক ও কর্মকর্তা নিয়োগ", "যোগ্যতা: এসএসসি থেকে স্নাতকোত্তর"])
+   - "poster_fee_line": Short text about application fee/method (e.g. "আবেদন ফি বিজ্ঞপ্তিমতে।")
+   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts & vacancy counts (STRICTLY DO NOT REPEAT DEADLINE DATES HERE).
+   - DO NOT output any emojis (no laptop, no people emoji, clean Bengali text only).
 
 2. SCRIPTS:
    - Provide "scripts": Array of exactly {scripts_count} UNIQUE spoken Bengali voiceover scripts (100-120 words each).
    - Strict Outro CTA: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে দেওয়া নাম্বারে হোয়াটসঅ্যাপে মেসেজ দিন।"
 
-3. DATA:
+3. EXACT DATES SEPARATION:
    - "org_name": Official organization name.
-   - "start_date": e.g. "০১ অক্টোবর".
-   - "end_date": e.g. "০৬ অক্টোবর".
+   - "start_date": Exact opening date (e.g. "০১ অক্টোবর" or "চলমান").
+   - "end_date": Exact deadline date (e.g. "২৬ অক্টোবর").
    - "posts": Array of {{"post_name": "...", "vacancy": "০১", "qualification": "..."}}.
 
 Return strictly valid JSON:
 {{
   "org_name": "...",
   "poster_headline_1": "...",
-  "poster_headline_2": "সুযোগ!",
+  "poster_headline_2": "বড় সুযোগ!",
   "poster_p1_lines": ["..."],
-  "poster_fee_line": "...",
+  "poster_fee_line": "আবেদন ফি বিজ্ঞপ্তিমতে।",
   "poster_p3_lines": ["..."],
   "start_date": "...",
   "end_date": "...",
@@ -293,9 +277,7 @@ Return strictly valid JSON:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:3] if encode_image_base64(p)]
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ১: OpenRouter Cloud API (১ম অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ১. OpenRouter Cloud API (১ম অগ্রাধিকার)
     openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
     if openrouter_keys:
         total_k = len(openrouter_keys)
@@ -336,9 +318,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ২: Groq Cloud API (২য় অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ২. Groq Cloud API (২য় অগ্রাধিকার)
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k = len(groq_keys)
@@ -354,7 +334,7 @@ Return strictly valid JSON:
                 payload = {
                     "model": g_model,
                     "messages": [
-                        {"role": "system", "content": "You are a professional Bengali job circular poster and voiceover writer. Return strictly valid JSON."},
+                        {"role": "system", "content": "You are a professional Bengali job circular poster and voiceover writer. Return strictly valid JSON with no emojis."},
                         {"role": "user", "content": prompt}
                     ],
                     "response_format": {"type": "json_object"},
@@ -374,9 +354,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ৩: Cerebras Cloud API (৩য় অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ৩. Cerebras Cloud API (৩য় অগ্রাধিকার)
     cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
     if cerebras_keys:
         total_k = len(cerebras_keys)
@@ -412,9 +390,7 @@ Return strictly valid JSON:
                         break
                 except Exception: pass
 
-    # ---------------------------------------------------------------------
-    # 🌟 প্ল্যাটফর্ম ৪: Ollama Cloud API (সর্বশেষ অগ্রাধিকার)
-    # ---------------------------------------------------------------------
+    # ৪. Ollama Cloud API (সর্বশেষ অগ্রাধিকার)
     ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
     if ollama_keys:
         total_k = len(ollama_keys)
