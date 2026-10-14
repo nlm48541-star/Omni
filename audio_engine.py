@@ -2,14 +2,18 @@
 import os
 import re
 import time
+import json
 import base64
 import random
 import shutil
 import socket
 import requests
+import concurrent.futures
 
 # 🌟 গ্লোবাল নেটওয়ার্ক সকেট গার্ড: ১০ মিনিট (৬০০ সেকেন্ড)
 socket.setdefaulttimeout(600.0)
+
+TRACKER_FILE = "key_tracker.json"
 
 PHONE_DIGIT_WORDS = {
     '0': "জিরো", '1': "ওয়ান", '2': "টু", '3': "থ্রি", '4': "ফোর",
@@ -34,6 +38,7 @@ def int_to_bangla_words(n):
     parts = []
     if n >= 10000000: parts.append(int_to_bangla_words(n // 10000000) + " কোটি"); n %= 10000000
     if n >= 100000: parts.append(int_to_bangla_words(n // 100000) + " লক্ষ"); n %= 100000
+    if n >= 1000: parts.append(int_to_bangla_words(n // 1000) + " হাজার"); n %= 1000
     if n >= 100:
         h = n // 100; n %= 100
         parts.append("একশত" if h == 1 else (int_to_bangla_words(h) + " শত"))
@@ -85,17 +90,59 @@ def parse_multi_keys(env_var_names):
     return []
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (আপনার কাস্টম ভয়েস আইডি সহ)
+# 🌟 লিমিট শেষ হওয়া কি-ট্র্যাকার ম্যানেজার (JSON File Persistence)
 # =========================================================================
-def synthesize_with_gemini(speech_text, output_audio_path, key_offset=0):
-    gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
-    if not gemini_keys:
-        return False
+def get_exhausted_keys(platform):
+    if os.path.exists(TRACKER_FILE):
+        try:
+            with open(TRACKER_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return set(data.get(f"{platform}_exhausted_keys", []))
+        except Exception: pass
+    return set()
 
-    total_k = len(gemini_keys)
-    start_idx = key_offset % total_k
+def record_key_exhausted(platform, api_key):
+    data = {}
+    if os.path.exists(TRACKER_FILE):
+        try:
+            with open(TRACKER_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception: data = {}
+    key_list = set(data.get(f"{platform}_exhausted_keys", []))
+    key_list.add(api_key)
+    data[f"{platform}_exhausted_keys"] = list(key_list)
+    try:
+        with open(TRACKER_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception: pass
 
-    # 🌟 আপনার দেওয়া কাস্টম ভয়েস আইডি
+def clear_exhausted_keys(platform):
+    if os.path.exists(TRACKER_FILE):
+        try:
+            with open(TRACKER_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            data[f"{platform}_exhausted_keys"] = []
+            with open(TRACKER_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception: pass
+
+# =========================================================================
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (কাস্টম ভয়েস ও ফলব্যাক সাপোর্ট)
+# =========================================================================
+def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_idx=0):
+    all_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
+    if not all_keys: return False
+
+    exhausted_set = get_exhausted_keys("gemini")
+    available_keys = [k for k in all_keys if k not in exhausted_set]
+
+    if not available_keys:
+        clear_exhausted_keys("gemini")
+        available_keys = all_keys
+
+    total_avail = len(available_keys)
+    start_pos = preferred_key_idx % total_avail
+
     custom_voice = os.environ.get("GEMINI_VOICE_ID", "voice_tut88l1l0nly").strip() or "voice_tut88l1l0nly"
     delivery_style = os.environ.get("GEMINI_DELIVERY_STYLE", "Natural, calm, warm and articulate Bengali pronunciation").strip()
 
@@ -105,22 +152,18 @@ def synthesize_with_gemini(speech_text, output_audio_path, key_offset=0):
         print("  ⚠️ 'google-genai' library not installed.")
         return False
 
-    for offset in range(total_k):
-        k_idx = (start_idx + offset) % total_k
-        api_key = gemini_keys[k_idx]
+    for offset in range(total_avail):
+        k_idx = (start_pos + offset) % total_avail
+        api_key = available_keys[k_idx]
         masked = mask_key(api_key)
-        print(f"  🚀 Attempting Gemini Key #{k_idx+1}/{total_k} ({masked})")
 
-        # ব্যবহারকারীর ভয়েস আইডি দিয়ে আগে ট্রাই করবে
         voices_to_try = [custom_voice]
         if custom_voice != "Kore": voices_to_try.append("Kore")
         if "Puck" not in voices_to_try: voices_to_try.append("Puck")
 
         for voice_candidate in voices_to_try:
-            start_t = time.time()
             try:
                 client = genai.Client(api_key=api_key)
-
                 interaction = client.interactions.create(
                     model="gemini-3.8-flash-tts",
                     input=[{
@@ -135,9 +178,7 @@ def synthesize_with_gemini(speech_text, output_audio_path, key_offset=0):
                         }]
                     }],
                     response_format={"type": "audio"},
-                    generation_config={
-                        "speech_config": [{"voice": voice_candidate}]
-                    }
+                    generation_config={"speech_config": [{"voice": voice_candidate}]}
                 )
 
                 if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
@@ -146,15 +187,15 @@ def synthesize_with_gemini(speech_text, output_audio_path, key_offset=0):
                         os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                         with open(output_audio_path, "wb") as f:
                             f.write(audio_bytes)
-                        elapsed = round(time.time() - start_t, 2)
-                        print(f"  ✅ [SUCCESS] Generated via Gemini 3.8 Flash TTS! (Voice: '{voice_candidate}' in {elapsed}s)")
+                        print(f"  ✅ [Gemini TTS SUCCESS] Generated using Key ({masked}) with Voice '{voice_candidate}'")
                         return True
             except Exception as e:
-                err_msg = str(e)
+                err_msg = str(e).lower()
                 if "voice was not found" in err_msg or "404" in err_msg:
                     continue
                 else:
-                    print(f"  ⚠️ Gemini Key #{k_idx+1} notice: {err_msg[:90]}. Switching key...")
+                    print(f"  ⚠️ [Gemini Key Notice] Key ({masked}) exhausted/error: {str(e)[:80]}. Saving to tracker...")
+                    record_key_exhausted("gemini", api_key)
                     break
 
     return False
@@ -162,17 +203,23 @@ def synthesize_with_gemini(speech_text, output_audio_path, key_offset=0):
 # =========================================================================
 # 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার)
 # =========================================================================
-def synthesize_with_elevenlabs(speech_text, output_audio_path, key_offset=0):
-    eleven_keys = parse_multi_keys(["ELEVENLABS_API_KEYS", "ELEVENLABS_API_KEY"])
-    if not eleven_keys:
-        return False
+def synthesize_with_elevenlabs_single(speech_text, output_audio_path, preferred_key_idx=0):
+    all_keys = parse_multi_keys(["ELEVENLABS_API_KEYS", "ELEVENLABS_API_KEY"])
+    if not all_keys: return False
 
-    total_k = len(eleven_keys)
-    start_idx = key_offset % total_k
+    exhausted_set = get_exhausted_keys("elevenlabs")
+    available_keys = [k for k in all_keys if k not in exhausted_set]
 
-    for offset in range(total_k):
-        k_idx = (start_idx + offset) % total_k
-        api_key = eleven_keys[k_idx]
+    if not available_keys:
+        clear_exhausted_keys("elevenlabs")
+        available_keys = all_keys
+
+    total_avail = len(available_keys)
+    start_pos = preferred_key_idx % total_avail
+
+    for offset in range(total_avail):
+        k_idx = (start_pos + offset) % total_avail
+        api_key = available_keys[k_idx]
         voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb").strip() or "JBFqnCBsd6RMkjVDRZzb"
         tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
@@ -190,9 +237,10 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path, key_offset=0):
                 os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                 with open(output_audio_path, "wb") as f:
                     f.write(resp.content)
-                print(f"  ✅ [SUCCESS] Generated via ElevenLabs Key #{k_idx+1}!")
+                print(f"  ✅ [ElevenLabs SUCCESS] Generated audio using Key ({mask_key(api_key)})")
                 return True
             elif resp.status_code in [401, 402, 429]:
+                record_key_exhausted("elevenlabs", api_key)
                 continue
         except Exception:
             continue
@@ -201,25 +249,23 @@ def synthesize_with_elevenlabs(speech_text, output_audio_path, key_offset=0):
 # =========================================================================
 # 🌟 ৩. Microsoft Edge Neural ব্যাকআপ ইঞ্জিন
 # =========================================================================
-def synthesize_with_edge_fallback(speech_text, output_audio_path):
-    print("\n--- [Emergency Backup: Microsoft Edge Neural (bn-BD-PradeepNeural)] ---")
+def synthesize_with_edge_single(speech_text, output_audio_path):
+    print("  🎙️ [Priority 3: Microsoft Edge Neural (bn-BD-PradeepNeural)]")
     try:
         import asyncio, edge_tts
-        start_t = time.time()
         async def _make():
             c = edge_tts.Communicate(speech_text, "bn-BD-PradeepNeural", rate="+0%", pitch="+0Hz")
             await c.save(output_audio_path)
         asyncio.run(_make())
         if os.path.exists(output_audio_path) and os.path.getsize(output_audio_path) > 1000:
-            elapsed = round(time.time() - start_t, 2)
-            print(f"  ✅ [SUCCESS] Generated via Microsoft Edge Neural in {elapsed}s!")
+            print("  ✅ [Edge TTS SUCCESS] Generated audio using Microsoft Edge!")
             return True
     except Exception as e:
-        print(f"  ⚠️ Edge fallback notice: {e}")
+        print(f"  ⚠️ Edge TTS notice: {e}")
     return False
 
 # =========================================================================
-# 🌟 ৪. লোকাল ব্যাকগ্রাউন্ড মিউজিক (চূড়ান্ত ফলব্যাক)
+# 🌟 ৪. লোকাল ব্যাকগ্রাউন্ড মিউজিক ফলব্যাক
 # =========================================================================
 def get_fallback_music_file():
     candidates = []
@@ -232,34 +278,59 @@ def get_fallback_music_file():
     return None
 
 # =========================================================================
-# 🌟 মাস্টার অডিও পাইপলাইন (Orchestrator)
+# 🌟 একক অডিও জেনারেটর টাস্ক
 # =========================================================================
-def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None):
+def generate_single_audio_task(text, output_path, key_idx=0):
     speech_text = clean_script_for_speech(text)
-    clean_chars = len(speech_text)
-    words = len(speech_text.split())
 
-    print("\n" + "="*65)
-    print("🎙️ [AUDIO ENGINE] Multi-Tier Voice Synthesis Active (10-Min Socket Guard)")
-    print(f"📊 [Text Stats] Chars: {clean_chars} | Words: {words}")
-    print(f"📝 [Preview]: \"{speech_text[:120]}...\"")
-    print("="*65)
-
-    if synthesize_with_gemini(speech_text, output_audio_path, key_offset=key_offset):
+    # ১. Gemini TTS
+    if synthesize_with_gemini_single(speech_text, output_path, preferred_key_idx=key_idx):
         return True
 
-    if synthesize_with_elevenlabs(speech_text, output_audio_path, key_offset=key_offset):
+    # ২. ElevenLabs
+    if synthesize_with_elevenlabs_single(speech_text, output_path, preferred_key_idx=key_idx):
         return True
 
-    if synthesize_with_edge_fallback(speech_text, output_audio_path):
+    # ৩. Edge TTS
+    if synthesize_with_edge_single(speech_text, output_path):
         return True
 
+    # ৪. মিউজিক ফলব্যাক
     fallback_music = get_fallback_music_file()
     if fallback_music and os.path.exists(fallback_music):
-        os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
-        shutil.copyfile(fallback_music, output_audio_path)
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        shutil.copyfile(fallback_music, output_path)
         print(f"  ⚠️ [Music Fallback] Used '{fallback_music}'")
         return True
 
-    print("\n❌ [CRITICAL] All audio engines failed.")
     return False
+
+# =========================================================================
+# 🌟 সম্পূর্ণ প্যারালাল অডিও জেনারেশন ইঞ্জিন (ImportError দূর করার ফাংশন)
+# =========================================================================
+def generate_audios_in_parallel(scripts_list, base_hash, total_needed):
+    """
+    প্রয়োজনীয় অডিওগুলো ক্রমানুসারে আলাদা আলাদা কি নিয়ে একসাথে প্যারালালভাবে জেনারেট করবে।
+    """
+    print("\n" + "="*65)
+    print(f"🎙️ [PARALLEL AUDIO ENGINE] Synthesizing {total_needed} Audios Simultaneously...")
+    print("="*65)
+
+    audio_paths = [f"tmp_voice_{base_hash}_{i+1}.mp3" for i in range(total_needed)]
+    tasks = []
+
+    workers = min(total_needed, 8)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        for idx in range(total_needed):
+            s_text = scripts_list[idx % len(scripts_list)]
+            out_file = audio_paths[idx]
+            tasks.append(executor.submit(generate_single_audio_task, s_text, out_file, idx))
+
+        results = [t.result() for t in tasks]
+
+    successful_audios = [p for p, ok in zip(audio_paths, results) if ok and os.path.exists(p)]
+    print(f"✅ [Parallel Audio Complete] {len(successful_audios)} of {total_needed} audios successfully synthesized!\n")
+    return successful_audios
+
+def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None):
+    return generate_single_audio_task(text, output_audio_path, key_idx=key_offset)
