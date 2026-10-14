@@ -2,13 +2,18 @@
 import sys
 import os
 import re
+import time
 import random
 import shutil
+import socket
 import asyncio
 import requests
 import builtins
 import concurrent.futures
 from PIL import Image
+
+# 🌟 গ্লোবাল নেটওয়ার্ক সকেট গার্ড: ১০ মিনিট (৬০০ সেকেন্ড)
+socket.setdefaulttimeout(600.0)
 
 def _disabled_ci_input(prompt=""):
     raise EOFError(f"Interactive input('{prompt}') is permanently disabled in CI/CD automation.")
@@ -26,7 +31,7 @@ from config_manager import (
     clean_text, clean_telegram_id, sanitize_filename
 )
 from ai_service import generate_job_data_and_script
-from audio_engine import generate_audios_in_parallel
+from audio_engine import generate_audios_in_parallel, generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
 from video_engine import render_vertical_video, render_tiktok_motion_video
 from feed_manager import fetch_feed_entries, extract_article_images, scrape_full_webpage_content
@@ -56,7 +61,7 @@ def filter_banner_first_image(downloaded_imgs):
     return list(downloaded_imgs)
 
 # =========================================================================
-# 🌟 প্যারালাল ভিডিও রেন্ডারিং হেল্পার (একসাথে ২টি করে ভিডিও রেন্ডার হবে)
+# 🌟 প্যারালাল ভিডিও রেন্ডারিং হেল্পার
 # =========================================================================
 def render_main_video_task(args):
     source, audio, out_path = args
@@ -72,7 +77,7 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # টেলিগ্রাম ক্লায়েন্ট
+    # টেলিগ্রাম ক্লায়েন্ট (নন-ব্লকিং)
     tg_session = get_credential(config, "tg_session", "TG_SESSION")
     tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
     tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
@@ -89,7 +94,7 @@ async def process_sync(config, memory):
                 await tg_client.disconnect()
                 tg_client = None
         except Exception as e:
-            print(f"  ⚠️ Telegram notice: {e}")
+            print(f"  ⚠️ Telegram connection safely skipped: {e}")
             tg_client = None
 
     # কানেক্টেড অ্যাকাউন্টসমূহ রিড করা
@@ -113,12 +118,10 @@ async def process_sync(config, memory):
         elif d_plat == "Telegram": tg_dest_ids.extend([d for d in d_ids if d not in tg_dest_ids])
         elif d_plat == "WhatsApp": wa_dest_ids.extend([d for d in d_ids if d not in wa_dest_ids])
 
-    # 🌟 ডাইনামিক অ্যাকাউন্ট সংখ্যা গণনা
     fb_count = len(fb_dest_ids)
     yt_count = len(yt_targets)
     tiktok_count = len(tiktok_targets)
 
-    # সর্বোচ্চ যে অ্যাকাউন্ট আছে সেই পরিমাণ অডিও ও স্ক্রিপ্ট তৈরি হবে
     total_audio_needed = max(fb_count, yt_count, tiktok_count, 1)
     main_videos_needed = max(fb_count, yt_count)
 
@@ -130,6 +133,7 @@ async def process_sync(config, memory):
     print(f"   ├─ Connected YouTube Channels : {yt_count}")
     print(f"   ├─ Connected Facebook Pages   : {fb_count}")
     print(f"   ├─ Connected TikTok Accounts  : {tiktok_count}")
+    print(f"   ├─ Active Telegram Channels   : {len(tg_dest_ids)}")
     print(f"   ├─ Dynamic Required Audios    : {total_audio_needed}")
     print(f"   ├─ Main Videos to Render      : {main_videos_needed}")
     print(f"   ├─ TikTok Videos to Render    : {tiktok_count}")
@@ -175,13 +179,13 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # 🌟 এআই দিয়ে প্রয়োজনীয় সংখ্যার (total_audio_needed) স্ক্রিপ্ট তৈরি
+            # এআই দিয়ে প্রয়োজনীয় সংখ্যার স্ক্রিপ্ট তৈরি
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, scripts_count=total_audio_needed, memory=memory)
 
             print(f"\n🔥 [CONTENT PREPARED] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
-            # 🌟 ১. প্যারালাল অডিও তৈরি (সবগুলো অডিও একসাথে জেনারেট হবে)
+            # 🌟 ১. সম্পূর্ণ প্যারালাল অডিও তৈরি
             generated_audios = generate_audios_in_parallel(scripts, hash(entry_link), total_audio_needed)
 
             if not generated_audios:
@@ -198,13 +202,13 @@ async def process_sync(config, memory):
             fb_yt_source = valid_source_imgs if valid_source_imgs else prepare_tiktok_slides(job_data, f"fb_fallback_{hash(entry_link)}")
 
             # =================================================================
-            # 🌟 ২. প্যারালাল ভিডিও রেন্ডারিং (একসাথে ২টি করে ভিডিও রেন্ডার হবে)
+            # 🌟 ২. প্যারালাল ভিডিও রেন্ডারিং
             # =================================================================
 
             # ক) মেইন ভিডিও রেন্ডারিং (Facebook ও YouTube এর জন্য)
             main_vid_paths = [f"tmp_main_{hash(entry_link)}_{i+1}.mp4" for i in range(main_videos_needed)]
             if main_videos_needed > 0:
-                print(f"🎬 [PARALLEL VIDEO RENDERING] Rendering {main_videos_needed} Main Videos (Workers = 2)...")
+                print(f"🎬 [PARALLEL VIDEO RENDERING] Rendering {main_videos_needed} Main Videos...")
                 main_tasks = [
                     (fb_yt_source, generated_audios[i % len(generated_audios)], main_vid_paths[i])
                     for i in range(main_videos_needed)
@@ -212,10 +216,10 @@ async def process_sync(config, memory):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                     list(executor.map(render_main_video_task, main_tasks))
 
-            # খ) TikTok পোস্টার ভিডিও রেন্ডারিং (TikTok অ্যাকাউন্টের জন্য)
+            # খ) TikTok পোস্টার ভিডিও রেন্ডারিং
             tk_vid_paths = [f"tmp_tiktok_{hash(entry_link)}_{i+1}.mp4" for i in range(tiktok_count)]
             if tiktok_count > 0:
-                print(f"🎬 [PARALLEL TIKTOK RENDERING] Rendering {tiktok_count} TikTok Videos (Workers = 2)...")
+                print(f"🎬 [PARALLEL TIKTOK RENDERING] Rendering {tiktok_count} TikTok Videos...")
                 tk_tasks = [
                     (job_data, generated_audios[i % len(generated_audios)], tk_vid_paths[i])
                     for i in range(tiktok_count)
@@ -224,10 +228,10 @@ async def process_sync(config, memory):
                     list(executor.map(render_tiktok_video_task, tk_tasks))
 
             # =================================================================
-            # 🌟 ৩. সোশ্যাল মিডিয়ায় নিখুঁত ডিস্ট্রিবিউশন
+            # 🌟 ৩. সোশ্যাল মিডিয়ায় আপলোড
             # =================================================================
 
-            # YouTube আপলোড (ইউটিউব অ্যাকাউন্টের সংখ্যা অনুযায়ী)
+            # YouTube আপলোড
             for y_idx, yt_channel in enumerate(yt_targets):
                 try:
                     yt_vid = main_vid_paths[y_idx % len(main_vid_paths)]
@@ -237,7 +241,7 @@ async def process_sync(config, memory):
                 except Exception as e:
                     print(f"  ⚠️ [YouTube Channel #{y_idx+1} Notice] {e}")
 
-            # Facebook আপলোড (ফেসবুক পেজের সংখ্যা অনুযায়ী)
+            # Facebook আপলোড
             for f_idx, did in enumerate(fb_dest_ids):
                 try:
                     token = get_page_access_token(fb_user_token, did)
@@ -249,7 +253,7 @@ async def process_sync(config, memory):
                 except Exception as e:
                     print(f"  ⚠️ [Facebook Page {did} Notice] {e}")
 
-            # TikTok / Buffer এবং Google Drive আপলোড (টিকটক অ্যাকাউন্টের সংখ্যা অনুযায়ী)
+            # TikTok / Buffer এবং Google Drive আপলোড
             for t_idx, tk_account in enumerate(tiktok_targets):
                 try:
                     tk_vid = tk_vid_paths[t_idx % len(tk_vid_paths)]
@@ -269,7 +273,7 @@ async def process_sync(config, memory):
                 except Exception as e:
                     print(f"  ⚠️ [TikTok Video #{t_idx+1} Notice] {e}")
 
-            # টেলিগ্রাম আপলোড
+            # Telegram আপলোড (সবগুলো চ্যানেলেই লুপ আকারে পাঠানো)
             if tg_client and tg_dest_ids:
                 for tg_id in tg_dest_ids:
                     try:
