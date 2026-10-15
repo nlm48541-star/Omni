@@ -12,18 +12,39 @@ def extract_article_images(entry, entry_link, raw_desc=""):
         img_urls.extend([enc.get('href', '') for enc in entry.enclosures if enc.get('href', '').lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
     if 'media_content' in entry and entry.media_content:
         img_urls.extend([mc.get('url') for mc in entry.media_content])
-    img_urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc, re.IGNORECASE))
 
+    # 🌟 শুধুমাত্র মূল আর্টিকেলের ভেতরের ছবি সংগ্রহ করা (সাইডবার ও রিলেটেড পোস্ট ডিলিট করে)
     try:
-        web_res = requests.get(entry_link, headers=HEADERS, timeout=36)
-        if web_res.status_code == 200:
-            scraped = [u for u in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', web_res.text, re.IGNORECASE) if not any(l in u.lower() for l in ['logo', 'icon', 'avatar', 'emoji'])]
-            img_urls.extend([i for i in scraped if i not in img_urls])
-    except Exception: pass
+        resp = requests.get(entry_link, headers=HEADERS, timeout=30)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+
+            # সাইডবার, উইজেট, ফুটার, মেনু ও রিলেটেড পোস্ট অংশ মুছে ফেলা
+            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                tag.decompose()
+            for junk in soup.find_all(['div', 'section', 'ul'], class_=re.compile(r'(related|sidebar|widget|comment|footer|recommend|yarpp|jp-relatedposts|author-box)', re.I)):
+                junk.decompose()
+
+            # শুধুমাত্র মূল কন্টেন্ট কন্টেইনার টার্গেট করা
+            container = soup.find(['div', 'article', 'section'], class_=re.compile(r'(entry-content|post-content|article-body|main-content|post-entry)', re.I))
+            target_element = container if container else soup.find('body')
+
+            if target_element:
+                for img in target_element.find_all('img'):
+                    src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                    if src:
+                        s_lower = src.lower()
+                        # লোগো, আইকন, সোশ্যাল বাটন ইত্যাদি বাদ দেওয়া
+                        if not any(x in s_lower for x in ['logo', 'icon', 'avatar', 'emoji', 'button', 'badge', 'banner']):
+                            full_u = urljoin(entry_link, src)
+                            img_urls.append(full_u)
+    except Exception:
+        if raw_desc:
+            img_urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc, re.I))
 
     cleaned = []
     seen_bases = set()
-    for u in img_urls[:6]:
+    for u in img_urls:
         u = urljoin(entry_link, u) if not u.startswith('http') else u
         base_u = u.split('?')[0]
         if base_u not in seen_bases:
@@ -36,10 +57,12 @@ def scrape_full_webpage_content(page_url):
         resp = requests.get(page_url, headers=HEADERS, timeout=45)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
+            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                tag.decompose()
+            for junk in soup.find_all(['div', 'section', 'ul'], class_=re.compile(r'(related|sidebar|widget|comment|footer|recommend|yarpp)', re.I)):
+                junk.decompose()
             container = soup.find(['div', 'article', 'section'], class_=re.compile(r'(entry-content|post-content|article-body|main-content)', re.I))
             element = container if container else soup
-            for tag in element(['script', 'style', 'nav', 'header', 'footer']):
-                tag.decompose()
             return element.get_text(separator=' ', strip=True), resp.text
     except Exception as e:
         print(f"  [!] Webpage scrape notice for {page_url}: {e}")
