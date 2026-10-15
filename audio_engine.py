@@ -10,8 +10,8 @@ import socket
 import requests
 import concurrent.futures
 
-# 🌟 গ্লোবাল নেটওয়ার্ক সকেট গার্ড: ১০ মিনিট (৬০০ সেকেন্ড)
-socket.setdefaulttimeout(600.0)
+# গ্লোবাল সকেট সেফটি
+socket.setdefaulttimeout(60.0)
 
 TRACKER_FILE = "key_tracker.json"
 
@@ -90,7 +90,7 @@ def parse_multi_keys(env_var_names):
     return []
 
 # =========================================================================
-# 🌟 লিমিট শেষ হওয়া কি-ট্র্যাকার ম্যানেজার (JSON File Persistence)
+# 🌟 লিমিট শেষ হওয়া কি-ট্র্যাকার ম্যানেজার
 # =========================================================================
 def get_exhausted_keys(platform):
     if os.path.exists(TRACKER_FILE):
@@ -127,7 +127,7 @@ def clear_exhausted_keys(platform):
         except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (কাস্টম ভয়েস ও ফলব্যাক সাপোর্ট)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (৪৫ সেকেন্ড সেফটি সহ)
 # =========================================================================
 def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_idx=0):
     all_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
@@ -144,26 +144,33 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
     start_pos = preferred_key_idx % total_avail
 
     custom_voice = os.environ.get("GEMINI_VOICE_ID", "voice_tut88l1l0nly").strip() or "voice_tut88l1l0nly"
+    primary_voice = custom_voice if custom_voice else "Kore"
     delivery_style = os.environ.get("GEMINI_DELIVERY_STYLE", "Natural, calm, warm and articulate Bengali pronunciation").strip()
 
     try:
         from google import genai
-    except ImportError:
-        print("  ⚠️ 'google-genai' library not installed.")
-        return False
+        from google.genai import types
+        http_config = types.HttpOptions(timeout=45_000)
+    except Exception:
+        http_config = None
 
     for offset in range(total_avail):
         k_idx = (start_pos + offset) % total_avail
         api_key = available_keys[k_idx]
         masked = mask_key(api_key)
 
-        voices_to_try = [custom_voice]
-        if custom_voice != "Kore": voices_to_try.append("Kore")
+        voices_to_try = [primary_voice]
+        if primary_voice != "Kore": voices_to_try.append("Kore")
         if "Puck" not in voices_to_try: voices_to_try.append("Puck")
 
         for voice_candidate in voices_to_try:
+            start_t = time.time()
             try:
-                client = genai.Client(api_key=api_key)
+                if http_config:
+                    client = genai.Client(api_key=api_key, http_options=http_config)
+                else:
+                    client = genai.Client(api_key=api_key)
+
                 interaction = client.interactions.create(
                     model="gemini-3.8-flash-tts",
                     input=[{
@@ -187,14 +194,15 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
                         os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                         with open(output_audio_path, "wb") as f:
                             f.write(audio_bytes)
-                        print(f"  ✅ [Gemini TTS SUCCESS] Generated using Key ({masked}) with Voice '{voice_candidate}'")
+                        elapsed = round(time.time() - start_t, 2)
+                        print(f"  ✅ [Gemini TTS SUCCESS] Generated using Key ({masked}) with Voice '{voice_candidate}' in {elapsed}s")
                         return True
             except Exception as e:
                 err_msg = str(e).lower()
                 if "voice was not found" in err_msg or "404" in err_msg:
                     continue
                 else:
-                    print(f"  ⚠️ [Gemini Key Notice] Key ({masked}) exhausted/error: {str(e)[:80]}. Saving to tracker...")
+                    print(f"  ⚠️ [Gemini Key Notice] Key ({masked}) error: {str(e)[:80]}. Marking exhausted...")
                     record_key_exhausted("gemini", api_key)
                     break
 
@@ -232,7 +240,7 @@ def synthesize_with_elevenlabs_single(speech_text, output_audio_path, preferred_
         headers = {"Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": api_key}
 
         try:
-            resp = requests.post(tts_url, json=payload, headers=headers)
+            resp = requests.post(tts_url, json=payload, headers=headers, timeout=30)
             if resp.status_code == 200 and len(resp.content) > 1000:
                 os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
                 with open(output_audio_path, "wb") as f:
@@ -306,30 +314,54 @@ def generate_single_audio_task(text, output_path, key_idx=0):
     return False
 
 # =========================================================================
-# 🌟 সম্পূর্ণ প্যারালাল অডিও জেনারেশন ইঞ্জিন (ImportError দূর করার ফাংশন)
+# 🌟 সম্পূর্ণ প্যারালাল অডিও জেনারেশন ইঞ্জিন (কনকারেন্সি কন্ট্রোল ও সেফ গার্ড)
 # =========================================================================
 def generate_audios_in_parallel(scripts_list, base_hash, total_needed):
     """
-    প্রয়োজনীয় অডিওগুলো ক্রমানুসারে আলাদা আলাদা কি নিয়ে একসাথে প্যারালালভাবে জেনারেট করবে।
+    একসাথে ৬টি পাঠিয়ে গুগল সার্ভার স্টল না করে ২টি করে কনকারেন্টলি জেনারেট করবে।
+    কোনো একটি মিস হলে স্বয়ংক্রিয়ভাবে Edge TTS ব্যাকআপ দিয়ে রিকভার করবে।
     """
     print("\n" + "="*65)
-    print(f"🎙️ [PARALLEL AUDIO ENGINE] Synthesizing {total_needed} Audios Simultaneously...")
+    print(f"🎙️ [PARALLEL AUDIO ENGINE] Synthesizing {total_needed} Audios (Max 2 Concurrent)...")
     print("="*65)
 
     audio_paths = [f"tmp_voice_{base_hash}_{i+1}.mp3" for i in range(total_needed)]
-    tasks = []
+    tasks = {}
 
-    workers = min(total_needed, 8)
+    # 🌟 একসাথে সর্বোচ্চ ২টি কনকারেন্ট রিকোয়েস্ট যাবে যাতে গুগল রেট-লিমিট না দেয়
+    workers = min(total_needed, 2)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         for idx in range(total_needed):
             s_text = scripts_list[idx % len(scripts_list)]
             out_file = audio_paths[idx]
-            tasks.append(executor.submit(generate_single_audio_task, s_text, out_file, idx))
+            future = executor.submit(generate_single_audio_task, s_text, out_file, idx)
+            tasks[future] = (out_file, s_text, idx)
 
-        results = [t.result() for t in tasks]
+        # প্রতিটি টাস্কের জন্য অপেক্ষা করা
+        for future in concurrent.futures.as_completed(tasks):
+            out_file, s_text, idx = tasks[future]
+            try:
+                future.result(timeout=50)
+            except Exception as e:
+                print(f"  ⚠️ Parallel Task #{idx+1} notice: {e}")
 
-    successful_audios = [p for p, ok in zip(audio_paths, results) if ok and os.path.exists(p)]
-    print(f"✅ [Parallel Audio Complete] {len(successful_audios)} of {total_needed} audios successfully synthesized!\n")
+    # 🌟 রিকভারি গার্ড: যদি কোনো অডিও জেমিনি দিয়ে তৈরি হতে মিস হয়, সাথে সাথে Edge TTS দিয়ে পূরণ করা
+    successful_audios = []
+    for idx, p in enumerate(audio_paths):
+        if os.path.exists(p) and os.path.getsize(p) > 1000:
+            successful_audios.append(p)
+        else:
+            print(f"  🔄 [Auto-Recovery] Audio #{idx+1} missing. Generating with Edge TTS backup...")
+            s_text = scripts_list[idx % len(scripts_list)]
+            if synthesize_with_edge_single(s_text, p):
+                successful_audios.append(p)
+            else:
+                fb = get_fallback_music_file()
+                if fb:
+                    shutil.copyfile(fb, p)
+                    successful_audios.append(p)
+
+    print(f"✅ [Parallel Audio Complete] {len(successful_audios)} of {total_needed} audios ready!\n")
     return successful_audios
 
 def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None):
