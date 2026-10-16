@@ -30,7 +30,7 @@ from config_manager import (
     clean_text, clean_telegram_id, sanitize_filename
 )
 from ai_service import generate_job_data_and_script
-from audio_engine import generate_audios_in_parallel, generate_voiceover_audio_pipeline
+from audio_engine import generate_voiceover_audio_pipeline
 from tiktok_designer import prepare_tiktok_slides
 from video_engine import render_vertical_video, render_tiktok_motion_video
 from feed_manager import fetch_feed_entries, extract_article_images, scrape_full_webpage_content
@@ -48,7 +48,6 @@ def is_forbidden_title(title):
     title_lower = str(title).lower()
     return any(k in title_lower for k in ['এনজিও', 'ngo', 'ব্যাংক', 'bank', 'চলমান'])
 
-# 🌟 আপনার আগের লজিক: শুধুমাত্র প্রথম ছবিটি ১৬:৯ ব্যানার কি না তা চেক করবে (বাকিগুলো আনচেঞ্জড থাকবে)
 def filter_banner_first_image(downloaded_imgs):
     if not downloaded_imgs or len(downloaded_imgs) == 1:
         return list(downloaded_imgs)
@@ -60,15 +59,6 @@ def filter_banner_first_image(downloaded_imgs):
                 return list(downloaded_imgs[1:])
     except Exception: pass
     return list(downloaded_imgs)
-
-# প্যারালাল ভিডিও রেন্ডারিং হেল্পার
-def render_main_video_task(args):
-    source, audio, out_path = args
-    return render_vertical_video(source, audio, out_path)
-
-def render_tiktok_video_task(args):
-    job_data, audio, out_path = args
-    return render_tiktok_motion_video(job_data, audio, out_path)
 
 async def process_sync(config, memory):
     rules = config.get("rules", [])
@@ -96,13 +86,12 @@ async def process_sync(config, memory):
             print(f"  ⚠️ Telegram connection safely skipped: {e}")
             tg_client = None
 
-    # মাস্টার সুইচ চেক (TikTok এবং Google Drive বন্ধ বা চালু আছে কি না)
+    # মাস্টার সুইচ চেক (TikTok এবং Google Drive)
     enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
     # অ্যাকাউন্ট রিড করা
     yt_targets = get_all_youtube_targets(config)
-    # 🌟 যদি ENABLE_TIKTOK বন্ধ থাকে তবে টিকটক লিস্ট শূন্য থাকবে (ভিডিও তৈরি হবে না)
     tiktok_targets = get_all_tiktok_buffer_targets(config) if enable_tiktok else []
 
     clean_platform = lambda p_str: "Telegram" if "Telegram" in p_str else ("Facebook" if "Facebook" in p_str else ("YouTube" if "YouTube" in p_str else ("WhatsApp" if "WhatsApp" in p_str else "Website")))
@@ -126,21 +115,18 @@ async def process_sync(config, memory):
     yt_count = len(yt_targets)
     tiktok_count = len(tiktok_targets)
 
-    # প্রয়োজনীয় অডিও ও ভিডিও সংখ্যা নির্ধারণ
-    total_audio_needed = max(fb_count, yt_count, tiktok_count, 1)
-    main_videos_needed = max(fb_count, yt_count)
+    # 🌟 মোট কতটি সাইকেল চালাতে হবে তা গণনা (সর্বোচ্চ অ্যাকাউন্ট সংখ্যা)
+    total_cycles = max(fb_count, yt_count, tiktok_count, 1)
 
     rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
 
-    print(f"\n⚙️ [Master Automation Status]")
+    print(f"\n⚙️ [Master Automation Status - Progressive Sequential Pipeline]")
     print(f"   ├─ Connected YouTube Channels : {yt_count}")
     print(f"   ├─ Connected Facebook Pages   : {fb_count}")
     print(f"   ├─ Connected TikTok Accounts  : {tiktok_count} ({'ENABLED' if enable_tiktok else 'DISABLED'})")
     print(f"   ├─ Active Telegram Channels   : {len(tg_dest_ids)}")
-    print(f"   ├─ Dynamic Required Audios    : {total_audio_needed}")
-    print(f"   ├─ Main Videos to Render      : {main_videos_needed}")
-    print(f"   ├─ TikTok Videos to Render    : {tiktok_count}")
+    print(f"   ├─ Total Required Cycles      : {total_cycles}")
     print(f"   └─ Google Drive Save Mode     : {'✅ ENABLED (ON)' if save_to_gdrive else '⚠️ DISABLED (OFF)'}")
 
     fb_user_token = get_credential(config, "fb_token", "FB_TOKEN") or get_credential(config, "fb_user_token", "FB_USER_TOKEN")
@@ -183,104 +169,93 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # এআই দিয়ে প্রয়োজনীয় সংখ্যার স্ক্রিপ্ট ও পোস্টার ডাটা তৈরি
-            job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, scripts_count=total_audio_needed, memory=memory)
+            # এআই দিয়ে প্রয়োজনীয় সংখ্যার স্ক্রিপ্ট তৈরি
+            job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, scripts_count=total_cycles, memory=memory)
 
             print(f"\n🔥 [CONTENT PREPARED] '{article_title}'")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
-
-            # অডিও তৈরি
-            generated_audios = generate_audios_in_parallel(scripts, hash(entry_link), total_audio_needed)
-
-            if not generated_audios:
-                print("  ❌ [ERROR] Could not generate audio. Safely skipping this circular.")
-                processed_set.add(entry_link)
-                continue
 
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন WhatsApp: 01540503092"
             fb_yt_post_text = f"{article_title}\n\n{raw_desc_clean[:280]}...{contact_sfx}" if len(raw_desc_clean) > 20 else f"{article_title}{contact_sfx}"
             tiktok_caption = f"{article_title[:90]} | নতুন নিয়োগ বিজ্ঞপ্তি\n\nআবেদন করতে WhatsApp: 01540503092 নাম্বারে যোগাযোগ করুন।\n\n#bdjobs #jobcircular #career #bangladesh"
             video_final_title = article_title[:85].strip()
 
-            # 🌟 ১ম ছবির ব্যানার ফিল্টারিং
             valid_source_imgs = filter_banner_first_image(downloaded_imgs)
             fb_yt_source = valid_source_imgs if valid_source_imgs else prepare_tiktok_slides(job_data, f"fb_fallback_{hash(entry_link)}")
 
             # =================================================================
-            # ১. মেইন ভিডিও রেন্ডারিং (Facebook ও YouTube এর জন্য)
+            # 🌟 একটি করে অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল (নতুন সিস্টেম)
             # =================================================================
-            main_vid_paths = [f"tmp_main_{hash(entry_link)}_{i+1}.mp4" for i in range(main_videos_needed)]
-            if main_videos_needed > 0:
-                print(f"🎬 Rendering {main_videos_needed} Main Videos...")
-                main_tasks = [
-                    (fb_yt_source, generated_audios[i % len(generated_audios)], main_vid_paths[i])
-                    for i in range(main_videos_needed)
-                ]
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    list(executor.map(render_main_video_task, main_tasks))
+            for cycle_idx in range(total_cycles):
+                print(f"\n--- [Cycle #{cycle_idx+1}/{total_cycles}] Starting Audio & Video Pipeline ---")
+                
+                # ১. অডিও তৈরি
+                audio_file = f"tmp_voice_{hash(entry_link)}_{cycle_idx+1}.mp3"
+                s_text = scripts[cycle_idx % len(scripts)]
+                audio_ok = generate_voiceover_audio_pipeline(s_text, audio_file, key_offset=cycle_idx, memory=memory)
+                
+                if not audio_ok or not os.path.exists(audio_file):
+                    print(f"  ❌ Audio generation failed for Cycle #{cycle_idx+1}. Skipping this variation.")
+                    continue
 
-            # =================================================================
-            # ২. TikTok পোস্টার ভিডিও রেন্ডারিং (যদি TikTok চালু থাকে)
-            # =================================================================
-            tk_vid_paths = [f"tmp_tiktok_{hash(entry_link)}_{i+1}.mp4" for i in range(tiktok_count)]
-            if tiktok_count > 0:
-                print(f"🎬 Rendering {tiktok_count} TikTok Videos...")
-                tk_tasks = [
-                    (job_data, generated_audios[i % len(generated_audios)], tk_vid_paths[i])
-                    for i in range(tiktok_count)
-                ]
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    list(executor.map(render_tiktok_video_task, tk_tasks))
+                # ২. মেইন ভিডিও রেন্ডার ও আপলোড (Facebook ও YouTube এর জন্য)
+                if cycle_idx < yt_count or cycle_idx < fb_count:
+                    main_vid_path = f"tmp_main_{hash(entry_link)}_{cycle_idx+1}.mp4"
+                    if render_vertical_video(fb_yt_source, audio_file, main_vid_path):
+                        # YouTube আপলোড
+                        if cycle_idx < yt_count:
+                            yt_ch = yt_targets[cycle_idx]
+                            try:
+                                print(f"  [+] Uploading Video #{cycle_idx+1} to YouTube Channel #{yt_ch.get('index')}...")
+                                upload_video_to_youtube(yt_ch['client_id'], yt_ch['client_secret'], yt_ch['refresh_token'], main_vid_path, video_final_title, fb_yt_post_text)
+                            except Exception as e:
+                                print(f"  ⚠️ [YouTube Error] {e}")
 
-            # =================================================================
-            # ৩. আপলোড ও সোশ্যাল মিডিয়া সিঙ্ক
-            # =================================================================
+                        # Facebook আপলোড
+                        if cycle_idx < fb_count:
+                            fb_did = fb_dest_ids[cycle_idx]
+                            try:
+                                token = get_page_access_token(fb_user_token, fb_did)
+                                if token:
+                                    if not post_reel_to_facebook(fb_did, token, main_vid_path, video_final_title, fb_yt_post_text):
+                                        post_video_to_facebook(fb_did, token, main_vid_path, fb_yt_post_text)
+                            except Exception as e:
+                                print(f"  ⚠️ [Facebook Error] {e}")
 
-            # YouTube আপলোড
-            for y_idx, yt_channel in enumerate(yt_targets):
-                try:
-                    yt_vid = main_vid_paths[y_idx % len(main_vid_paths)]
-                    if os.path.exists(yt_vid):
-                        print(f"  [+] Uploading Video #{y_idx+1} to YouTube Channel #{yt_channel.get('index')}...")
-                        upload_video_to_youtube(yt_channel['client_id'], yt_channel['client_secret'], yt_channel['refresh_token'], yt_vid, video_final_title, fb_yt_post_text)
-                except Exception as e:
-                    print(f"  ⚠️ [YouTube Channel #{y_idx+1} Notice] {e}")
+                        if os.path.exists(main_vid_path):
+                            try: os.remove(main_vid_path)
+                            except Exception: pass
 
-            # Facebook আপলোড
-            for f_idx, did in enumerate(fb_dest_ids):
-                try:
-                    token = get_page_access_token(fb_user_token, did)
-                    if token:
-                        fb_vid = main_vid_paths[f_idx % len(main_vid_paths)]
-                        if os.path.exists(fb_vid):
-                            if not post_reel_to_facebook(did, token, fb_vid, video_final_title, fb_yt_post_text):
-                                post_video_to_facebook(did, token, fb_vid, fb_yt_post_text)
-                except Exception as e:
-                    print(f"  ⚠️ [Facebook Page {did} Notice] {e}")
-
-            # TikTok / Buffer এবং Google Drive আপলোড (যদি টিকটক চালু থাকে)
-            for t_idx, tk_account in enumerate(tiktok_targets):
-                try:
-                    tk_vid = tk_vid_paths[t_idx % len(tk_vid_paths)]
-                    if os.path.exists(tk_vid):
-                        # গুগল ড্রাইভ সেভ (যদি চালু থাকে)
+                # ৩. TikTok পোস্টার ভিডিও রেন্ডার, ড্রাইভ সেভ ও বাফার আপলোড
+                if cycle_idx < tiktok_count:
+                    tk_account = tiktok_targets[cycle_idx]
+                    tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{cycle_idx+1}.mp4"
+                    if render_tiktok_motion_video(job_data, audio_file, tk_vid_path):
+                        # গুগল ড্রাইভে সেভ
                         if save_to_gdrive:
                             try:
-                                drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
-                                upload_video_via_rclone(tk_vid, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
+                                drive_clean_name = f"{sanitize_filename(article_title[:45])}_{cycle_idx+1}.mp4"
+                                upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
                             except Exception as g_err:
                                 print(f"  ⚠️ [Google Drive Notice] {g_err}")
 
-                        # Buffer-এর মাধ্যমে টিকটকে আপলোড
+                        # বাফারের মাধ্যমে টিকটকে আপলোড
                         try:
-                            print(f"  [+] Uploading Poster Video #{t_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
-                            upload_to_specific_buffer_account(tk_vid, tiktok_caption, tk_account['profile_id'], tk_account['token'])
+                            print(f"  [+] Uploading Poster Video #{cycle_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
+                            upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
                         except Exception as b_err:
                             print(f"  ⚠️ [TikTok Buffer Notice] {b_err}")
-                except Exception as e:
-                    print(f"  ⚠️ [TikTok Video #{t_idx+1} Notice] {e}")
 
-            # Telegram আপলোড (সবগুলো চ্যানেলেই লুপ আকারে পাঠানো)
+                        if os.path.exists(tk_vid_path):
+                            try: os.remove(tk_vid_path)
+                            except Exception: pass
+
+                # ৪. প্রতিটি সাইকেল শেষে অডিও মুছে মেমোরি ফ্রি করা
+                if os.path.exists(audio_file):
+                    try: os.remove(audio_file)
+                    except Exception: pass
+
+            # Telegram আপলোড
             if tg_client and tg_dest_ids:
                 for tg_id in tg_dest_ids:
                     try:
@@ -301,10 +276,10 @@ async def process_sync(config, memory):
                 except Exception as e:
                     print(f"  ⚠️ [WhatsApp Notice] {e}")
 
-            # ক্লিনআপ
-            for p in main_vid_paths + tk_vid_paths + generated_audios + downloaded_imgs:
-                if os.path.exists(p):
-                    try: os.remove(p)
+            # ডাউনলোড করা পোস্টের ইমেজ ক্লিনআপ
+            for dp in downloaded_imgs:
+                if os.path.exists(dp):
+                    try: os.remove(dp)
                     except Exception: pass
 
             processed_set.add(entry_link)
