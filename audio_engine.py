@@ -10,8 +10,8 @@ import socket
 import requests
 import concurrent.futures
 
-# গ্লোবাল সকেট গার্ড
-socket.setdefaulttimeout(120.0)
+# গ্লোবাল সকেট গার্ড: ১০ মিনিট
+socket.setdefaulttimeout(600.0)
 
 TRACKER_FILE = "key_tracker.json"
 
@@ -90,7 +90,7 @@ def parse_multi_keys(env_var_names):
     return []
 
 # =========================================================================
-# 🌟 লিমিট শেষ হওয়া কি-ট্র্যাকার ম্যানেজার
+# 🌟 লিমিট শেষ হওয়া কি-ট্র্যাকার ম্যানেজার (key_tracker.json)
 # =========================================================================
 def get_exhausted_keys(platform):
     if os.path.exists(TRACKER_FILE):
@@ -127,12 +127,12 @@ def clear_exhausted_keys(platform):
         except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (আইসোলেটেড থ্রেড ওয়াচডগ সহ)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (প্রতি কি-তে ৫ মিনিট অপেক্ষা)
 # =========================================================================
-def _run_gemini_call(api_key, speech_text, voice_candidate, delivery_style):
+def _run_gemini_direct_call(api_key, speech_text, voice_candidate, delivery_style):
     from google import genai
     from google.genai import types
-    http_config = types.HttpOptions(timeout=180_000)
+    http_config = types.HttpOptions(timeout=300_000)
     client = genai.Client(api_key=api_key, http_options=http_config)
     return client.interactions.create(
         model="gemini-3.8-flash-tts",
@@ -155,8 +155,9 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
     exhausted_set = get_exhausted_keys("gemini")
     available_keys = [k for k in all_keys if k not in exhausted_set]
 
+    # সবগুলো কি ফেইল্ড থাকলে নতুন করে রিসেট করা
     if not available_keys:
-        print("  🔄 [Gemini] All keys were exhausted. Resetting cycle...")
+        print("  🔄 [Gemini] All keys were exhausted. Resetting cycle to Key #1...")
         clear_exhausted_keys("gemini")
         available_keys = all_keys
 
@@ -178,7 +179,7 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
         api_key = available_keys[k_idx]
         masked = mask_key(api_key)
 
-        # 🌟 গুগল ক্লাউডের ভুল AIza... কি পেলে সরাসরি বাদ দেওয়া (যাতে সিস্টেম হ্যাং না হয়)
+        # ক্লাউড বা ভুল কি পেলে বাদ দেওয়া
         if api_key.startswith("AIza") and len(api_key) < 45:
             print(f"  ⚠️ Skipping Google Cloud key ({masked}) - requires AI Studio AQ.A... key")
             record_key_exhausted("gemini", api_key)
@@ -192,11 +193,10 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
 
         for voice_candidate in voices_to_try:
             start_t = time.time()
-            # 🌟 আইসোলেটেড থ্রেড ওয়াচডগ: কোনো অবস্থাতেই মেইন থ্রেডকে ব্লক করতে পারবে না
-            exec_single = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                fut = exec_single.submit(_run_gemini_call, api_key, speech_text, voice_candidate, delivery_style)
-                # ৫ মিনিট (৩০০ সেকেন্ড) পার হলেই তৎক্ষণাৎ ক্যানসেল হয়ে পরের কি-তে চলে যাবে
+                fut = executor.submit(_run_gemini_call, api_key, speech_text, voice_candidate, delivery_style)
+                # 🌟 ঠিক ৫ মিনিট (৩০০ সেকেন্ড) ধৈর্য ধরে অপেক্ষা করবে
                 interaction = fut.result(timeout=300)
 
                 if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
@@ -207,15 +207,15 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
                             f.write(audio_bytes)
                         elapsed = round(time.time() - start_t, 2)
                         print(f"  ✅ [Gemini TTS SUCCESS] Generated using Key ({masked}) with Voice '{voice_candidate}' in {elapsed}s")
-                        exec_single.shutdown(wait=False)
+                        executor.shutdown(wait=False)
                         return True
             except concurrent.futures.TimeoutError:
-                print(f"  ⚠️ [Gemini Stalled >5m] Key ({masked}) socket frozen. Abandoning thread and switching key...")
+                print(f"  ⚠️ [Gemini Wait Limit 5m Exceeded] Key ({masked}) failed to respond. Switching to next key...")
                 record_key_exhausted("gemini", api_key)
-                exec_single.shutdown(wait=False, cancel_futures=True)
+                executor.shutdown(wait=False, cancel_futures=True)
                 break
             except Exception as e:
-                exec_single.shutdown(wait=False)
+                executor.shutdown(wait=False)
                 err_msg = str(e).lower()
                 if "voice was not found" in err_msg or "404" in err_msg:
                     continue
@@ -304,17 +304,17 @@ def get_fallback_music_file():
     return None
 
 # =========================================================================
-# 🌟 একক অডিও জেনারেটর টাস্ক
+# 🌟 একক অডিও জেনারেটর টাস্ক (নিখুঁত অগ্রাধিকার চেইন)
 # =========================================================================
 def generate_single_audio_task(text, output_path, key_idx=0):
     speech_text = clean_script_for_speech(text)
 
-    # ১. Gemini TTS
+    # ১. Gemini TTS (প্রতি কি-তে ৫ মিনিট অপেক্ষা করবে)
     if synthesize_with_gemini_single(speech_text, output_path, preferred_key_idx=key_idx):
         return True
 
-    # ২. ElevenLabs
-    print("  ⚠️ Gemini failed. Cascading to Priority 2: ElevenLabs...")
+    # ২. ElevenLabs (জেমিনির সব কি ব্যর্থ হলে এখানে আসবে)
+    print("  ⚠️ All Gemini keys failed. Cascading to Priority 2: ElevenLabs...")
     if synthesize_with_elevenlabs_single(speech_text, output_path, preferred_key_idx=key_idx):
         return True
 
@@ -333,51 +333,15 @@ def generate_single_audio_task(text, output_path, key_idx=0):
 
     return False
 
-# =========================================================================
-# 🌟 সম্পূর্ণ প্যারালাল অডিও জেনারেশন ইঞ্জিন (অটো-রিকভারি সহ)
-# =========================================================================
-def generate_audios_in_parallel(scripts_list, base_hash, total_needed):
-    print("\n" + "="*65)
-    print(f"🎙️ [PARALLEL AUDIO ENGINE] Synthesizing {total_needed} Audios...")
-    print("="*65)
-
-    audio_paths = [f"tmp_voice_{base_hash}_{i+1}.mp3" for i in range(total_needed)]
-    tasks = {}
-
-    workers = min(total_needed, 2)
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
-    try:
-        for idx in range(total_needed):
-            s_text = scripts_list[idx % len(scripts_list)]
-            out_file = audio_paths[idx]
-            future = executor.submit(generate_single_audio_task, s_text, out_file, idx)
-            tasks[future] = (out_file, s_text, idx)
-
-        # 🌟 কোনো টাস্ক আটকে থাকলেও সর্বোচ্চ ৬ মিনিটে অটোমেটিক রিলিজ করবে
-        done, not_done = concurrent.futures.wait(tasks.keys(), timeout=360)
-        executor.shutdown(wait=False, cancel_futures=True)
-    except Exception as e:
-        print(f"  ⚠️ Parallel execution notice: {e}")
-        executor.shutdown(wait=False)
-
-    # 🌟 রিকভারি গার্ড: যদি কোনো অডিও জেমিনির অনন্ত অপেক্ষায় আটকে থাকত, তা তৎক্ষণাৎ Edge TTS দিয়ে তৈরি করে নেওয়া হবে
-    successful_audios = []
-    for idx, p in enumerate(audio_paths):
-        if os.path.exists(p) and os.path.getsize(p) > 1000:
-            successful_audios.append(p)
-        else:
-            print(f"  🔄 [Auto-Recovery] Audio #{idx+1} missing/stalled. Generating with Edge TTS...")
-            s_text = scripts_list[idx % len(scripts_list)]
-            if synthesize_with_edge_single(s_text, p):
-                successful_audios.append(p)
-            else:
-                fb = get_fallback_music_file()
-                if fb:
-                    shutil.copyfile(fb, p)
-                    successful_audios.append(p)
-
-    print(f"✅ [Parallel Audio Complete] {len(successful_audios)} of {total_needed} audios ready!\n")
-    return successful_audios
-
 def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None):
     return generate_single_audio_task(text, output_audio_path, key_idx=key_offset)
+
+def generate_audios_in_parallel(scripts_list, base_hash, total_needed):
+    """সামঞ্জস্য রক্ষার জন্য হেল্পার ফাংশন"""
+    audio_paths = []
+    for idx in range(total_needed):
+        s_text = scripts_list[idx % len(scripts_list)]
+        out_file = f"tmp_voice_{base_hash}_{idx+1}.mp3"
+        if generate_single_audio_task(s_text, out_file, idx):
+            audio_paths.append(out_file)
+    return audio_paths
