@@ -82,70 +82,31 @@ def sync_background_videos_from_gdrive(config=None):
     return len(downloaded) > 0
 
 # =========================================================================
-# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (স্মার্ট অটো-ডিটেকশন)
+# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার
 # =========================================================================
 def get_all_youtube_targets(config=None):
-    """
-    গিটহাব সিক্রেটস কিংবা কনফিগ ফাইল থেকে সর্বোচ্চ ৮টি ইউটিউব চ্যানেলের
-    ক্রেডেনশিয়াল নিখুঁতভাবে সংগ্রহ করে (নাম্বারড ও আন-নাম্বারড উভয় ফরম্যাট সাপোর্ট করে)।
-    """
     if config is None: config = {}
     targets = []
 
-    # ১ নম্বর চ্যানেলের জন্য সমস্ত সম্ভাব্য নাম চেক করা
-    cid_1 = (
-        os.environ.get("YT_CLIENT_ID_1", "").strip() or
-        os.environ.get("CLIENT_ID_1", "").strip() or
-        os.environ.get("YT_CLIENT_ID", "").strip() or
-        os.environ.get("CLIENT_ID", "").strip() or
-        get_credential(config, "yt_client_id_1", "YT_CLIENT_ID_1") or
-        get_credential(config, "yt_client_id", "YT_CLIENT_ID") or
-        get_credential(config, "client_id", "CLIENT_ID")
-    )
-    csec_1 = (
-        os.environ.get("YT_CLIENT_SECRET_1", "").strip() or
-        os.environ.get("CLIENT_SECRET_1", "").strip() or
-        os.environ.get("YT_CLIENT_SECRET", "").strip() or
-        os.environ.get("CLIENT_SECRET", "").strip() or
-        get_credential(config, "yt_client_secret_1", "YT_CLIENT_SECRET_1") or
-        get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET") or
-        get_credential(config, "client_secret", "CLIENT_SECRET")
-    )
-    rtok_1 = (
-        os.environ.get("YT_REFRESH_TOKEN_1", "").strip() or
-        os.environ.get("REFRESH_TOKEN_1", "").strip() or
-        os.environ.get("YT_REFRESH_TOKEN", "").strip() or
-        os.environ.get("REFRESH_TOKEN", "").strip() or
-        get_credential(config, "yt_refresh_token_1", "YT_REFRESH_TOKEN_1") or
-        get_credential(config, "yt_refresh_token", "YT_REFRESH_TOKEN") or
-        get_credential(config, "refresh_token", "REFRESH_TOKEN")
-    )
-
-    if cid_1 and csec_1 and rtok_1:
-        targets.append({"client_id": cid_1, "client_secret": csec_1, "refresh_token": rtok_1, "index": 1})
-
-    # ২ থেকে ৮ নম্বর চ্যানেলের জন্য চেক করা
-    for i in range(2, 9):
-        cid = (
-            os.environ.get(f"YT_CLIENT_ID_{i}", "").strip() or
-            os.environ.get(f"CLIENT_ID_{i}", "").strip() or
-            get_credential(config, f"yt_client_id_{i}", f"YT_CLIENT_ID_{i}") or
-            get_credential(config, f"client_id_{i}", f"CLIENT_ID_{i}")
-        )
-        csec = (
-            os.environ.get(f"YT_CLIENT_SECRET_{i}", "").strip() or
-            os.environ.get(f"CLIENT_SECRET_{i}", "").strip() or
-            get_credential(config, f"yt_client_secret_{i}", f"YT_CLIENT_SECRET_{i}") or
-            get_credential(config, f"client_secret_{i}", f"CLIENT_SECRET_{i}")
-        )
-        rtok = (
-            os.environ.get(f"YT_REFRESH_TOKEN_{i}", "").strip() or
-            os.environ.get(f"REFRESH_TOKEN_{i}", "").strip() or
-            get_credential(config, f"yt_refresh_token_{i}", f"YT_REFRESH_TOKEN_{i}") or
-            get_credential(config, f"refresh_token_{i}", f"REFRESH_TOKEN_{i}")
-        )
+    for i in range(1, 9):
+        cid = os.environ.get(f"YT_CLIENT_ID_{i}", "").strip()
+        csec = os.environ.get(f"YT_CLIENT_SECRET_{i}", "").strip()
+        rtok = os.environ.get(f"YT_REFRESH_TOKEN_{i}", "").strip()
         if cid and csec and rtok:
             targets.append({"client_id": cid, "client_secret": csec, "refresh_token": rtok, "index": i})
+
+    if not targets:
+        cid1 = os.environ.get("YT_CLIENT_ID", "").strip() or os.environ.get("CLIENT_ID", "").strip()
+        csec1 = os.environ.get("YT_CLIENT_SECRET", "").strip() or os.environ.get("CLIENT_SECRET", "").strip()
+        rtok1 = os.environ.get("YT_REFRESH_TOKEN", "").strip() or os.environ.get("REFRESH_TOKEN", "").strip()
+        if cid1 and csec1 and rtok1:
+            targets.append({"client_id": cid1, "client_secret": csec1, "refresh_token": rtok1, "index": 1})
+
+        cid2 = os.environ.get("YT_CLIENT_ID_2", "").strip() or os.environ.get("CLIENT_ID_2", "").strip()
+        csec2 = os.environ.get("YT_CLIENT_SECRET_2", "").strip() or os.environ.get("CLIENT_SECRET_2", "").strip()
+        rtok2 = os.environ.get("YT_REFRESH_TOKEN_2", "").strip() or os.environ.get("REFRESH_TOKEN_2", "").strip()
+        if cid2 and csec2 and rtok2:
+            targets.append({"client_id": cid2, "client_secret": csec2, "refresh_token": rtok2, "index": 2})
 
     return targets
 
@@ -481,7 +442,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     except Exception: return False
 
 # =========================================================================
-# 🌟 ৬. WHATSAPP চ্যানেল হ্যান্ডলার
+# 🌟 ৬. WHATSAPP চ্যানেল হ্যান্ডলার (লাইভ লগ ও ইমেজ কাউন্ট সহ)
 # =========================================================================
 def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
     if not render_url: return False
@@ -492,7 +453,16 @@ def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
             if os.path.exists(p):
                 with open(p, 'rb') as f:
                     encoded.append(base64.b64encode(f.read()).decode('utf-8'))
+        
         payload = {"channel_id": clean_id, "text": text, "images": encoded}
         res = requests.post(f"{render_url.rstrip('/')}/send", json=payload, timeout=120)
-        return res.status_code == 200
-    except Exception: return False
+        
+        if res.status_code == 200:
+            print(f"  ✅ [WhatsApp SUCCESS] Posted to @{clean_id} with {len(encoded)} image(s)!")
+            return True
+        else:
+            print(f"  ⚠️ [WhatsApp Notice] Render returned HTTP {res.status_code}: {res.text[:120]}")
+            return False
+    except Exception as e:
+        print(f"  ⚠️ [WhatsApp Channel Exception] {e}")
+        return False
