@@ -66,7 +66,7 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # টেলিগ্রাম ক্লায়েন্ট (নন-ব্লকিং)
+    # টেলিগ্রাম ক্লায়েন্ট
     tg_session = get_credential(config, "tg_session", "TG_SESSION")
     tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
     tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
@@ -86,11 +86,10 @@ async def process_sync(config, memory):
             print(f"  ⚠️ Telegram connection safely skipped: {e}")
             tg_client = None
 
-    # মাস্টার সুইচ চেক (TikTok এবং Google Drive)
+    # মাস্টার সুইচ চেক
     enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
-    # অ্যাকাউন্ট রিড করা
     yt_targets = get_all_youtube_targets(config)
     tiktok_targets = get_all_tiktok_buffer_targets(config) if enable_tiktok else []
 
@@ -115,7 +114,6 @@ async def process_sync(config, memory):
     yt_count = len(yt_targets)
     tiktok_count = len(tiktok_targets)
 
-    # 🌟 মোট কতটি সাইকেল চালাতে হবে তা গণনা (সর্বোচ্চ অ্যাকাউন্ট সংখ্যা)
     total_cycles = max(fb_count, yt_count, tiktok_count, 1)
 
     rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
@@ -169,7 +167,6 @@ async def process_sync(config, memory):
                         downloaded_imgs.append(p)
                 except Exception: pass
 
-            # এআই দিয়ে প্রয়োজনীয় সংখ্যার স্ক্রিপ্ট তৈরি
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, scripts_count=total_cycles, memory=memory)
 
             print(f"\n🔥 [CONTENT PREPARED] '{article_title}'")
@@ -181,28 +178,31 @@ async def process_sync(config, memory):
             video_final_title = article_title[:85].strip()
 
             valid_source_imgs = filter_banner_first_image(downloaded_imgs)
-            fb_yt_source = valid_source_imgs if valid_source_imgs else prepare_tiktok_slides(job_data, f"fb_fallback_{hash(entry_link)}")
+            # যদি কোনো ইমেজ ডাউনলোড না হয়, তাহলে পোস্টার ইমেজ তৈরি হবে
+            poster_slide_paths = prepare_tiktok_slides(job_data, f"poster_{hash(entry_link)}")
+            fb_yt_source = valid_source_imgs if valid_source_imgs else poster_slide_paths
+
+            # 🌟 হোয়াটসঅ্যাপ এবং টেলিগ্রামের জন্য ইমেজ নির্ধারণ: মূল ছবি থাকলে সেটা যাবে, না থাকলে পোস্টার ইমেজ যাবে
+            social_images_to_share = valid_source_imgs if valid_source_imgs else poster_slide_paths
 
             # =================================================================
-            # 🌟 একটি করে অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল (নতুন সিস্টেম)
+            # 🌟 একটি করে অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল
             # =================================================================
             for cycle_idx in range(total_cycles):
                 print(f"\n--- [Cycle #{cycle_idx+1}/{total_cycles}] Starting Audio & Video Pipeline ---")
                 
-                # ১. অডিও তৈরি
                 audio_file = f"tmp_voice_{hash(entry_link)}_{cycle_idx+1}.mp3"
                 s_text = scripts[cycle_idx % len(scripts)]
                 audio_ok = generate_voiceover_audio_pipeline(s_text, audio_file, key_offset=cycle_idx, memory=memory)
                 
                 if not audio_ok or not os.path.exists(audio_file):
-                    print(f"  ❌ Audio generation failed for Cycle #{cycle_idx+1}. Skipping this variation.")
+                    print(f"  ❌ Audio generation failed for Cycle #{cycle_idx+1}. Skipping.")
                     continue
 
-                # ২. মেইন ভিডিও রেন্ডার ও আপলোড (Facebook ও YouTube এর জন্য)
+                # মেইন ভিডিও (YouTube & Facebook)
                 if cycle_idx < yt_count or cycle_idx < fb_count:
                     main_vid_path = f"tmp_main_{hash(entry_link)}_{cycle_idx+1}.mp4"
                     if render_vertical_video(fb_yt_source, audio_file, main_vid_path):
-                        # YouTube আপলোড
                         if cycle_idx < yt_count:
                             yt_ch = yt_targets[cycle_idx]
                             try:
@@ -211,7 +211,6 @@ async def process_sync(config, memory):
                             except Exception as e:
                                 print(f"  ⚠️ [YouTube Error] {e}")
 
-                        # Facebook আপলোড
                         if cycle_idx < fb_count:
                             fb_did = fb_dest_ids[cycle_idx]
                             try:
@@ -226,12 +225,11 @@ async def process_sync(config, memory):
                             try: os.remove(main_vid_path)
                             except Exception: pass
 
-                # ৩. TikTok পোস্টার ভিডিও রেন্ডার, ড্রাইভ সেভ ও বাফার আপলোড
+                # TikTok পোস্টার ভিডিও
                 if cycle_idx < tiktok_count:
                     tk_account = tiktok_targets[cycle_idx]
                     tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{cycle_idx+1}.mp4"
                     if render_tiktok_motion_video(job_data, audio_file, tk_vid_path):
-                        # গুগল ড্রাইভে সেভ
                         if save_to_gdrive:
                             try:
                                 drive_clean_name = f"{sanitize_filename(article_title[:45])}_{cycle_idx+1}.mp4"
@@ -239,7 +237,6 @@ async def process_sync(config, memory):
                             except Exception as g_err:
                                 print(f"  ⚠️ [Google Drive Notice] {g_err}")
 
-                        # বাফারের মাধ্যমে টিকটকে আপলোড
                         try:
                             print(f"  [+] Uploading Poster Video #{cycle_idx+1} to TikTok via Buffer Profile #{tk_account.get('index')}...")
                             upload_to_specific_buffer_account(tk_vid_path, tiktok_caption, tk_account['profile_id'], tk_account['token'])
@@ -250,36 +247,39 @@ async def process_sync(config, memory):
                             try: os.remove(tk_vid_path)
                             except Exception: pass
 
-                # ৪. প্রতিটি সাইকেল শেষে অডিও মুছে মেমোরি ফ্রি করা
                 if os.path.exists(audio_file):
                     try: os.remove(audio_file)
                     except Exception: pass
 
-            # Telegram আপলোড
+            # Telegram আপলোড (ছবিসহ)
             if tg_client and tg_dest_ids:
                 for tg_id in tg_dest_ids:
                     try:
                         clean_tg = clean_telegram_id(tg_id)
                         if clean_tg:
                             print(f"  [+] Posting to Telegram Channel: @{clean_tg}")
-                            if valid_source_imgs:
-                                await tg_client.send_file(clean_tg, valid_source_imgs, caption=fb_yt_post_text)
+                            if social_images_to_share:
+                                await tg_client.send_file(clean_tg, social_images_to_share, caption=fb_yt_post_text)
                             else:
                                 await tg_client.send_message(clean_tg, fb_yt_post_text)
                     except Exception as e:
                         print(f"  ⚠️ [Telegram Channel @{clean_tg} Notice] {e}")
 
-            # WhatsApp আপলোড
+            # 🌟 WhatsApp আপলোড (সবসময় ছবিসহ যাবে: মূল সার্কুলার ছবি অথবা পোস্টার ছবি)
             for did in wa_dest_ids:
                 try:
-                    post_to_whatsapp_channel(render_wa_url, did, fb_yt_post_text, valid_source_imgs)
+                    post_to_whatsapp_channel(render_wa_url, did, fb_yt_post_text, social_images_to_share)
                 except Exception as e:
                     print(f"  ⚠️ [WhatsApp Notice] {e}")
 
-            # ডাউনলোড করা পোস্টের ইমেজ ক্লিনআপ
+            # ইমেজ ক্লিনআপ
             for dp in downloaded_imgs:
                 if os.path.exists(dp):
                     try: os.remove(dp)
+                    except Exception: pass
+            for pp in poster_slide_paths:
+                if os.path.exists(pp):
+                    try: os.remove(pp)
                     except Exception: pass
 
             processed_set.add(entry_link)
