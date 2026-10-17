@@ -13,7 +13,7 @@ def extract_article_images(entry, entry_link, raw_desc=""):
     if 'media_content' in entry and entry.media_content:
         img_urls.extend([mc.get('url') for mc in entry.media_content])
 
-    # 🌟 শুধুমাত্র মূল আর্টিকেলের ভেতরের ছবি সংগ্রহ করা (সাইডবার ও রিলেটেড পোস্ট ডিলিট করে)
+    # 🌟 মূল আর্টিকেলের ভেতরের ছবি সংগ্রহ করা
     try:
         resp = requests.get(entry_link, headers=HEADERS, timeout=30)
         if resp.status_code == 200:
@@ -25,7 +25,6 @@ def extract_article_images(entry, entry_link, raw_desc=""):
             for junk in soup.find_all(['div', 'section', 'ul'], class_=re.compile(r'(related|sidebar|widget|comment|footer|recommend|yarpp|jp-relatedposts|author-box)', re.I)):
                 junk.decompose()
 
-            # শুধুমাত্র মূল কন্টেন্ট কন্টেইনার টার্গেট করা
             container = soup.find(['div', 'article', 'section'], class_=re.compile(r'(entry-content|post-content|article-body|main-content|post-entry)', re.I))
             target_element = container if container else soup.find('body')
 
@@ -34,8 +33,8 @@ def extract_article_images(entry, entry_link, raw_desc=""):
                     src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
                     if src:
                         s_lower = src.lower()
-                        # লোগো, আইকন, সোশ্যাল বাটন ইত্যাদি বাদ দেওয়া
-                        if not any(x in s_lower for x in ['logo', 'icon', 'avatar', 'emoji', 'button', 'badge', 'banner']):
+                        # শুধুমাত্র অপ্রয়োজনীয় ছোট আইকন ও ইমোজি বাদ দেওয়া (ব্যানার শব্দ রাখা হয়েছে যাতে সার্কুলার ছবি না কাটে)
+                        if not any(x in s_lower for x in ['logo', 'icon', 'avatar', 'emoji', 'button', 'badge']):
                             full_u = urljoin(entry_link, src)
                             img_urls.append(full_u)
     except Exception:
