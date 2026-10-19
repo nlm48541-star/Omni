@@ -66,7 +66,7 @@ async def process_sync(config, memory):
         print("[!] No sync rules found in automation_config.json")
         return memory
 
-    # টেলিগ্রাম ক্লায়েন্ট
+    # টেলিগ্রাম ক্লায়েন্ট (নন-ব্লকিং)
     tg_session = get_credential(config, "tg_session", "TG_SESSION")
     tg_api_id = get_credential(config, "tg_api_id", "TG_API_ID")
     tg_api_hash = get_credential(config, "tg_api_hash", "TG_API_HASH")
@@ -86,6 +86,7 @@ async def process_sync(config, memory):
             print(f"  ⚠️ Telegram connection safely skipped: {e}")
             tg_client = None
 
+    # মাস্টার সুইচ চেক
     enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
@@ -118,7 +119,7 @@ async def process_sync(config, memory):
     rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
 
-    print(f"\n⚙️ [Master Automation Status - Progressive Pipeline]")
+    print(f"\n⚙️ [Master Automation Status - Progressive Sequential Pipeline]")
     print(f"   ├─ Connected YouTube Channels : {yt_count}")
     print(f"   ├─ Connected Facebook Pages   : {fb_count}")
     print(f"   ├─ Connected TikTok Accounts  : {tiktok_count} ({'ENABLED' if enable_tiktok else 'DISABLED'})")
@@ -159,7 +160,7 @@ async def process_sync(config, memory):
             downloaded_imgs = []
             for i_idx, u in enumerate(img_urls):
                 try:
-                    ir = requests.get(u, headers=HEADERS)
+                    ir = requests.get(u, headers=HEADERS, timeout=25)
                     if ir.status_code == 200:
                         p = f"tmp_raw_{hash(entry_link)}_{i_idx}.jpg"
                         with open(p, 'wb') as f: f.write(ir.content)
@@ -176,13 +177,23 @@ async def process_sync(config, memory):
             tiktok_caption = f"{article_title[:90]} | নতুন নিয়োগ বিজ্ঞপ্তি\n\nআবেদন করতে WhatsApp: 01540503092 নাম্বারে যোগাযোগ করুন।\n\n#bdjobs #jobcircular #career #bangladesh"
             video_final_title = article_title[:85].strip()
 
-            valid_source_imgs = filter_banner_first_image(downloaded_imgs)
+            # ব্যানার ফিল্টার
+            valid_circular_imgs = filter_banner_first_image(downloaded_imgs)
+            # পোস্টার ইমেজ তৈরি
             poster_slide_paths = prepare_tiktok_slides(job_data, f"poster_{hash(entry_link)}")
-            fb_yt_source = valid_source_imgs if valid_source_imgs else poster_slide_paths
-            social_images_to_share = valid_source_imgs if valid_source_imgs else poster_slide_paths
+
+            # 🌟 নতুন লজিক: ভিডিওর শুরুতে প্রথমে পোস্টার ইমেজ থাকবে, এরপরে সার্কুলারের ইমেজগুলো আসবে
+            if poster_slide_paths and valid_circular_imgs:
+                fb_yt_source = [poster_slide_paths[0]] + valid_circular_imgs
+            elif poster_slide_paths:
+                fb_yt_source = poster_slide_paths
+            else:
+                fb_yt_source = valid_circular_imgs
+
+            social_images_to_share = valid_circular_imgs if valid_circular_imgs else poster_slide_paths
 
             # =================================================================
-            # 🌟 অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল
+            # 🌟 একটি করে অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল
             # =================================================================
             for cycle_idx in range(total_cycles):
                 print(f"\n--- [Cycle #{cycle_idx+1}/{total_cycles}] Starting Audio & Video Pipeline ---")
@@ -195,11 +206,11 @@ async def process_sync(config, memory):
                     print(f"  ❌ Audio generation failed for Cycle #{cycle_idx+1}. Skipping.")
                     continue
 
-                # মেইন ভিডিও (YouTube & Facebook)
+                # মেইন ভিডিও (YouTube & Facebook Shorts/Reels)
                 if cycle_idx < yt_count or cycle_idx < fb_count:
                     main_vid_path = f"tmp_main_{hash(entry_link)}_{cycle_idx+1}.mp4"
+                    # এখানে fb_yt_source ব্যবহার হচ্ছে যা শুরুতে পোস্টার ও পরে সার্কুলার ছবি দেখাবে
                     if render_vertical_video(fb_yt_source, audio_file, main_vid_path):
-                        # YouTube আপলোড
                         if cycle_idx < yt_count:
                             yt_ch = yt_targets[cycle_idx]
                             try:
@@ -208,13 +219,12 @@ async def process_sync(config, memory):
                             except Exception as e:
                                 print(f"  ⚠️ [YouTube Error] {e}")
 
-                        # 🌟 Facebook আপলোড (ফটো অ্যালবাম/পোস্ট + রিলস ভিডিও)
+                        # Facebook আপলোড (ছবি অ্যালবাম + রিলস)
                         if cycle_idx < fb_count:
                             fb_did = fb_dest_ids[cycle_idx]
                             try:
                                 token = get_page_access_token(fb_user_token, fb_did)
                                 if token:
-                                    # ১. ছবি বা ফটো অ্যালবাম পোস্ট করা
                                     if downloaded_imgs:
                                         print(f"  [+] Posting {len(downloaded_imgs)} Photo(s) to Facebook Page {fb_did}...")
                                         if len(downloaded_imgs) > 1:
@@ -224,7 +234,6 @@ async def process_sync(config, memory):
                                     elif poster_slide_paths:
                                         post_photo_to_facebook(fb_did, token, poster_slide_paths[0], fb_yt_post_text)
 
-                                    # ২. রিলস / ভিডিও আপলোড করা
                                     print(f"  [+] Uploading Reel Video #{cycle_idx+1} to Facebook Page {fb_did}...")
                                     if not post_reel_to_facebook(fb_did, token, main_vid_path, video_final_title, fb_yt_post_text):
                                         post_video_to_facebook(fb_did, token, main_vid_path, fb_yt_post_text)
@@ -235,14 +244,14 @@ async def process_sync(config, memory):
                             try: os.remove(main_vid_path)
                             except Exception: pass
 
-                # TikTok পোস্টার ভিডিও রেন্ডার ও আপলোড
+                # TikTok পোস্টার ভিডিও
                 if cycle_idx < tiktok_count:
                     tk_account = tiktok_targets[cycle_idx]
                     tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{cycle_idx+1}.mp4"
                     if render_tiktok_motion_video(job_data, audio_file, tk_vid_path):
                         if save_to_gdrive:
                             try:
-                                drive_clean_name = f"{sanitize_filename(article_title[:45])}_{cycle_idx+1}.mp4"
+                                drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
                                 upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
                             except Exception as g_err:
                                 print(f"  ⚠️ [Google Drive Notice] {g_err}")
