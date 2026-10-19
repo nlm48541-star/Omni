@@ -182,7 +182,7 @@ async def process_sync(config, memory):
             # পোস্টার ইমেজ তৈরি
             poster_slide_paths = prepare_tiktok_slides(job_data, f"poster_{hash(entry_link)}")
 
-            # 🌟 নতুন লজিক: ভিডিওর শুরুতে প্রথমে পোস্টার ইমেজ থাকবে, এরপরে সার্কুলারের ইমেজগুলো আসবে
+            # ভিডিওর শুরুতে প্রথমে পোস্টার ইমেজ, এরপর সার্কুলারের ইমেজ
             if poster_slide_paths and valid_circular_imgs:
                 fb_yt_source = [poster_slide_paths[0]] + valid_circular_imgs
             elif poster_slide_paths:
@@ -190,6 +190,7 @@ async def process_sync(config, memory):
             else:
                 fb_yt_source = valid_circular_imgs
 
+            # 🌟 টেলিগ্রাম ও হোয়াটসঅ্যাপে শেয়ার করার জন্য ইমেজ (কোনো অবস্থায় যেন ইমেজ মিস না হয়)
             social_images_to_share = valid_circular_imgs if valid_circular_imgs else poster_slide_paths
 
             # =================================================================
@@ -206,20 +207,19 @@ async def process_sync(config, memory):
                     print(f"  ❌ Audio generation failed for Cycle #{cycle_idx+1}. Skipping.")
                     continue
 
-                # মেইন ভিডিও (YouTube & Facebook Shorts/Reels)
+                # মেইন ভিডিও (YouTube & Facebook)
                 if cycle_idx < yt_count or cycle_idx < fb_count:
                     main_vid_path = f"tmp_main_{hash(entry_link)}_{cycle_idx+1}.mp4"
-                    # এখানে fb_yt_source ব্যবহার হচ্ছে যা শুরুতে পোস্টার ও পরে সার্কুলার ছবি দেখাবে
                     if render_vertical_video(fb_yt_source, audio_file, main_vid_path):
                         if cycle_idx < yt_count:
                             yt_ch = yt_targets[cycle_idx]
                             try:
                                 print(f"  [+] Uploading Video #{cycle_idx+1} to YouTube Channel #{yt_ch.get('index')}...")
-                                upload_video_to_youtube(yt_ch['client_id'], yt_ch['client_secret'], yt_ch['refresh_token'], main_vid_path, video_final_title, fb_yt_post_text)
+                                upload_video_to_youtube(yt_ch['client_id'], yt_channel_sec := yt_ch['client_secret'], yt_ch['refresh_token'], main_vid_path, video_final_title, fb_yt_post_text)
                             except Exception as e:
                                 print(f"  ⚠️ [YouTube Error] {e}")
 
-                        # Facebook আপলোড (ছবি অ্যালবাম + রিলস)
+                        # Facebook আপলোড
                         if cycle_idx < fb_count:
                             fb_did = fb_dest_ids[cycle_idx]
                             try:
@@ -251,7 +251,7 @@ async def process_sync(config, memory):
                     if render_tiktok_motion_video(job_data, audio_file, tk_vid_path):
                         if save_to_gdrive:
                             try:
-                                drive_clean_name = f"{sanitize_filename(article_title[:45])}_{t_idx+1}.mp4"
+                                drive_clean_name = f"{sanitize_filename(article_title[:45])}_{cycle_idx+1}.mp4"
                                 upload_video_via_rclone(tk_vid_path, rclone_conf, folder_id=gdrive_folder_id, custom_filename=drive_clean_name)
                             except Exception as g_err:
                                 print(f"  ⚠️ [Google Drive Notice] {g_err}")
@@ -270,21 +270,20 @@ async def process_sync(config, memory):
                     try: os.remove(audio_file)
                     except Exception: pass
 
-            # Telegram আপলোড (ছবিসহ)
+            # 🌟 Telegram আপলোড (হোয়াটসঅ্যাপের মতোই শুধুমাত্র ছবি ও ক্যাপশন পোস্ট হবে, কোনো ভিডিও যাবে না)
             if tg_client and tg_dest_ids:
+                tg_images = social_images_to_share if social_images_to_share else poster_slide_paths
                 for tg_id in tg_dest_ids:
                     try:
                         clean_tg = clean_telegram_id(tg_id)
-                        if clean_tg:
-                            print(f"  [+] Posting to Telegram Channel: @{clean_tg}")
-                            if social_images_to_share:
-                                await tg_client.send_file(clean_tg, social_images_to_share, caption=fb_yt_post_text)
-                            else:
-                                await tg_client.send_message(clean_tg, fb_yt_post_text)
+                        if clean_tg and tg_images:
+                            print(f"  [+] Posting Photo(s) to Telegram Channel: @{clean_tg}")
+                            await tg_client.send_file(clean_tg, tg_images, caption=fb_yt_post_text)
+                            await asyncio.sleep(1.5)  # কানেকশন ড্রপ প্রতিরোধে বিরতি
                     except Exception as e:
                         print(f"  ⚠️ [Telegram Channel @{clean_tg} Notice] {e}")
 
-            # WhatsApp আপলোড (ছবিসহ)
+            # WhatsApp আপলোড (শুধুমাত্র ছবি ও ক্যাপশন)
             for did in wa_dest_ids:
                 try:
                     post_to_whatsapp_channel(render_wa_url, did, fb_yt_post_text, social_images_to_share)
