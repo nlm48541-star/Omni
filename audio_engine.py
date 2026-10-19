@@ -10,7 +10,7 @@ import socket
 import requests
 import concurrent.futures
 
-# গ্লোবাল সকেট গার্ড: ১০ মিনিট
+# গ্লোবাল সকেট গার্ড: ১০ মিনিট (৬০০ সেকেন্ড)
 socket.setdefaulttimeout(600.0)
 
 TRACKER_FILE = "key_tracker.json"
@@ -127,9 +127,9 @@ def clear_exhausted_keys(platform):
         except Exception: pass
 
 # =========================================================================
-# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (প্রতি কি-তে ৫ মিনিট অপেক্ষা)
+# 🌟 ১. Gemini 3.8 Flash TTS ইঞ্জিন (ফাংশন নেম ও কল শতভাগ ফিক্সড)
 # =========================================================================
-def _run_gemini_direct_call(api_key, speech_text, voice_candidate, delivery_style):
+def _run_gemini_call(api_key, speech_text, voice_candidate, delivery_style):
     from google import genai
     from google.genai import types
     http_config = types.HttpOptions(timeout=300_000)
@@ -155,7 +155,7 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
     exhausted_set = get_exhausted_keys("gemini")
     available_keys = [k for k in all_keys if k not in exhausted_set]
 
-    # সবগুলো কি ফেইল্ড থাকলে নতুন করে রিসেট করা
+    # সব কি শেষ হয়ে গেলে আবার ১ নম্বর কি থেকে শুরু করবে
     if not available_keys:
         print("  🔄 [Gemini] All keys were exhausted. Resetting cycle to Key #1...")
         clear_exhausted_keys("gemini")
@@ -179,7 +179,7 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
         api_key = available_keys[k_idx]
         masked = mask_key(api_key)
 
-        # ক্লাউড বা ভুল কি পেলে বাদ দেওয়া
+        # ক্লাউড বা ভুল ফরম্যাটের কি পেলে বাদ দেওয়া
         if api_key.startswith("AIza") and len(api_key) < 45:
             print(f"  ⚠️ Skipping Google Cloud key ({masked}) - requires AI Studio AQ.A... key")
             record_key_exhausted("gemini", api_key)
@@ -195,8 +195,8 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
             start_t = time.time()
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
+                # 🌟 সঠিক ফাংশন নেম কল (_run_gemini_call)
                 fut = executor.submit(_run_gemini_call, api_key, speech_text, voice_candidate, delivery_style)
-                # 🌟 ঠিক ৫ মিনিট (৩০০ সেকেন্ড) ধৈর্য ধরে অপেক্ষা করবে
                 interaction = fut.result(timeout=300)
 
                 if hasattr(interaction, 'output_audio') and hasattr(interaction.output_audio, 'data'):
@@ -210,7 +210,7 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
                         executor.shutdown(wait=False)
                         return True
             except concurrent.futures.TimeoutError:
-                print(f"  ⚠️ [Gemini Wait Limit 5m Exceeded] Key ({masked}) failed to respond. Switching to next key...")
+                print(f"  ⚠️ [Gemini Stalled >5m] Key ({masked}) failed to respond. Marking exhausted...")
                 record_key_exhausted("gemini", api_key)
                 executor.shutdown(wait=False, cancel_futures=True)
                 break
@@ -227,7 +227,7 @@ def synthesize_with_gemini_single(speech_text, output_audio_path, preferred_key_
     return False
 
 # =========================================================================
-# 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার)
+# 🌟 ২. ElevenLabs ইঞ্জিন (২য় অগ্রাধিকার)
 # =========================================================================
 def synthesize_with_elevenlabs_single(speech_text, output_audio_path, preferred_key_idx=0):
     all_keys = parse_multi_keys(["ELEVENLABS_API_KEYS", "ELEVENLABS_API_KEY"])
@@ -273,16 +273,31 @@ def synthesize_with_elevenlabs_single(speech_text, output_audio_path, preferred_
     return False
 
 # =========================================================================
-# 🌟 ৩. Microsoft Edge Neural ব্যাকআপ ইঞ্জিন (৩য় অগ্রাধিকার)
+# 🌟 ৩. Microsoft Edge Neural ব্যাকআপ ইঞ্জিন (ইভেন্ট লুপ ফিক্সড)
 # =========================================================================
+def _run_edge_tts_in_thread(speech_text, output_audio_path):
+    import asyncio, edge_tts
+    async def _make():
+        c = edge_tts.Communicate(speech_text, "bn-BD-PradeepNeural", rate="+0%", pitch="+0Hz")
+        await c.save(output_audio_path)
+    
+    # নতুন ইভেন্ট লুপ তৈরি করে চালানো যাতে asyncio.run() ক্র্যাশ না করে
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_make())
+    finally:
+        loop.close()
+
 def synthesize_with_edge_single(speech_text, output_audio_path):
     print("  🎙️ [Priority 3: Microsoft Edge Neural (bn-BD-PradeepNeural)]")
     try:
-        import asyncio, edge_tts
-        async def _make():
-            c = edge_tts.Communicate(speech_text, "bn-BD-PradeepNeural", rate="+0%", pitch="+0Hz")
-            await c.save(output_audio_path)
-        asyncio.run(_make())
+        # আলাদা থ্রেডে চালানো হচ্ছে যাতে রানিং ইভেন্ট লুপের কোনো কনফ্লিক্ট না হয়
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        fut = executor.submit(_run_edge_tts_in_thread, speech_text, output_audio_path)
+        fut.result(timeout=45)
+        executor.shutdown(wait=False)
+
         if os.path.exists(output_audio_path) and os.path.getsize(output_audio_path) > 1000:
             print("  ✅ [Edge TTS SUCCESS] Generated audio using Microsoft Edge!")
             return True
@@ -291,7 +306,7 @@ def synthesize_with_edge_single(speech_text, output_audio_path):
     return False
 
 # =========================================================================
-# 🌟 ৪. লোকাল ব্যাকগ্রাউন্ড মিউজিক ফলব্যাক (৪র্থ অগ্রাধিকার)
+# 🌟 ৪. লোকাল ব্যাকগ্রাউন্ড মিউজিক ফলব্যাক
 # =========================================================================
 def get_fallback_music_file():
     candidates = []
@@ -304,7 +319,7 @@ def get_fallback_music_file():
     return None
 
 # =========================================================================
-# 🌟 একক অডিও জেনারেটর টাস্ক (নিখুঁত অগ্রাধিকার চেইন)
+# 🌟 একক অডিও জেনারেটর টাস্ক (নিখুঁত প্রায়োরিটি চেইন)
 # =========================================================================
 def generate_single_audio_task(text, output_path, key_idx=0):
     speech_text = clean_script_for_speech(text)
@@ -313,7 +328,7 @@ def generate_single_audio_task(text, output_path, key_idx=0):
     if synthesize_with_gemini_single(speech_text, output_path, preferred_key_idx=key_idx):
         return True
 
-    # ২. ElevenLabs (জেমিনির সব কি ব্যর্থ হলে এখানে আসবে)
+    # ২. ElevenLabs
     print("  ⚠️ All Gemini keys failed. Cascading to Priority 2: ElevenLabs...")
     if synthesize_with_elevenlabs_single(speech_text, output_path, preferred_key_idx=key_idx):
         return True
@@ -337,7 +352,6 @@ def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, mem
     return generate_single_audio_task(text, output_audio_path, key_idx=key_offset)
 
 def generate_audios_in_parallel(scripts_list, base_hash, total_needed):
-    """সামঞ্জস্য রক্ষার জন্য হেল্পার ফাংশন"""
     audio_paths = []
     for idx in range(total_needed):
         s_text = scripts_list[idx % len(scripts_list)]
