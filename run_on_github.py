@@ -86,7 +86,6 @@ async def process_sync(config, memory):
             print(f"  ⚠️ Telegram connection safely skipped: {e}")
             tg_client = None
 
-    # মাস্টার সুইচ চেক
     enable_tiktok = str(get_credential(config, "enable_tiktok", "ENABLE_TIKTOK")).lower() not in ["false", "0", "no", "off"]
     save_to_gdrive = str(get_credential(config, "save_to_gdrive", "SAVE_TO_GDRIVE")).lower() in ["true", "1", "yes", "on"]
 
@@ -119,7 +118,7 @@ async def process_sync(config, memory):
     rclone_conf = get_credential(config, "rclone_conf", "RCLONE_CONF")
     gdrive_folder_id = get_credential(config, "gdrive_folder_id", "GDRIVE_FOLDER_ID")
 
-    print(f"\n⚙️ [Master Automation Status - Progressive Sequential Pipeline]")
+    print(f"\n⚙️ [Master Automation Status - Progressive Pipeline]")
     print(f"   ├─ Connected YouTube Channels : {yt_count}")
     print(f"   ├─ Connected Facebook Pages   : {fb_count}")
     print(f"   ├─ Connected TikTok Accounts  : {tiktok_count} ({'ENABLED' if enable_tiktok else 'DISABLED'})")
@@ -169,7 +168,7 @@ async def process_sync(config, memory):
 
             job_data = generate_job_data_and_script(article_title, web_text or raw_desc_clean, web_html, downloaded_imgs, scripts_count=total_cycles, memory=memory)
 
-            print(f"\n🔥 [CONTENT PREPARED] '{article_title}'")
+            print(f"\n🔥 [CONTENT PREPARED] '{article_title}' (Downloaded Images: {len(downloaded_imgs)})")
             scripts = job_data.get("scripts", [job_data.get("voiceover_script", "")])
 
             contact_sfx = "\n\nআবেদন করতে যোগাযোগ করুন WhatsApp: 01540503092"
@@ -178,15 +177,12 @@ async def process_sync(config, memory):
             video_final_title = article_title[:85].strip()
 
             valid_source_imgs = filter_banner_first_image(downloaded_imgs)
-            # যদি কোনো ইমেজ ডাউনলোড না হয়, তাহলে পোস্টার ইমেজ তৈরি হবে
             poster_slide_paths = prepare_tiktok_slides(job_data, f"poster_{hash(entry_link)}")
             fb_yt_source = valid_source_imgs if valid_source_imgs else poster_slide_paths
-
-            # 🌟 হোয়াটসঅ্যাপ এবং টেলিগ্রামের জন্য ইমেজ নির্ধারণ: মূল ছবি থাকলে সেটা যাবে, না থাকলে পোস্টার ইমেজ যাবে
             social_images_to_share = valid_source_imgs if valid_source_imgs else poster_slide_paths
 
             # =================================================================
-            # 🌟 একটি করে অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল
+            # 🌟 অডিও তৈরি ➔ ভিডিও তৈরি ➔ আপলোড সাইকেল
             # =================================================================
             for cycle_idx in range(total_cycles):
                 print(f"\n--- [Cycle #{cycle_idx+1}/{total_cycles}] Starting Audio & Video Pipeline ---")
@@ -203,6 +199,7 @@ async def process_sync(config, memory):
                 if cycle_idx < yt_count or cycle_idx < fb_count:
                     main_vid_path = f"tmp_main_{hash(entry_link)}_{cycle_idx+1}.mp4"
                     if render_vertical_video(fb_yt_source, audio_file, main_vid_path):
+                        # YouTube আপলোড
                         if cycle_idx < yt_count:
                             yt_ch = yt_targets[cycle_idx]
                             try:
@@ -211,11 +208,24 @@ async def process_sync(config, memory):
                             except Exception as e:
                                 print(f"  ⚠️ [YouTube Error] {e}")
 
+                        # 🌟 Facebook আপলোড (ফটো অ্যালবাম/পোস্ট + রিলস ভিডিও)
                         if cycle_idx < fb_count:
                             fb_did = fb_dest_ids[cycle_idx]
                             try:
                                 token = get_page_access_token(fb_user_token, fb_did)
                                 if token:
+                                    # ১. ছবি বা ফটো অ্যালবাম পোস্ট করা
+                                    if downloaded_imgs:
+                                        print(f"  [+] Posting {len(downloaded_imgs)} Photo(s) to Facebook Page {fb_did}...")
+                                        if len(downloaded_imgs) > 1:
+                                            post_multi_photo_to_facebook(fb_did, token, downloaded_imgs, fb_yt_post_text)
+                                        else:
+                                            post_photo_to_facebook(fb_did, token, downloaded_imgs[0], fb_yt_post_text)
+                                    elif poster_slide_paths:
+                                        post_photo_to_facebook(fb_did, token, poster_slide_paths[0], fb_yt_post_text)
+
+                                    # ২. রিলস / ভিডিও আপলোড করা
+                                    print(f"  [+] Uploading Reel Video #{cycle_idx+1} to Facebook Page {fb_did}...")
                                     if not post_reel_to_facebook(fb_did, token, main_vid_path, video_final_title, fb_yt_post_text):
                                         post_video_to_facebook(fb_did, token, main_vid_path, fb_yt_post_text)
                             except Exception as e:
@@ -225,7 +235,7 @@ async def process_sync(config, memory):
                             try: os.remove(main_vid_path)
                             except Exception: pass
 
-                # TikTok পোস্টার ভিডিও
+                # TikTok পোস্টার ভিডিও রেন্ডার ও আপলোড
                 if cycle_idx < tiktok_count:
                     tk_account = tiktok_targets[cycle_idx]
                     tk_vid_path = f"tmp_tiktok_{hash(entry_link)}_{cycle_idx+1}.mp4"
@@ -265,7 +275,7 @@ async def process_sync(config, memory):
                     except Exception as e:
                         print(f"  ⚠️ [Telegram Channel @{clean_tg} Notice] {e}")
 
-            # 🌟 WhatsApp আপলোড (সবসময় ছবিসহ যাবে: মূল সার্কুলার ছবি অথবা পোস্টার ছবি)
+            # WhatsApp আপলোড (ছবিসহ)
             for did in wa_dest_ids:
                 try:
                     post_to_whatsapp_channel(render_wa_url, did, fb_yt_post_text, social_images_to_share)
