@@ -82,31 +82,62 @@ def sync_background_videos_from_gdrive(config=None):
     return len(downloaded) > 0
 
 # =========================================================================
-# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার
+# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (একই Client ID/Secret শেয়ারিং)
 # =========================================================================
 def get_all_youtube_targets(config=None):
     if config is None: config = {}
     targets = []
 
+    # মাস্টার ক্লায়েন্ট আইডি ও সিক্রেট (সব চ্যানেল এই একই আইডি ও সিক্রেট শেয়ার করবে)
+    master_cid = (
+        os.environ.get("YT_CLIENT_ID", "").strip() or
+        os.environ.get("CLIENT_ID", "").strip() or
+        os.environ.get("YT_CLIENT_ID_1", "").strip() or
+        get_credential(config, "yt_client_id", "YT_CLIENT_ID") or
+        get_credential(config, "client_id", "CLIENT_ID")
+    )
+    master_csec = (
+        os.environ.get("YT_CLIENT_SECRET", "").strip() or
+        os.environ.get("CLIENT_SECRET", "").strip() or
+        os.environ.get("YT_CLIENT_SECRET_1", "").strip() or
+        get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET") or
+        get_credential(config, "client_secret", "CLIENT_SECRET")
+    )
+
+    # ১. মাল্টিলাইন সিক্রেট চেক (YT_REFRESH_TOKENS - একটার নিচে আরেকটা পেস্ট করা ৮টি টোকেন)
+    raw_tokens = os.environ.get("YT_REFRESH_TOKENS", "").strip()
+    if raw_tokens and master_cid and master_csec:
+        tokens = [t.strip() for t in re.split(r'[\r\n]+', raw_tokens) if t.strip() and not t.strip().startswith('#')]
+        for idx, rtok in enumerate(tokens[:8], start=1):
+            targets.append({
+                "client_id": master_cid,
+                "client_secret": master_csec,
+                "refresh_token": rtok,
+                "index": idx
+            })
+        if targets:
+            return targets
+
+    # ২. আলাদা আলাদা নাম্বারড সিক্রেট চেক (YT_REFRESH_TOKEN_1 ... YT_REFRESH_TOKEN_8)
     for i in range(1, 9):
-        cid = os.environ.get(f"YT_CLIENT_ID_{i}", "").strip()
-        csec = os.environ.get(f"YT_CLIENT_SECRET_{i}", "").strip()
-        rtok = os.environ.get(f"YT_REFRESH_TOKEN_{i}", "").strip()
+        cid = (
+            os.environ.get(f"YT_CLIENT_ID_{i}", "").strip() or
+            os.environ.get(f"CLIENT_ID_{i}", "").strip() or
+            master_cid
+        )
+        csec = (
+            os.environ.get(f"YT_CLIENT_SECRET_{i}", "").strip() or
+            os.environ.get(f"CLIENT_SECRET_{i}", "").strip() or
+            master_csec
+        )
+        rtok = (
+            os.environ.get(f"YT_REFRESH_TOKEN_{i}", "").strip() or
+            os.environ.get(f"REFRESH_TOKEN_{i}", "").strip() or
+            (os.environ.get("YT_REFRESH_TOKEN", "").strip() if i == 1 else "") or
+            (os.environ.get("REFRESH_TOKEN", "").strip() if i == 1 else "")
+        )
         if cid and csec and rtok:
             targets.append({"client_id": cid, "client_secret": csec, "refresh_token": rtok, "index": i})
-
-    if not targets:
-        cid1 = os.environ.get("YT_CLIENT_ID", "").strip() or os.environ.get("CLIENT_ID", "").strip()
-        csec1 = os.environ.get("YT_CLIENT_SECRET", "").strip() or os.environ.get("CLIENT_SECRET", "").strip()
-        rtok1 = os.environ.get("YT_REFRESH_TOKEN", "").strip() or os.environ.get("REFRESH_TOKEN", "").strip()
-        if cid1 and csec1 and rtok1:
-            targets.append({"client_id": cid1, "client_secret": csec1, "refresh_token": rtok1, "index": 1})
-
-        cid2 = os.environ.get("YT_CLIENT_ID_2", "").strip() or os.environ.get("CLIENT_ID_2", "").strip()
-        csec2 = os.environ.get("YT_CLIENT_SECRET_2", "").strip() or os.environ.get("CLIENT_SECRET_2", "").strip()
-        rtok2 = os.environ.get("YT_REFRESH_TOKEN_2", "").strip() or os.environ.get("REFRESH_TOKEN_2", "").strip()
-        if cid2 and csec2 and rtok2:
-            targets.append({"client_id": cid2, "client_secret": csec2, "refresh_token": rtok2, "index": 2})
 
     return targets
 
@@ -442,7 +473,7 @@ def post_video_to_facebook(page_id, page_token, video_path, caption):
     except Exception: return False
 
 # =========================================================================
-# 🌟 ৬. WHATSAPP চ্যানেল হ্যান্ডলার (লাইভ লগ ও ইমেজ কাউন্ট সহ)
+# 🌟 ৬. WHATSAPP চ্যানেল হ্যান্ডলার (লাইভ লগ সহ)
 # =========================================================================
 def post_to_whatsapp_channel(render_url, channel_id, text, image_paths):
     if not render_url: return False
