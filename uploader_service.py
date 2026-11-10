@@ -82,62 +82,87 @@ def sync_background_videos_from_gdrive(config=None):
     return len(downloaded) > 0
 
 # =========================================================================
-# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (একই Client ID/Secret শেয়ারিং)
+# 🌟 ২. YouTube Shorts মাল্টি-চ্যানেল হ্যান্ডলার (২৪টি সিক্রেট ও ১টি JSON উভয়ই সাপোর্ট করে)
 # =========================================================================
 def get_all_youtube_targets(config=None):
     if config is None: config = {}
     targets = []
 
-    # মাস্টার ক্লায়েন্ট আইডি ও সিক্রেট (সব চ্যানেল এই একই আইডি ও সিক্রেট শেয়ার করবে)
-    master_cid = (
-        os.environ.get("YT_CLIENT_ID", "").strip() or
-        os.environ.get("CLIENT_ID", "").strip() or
-        os.environ.get("YT_CLIENT_ID_1", "").strip() or
-        get_credential(config, "yt_client_id", "YT_CLIENT_ID") or
-        get_credential(config, "client_id", "CLIENT_ID")
-    )
-    master_csec = (
-        os.environ.get("YT_CLIENT_SECRET", "").strip() or
-        os.environ.get("CLIENT_SECRET", "").strip() or
-        os.environ.get("YT_CLIENT_SECRET_1", "").strip() or
-        get_credential(config, "yt_client_secret", "YT_CLIENT_SECRET") or
-        get_credential(config, "client_secret", "CLIENT_SECRET")
-    )
+    # বিকল্প ১: যদি ইউজার ১টি সিক্রেটে YT_CHANNELS_JSON দিয়ে থাকেন
+    raw_json = os.environ.get("YT_CHANNELS_JSON", "").strip() or get_credential(config, "yt_channels_json", "YT_CHANNELS_JSON")
+    if raw_json:
+        try:
+            ch_list = json.loads(raw_json)
+            if isinstance(ch_list, list):
+                for idx, ch in enumerate(ch_list[:8], start=1):
+                    cid = str(ch.get("client_id", "")).strip()
+                    csec = str(ch.get("client_secret", "")).strip()
+                    rtok = str(ch.get("refresh_token", "")).strip()
+                    ch_name = str(ch.get("name", f"Channel #{idx}")).strip()
+                    if cid and csec and rtok:
+                        targets.append({
+                            "client_id": cid,
+                            "client_secret": csec,
+                            "refresh_token": rtok,
+                            "name": ch_name,
+                            "index": idx
+                        })
+                if targets:
+                    return targets
+        except Exception as e:
+            print(f"  ⚠️ [YouTube JSON Config Parse Notice] {e}")
 
-    # ১. মাল্টিলাইন সিক্রেট চেক (YT_REFRESH_TOKENS - একটার নিচে আরেকটা পেস্ট করা ৮টি টোকেন)
-    raw_tokens = os.environ.get("YT_REFRESH_TOKENS", "").strip()
-    if raw_tokens and master_cid and master_csec:
-        tokens = [t.strip() for t in re.split(r'[\r\n]+', raw_tokens) if t.strip() and not t.strip().startswith('#')]
-        for idx, rtok in enumerate(tokens[:8], start=1):
-            targets.append({
-                "client_id": master_cid,
-                "client_secret": master_csec,
-                "refresh_token": rtok,
-                "index": idx
-            })
-        if targets:
-            return targets
-
-    # ২. আলাদা আলাদা নাম্বারড সিক্রেট চেক (YT_REFRESH_TOKEN_1 ... YT_REFRESH_TOKEN_8)
+    # বিকল্প ২: ২৪টি আলাদা সিক্রেট চেক করা (YT_CLIENT_ID_1 ... 8, YT_CLIENT_SECRET_1 ... 8, YT_REFRESH_TOKEN_1 ... 8)
     for i in range(1, 9):
         cid = (
             os.environ.get(f"YT_CLIENT_ID_{i}", "").strip() or
             os.environ.get(f"CLIENT_ID_{i}", "").strip() or
-            master_cid
+            (os.environ.get("YT_CLIENT_ID", "").strip() if i == 1 else "") or
+            (os.environ.get("CLIENT_ID", "").strip() if i == 1 else "") or
+            get_credential(config, f"yt_client_id_{i}", f"YT_CLIENT_ID_{i}") or
+            get_credential(config, f"client_id_{i}", f"CLIENT_ID_{i}")
         )
         csec = (
             os.environ.get(f"YT_CLIENT_SECRET_{i}", "").strip() or
             os.environ.get(f"CLIENT_SECRET_{i}", "").strip() or
-            master_csec
+            (os.environ.get("YT_CLIENT_SECRET", "").strip() if i == 1 else "") or
+            (os.environ.get("CLIENT_SECRET", "").strip() if i == 1 else "") or
+            get_credential(config, f"yt_client_secret_{i}", f"YT_CLIENT_SECRET_{i}") or
+            get_credential(config, f"client_secret_{i}", f"CLIENT_SECRET_{i}")
         )
         rtok = (
             os.environ.get(f"YT_REFRESH_TOKEN_{i}", "").strip() or
             os.environ.get(f"REFRESH_TOKEN_{i}", "").strip() or
             (os.environ.get("YT_REFRESH_TOKEN", "").strip() if i == 1 else "") or
-            (os.environ.get("REFRESH_TOKEN", "").strip() if i == 1 else "")
+            (os.environ.get("REFRESH_TOKEN", "").strip() if i == 1 else "") or
+            get_credential(config, f"yt_refresh_token_{i}", f"YT_REFRESH_TOKEN_{i}") or
+            get_credential(config, f"refresh_token_{i}", f"REFRESH_TOKEN_{i}")
         )
+
         if cid and csec and rtok:
-            targets.append({"client_id": cid, "client_secret": csec, "refresh_token": rtok, "index": i})
+            targets.append({
+                "client_id": cid,
+                "client_secret": csec,
+                "refresh_token": rtok,
+                "name": f"Channel #{i}",
+                "index": i
+            })
+
+    # বিকল্প ৩: যদি ইউজার একক ক্লায়েন্ট আইডি/সিক্রেট এবং YT_REFRESH_TOKENS মাল্টিলাইন ব্যবহার করেন
+    if not targets:
+        master_cid = os.environ.get("YT_CLIENT_ID", "").strip() or os.environ.get("CLIENT_ID", "").strip()
+        master_csec = os.environ.get("YT_CLIENT_SECRET", "").strip() or os.environ.get("CLIENT_SECRET", "").strip()
+        raw_tokens = os.environ.get("YT_REFRESH_TOKENS", "").strip()
+        if raw_tokens and master_cid and master_csec:
+            tokens = [t.strip() for t in re.split(r'[\r\n]+', raw_tokens) if t.strip() and not t.strip().startswith('#')]
+            for idx, rtok in enumerate(tokens[:8], start=1):
+                targets.append({
+                    "client_id": master_cid,
+                    "client_secret": master_csec,
+                    "refresh_token": rtok,
+                    "name": f"Channel #{idx}",
+                    "index": idx
+                })
 
     return targets
 
