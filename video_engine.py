@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import math
 import shutil
 import random
 import subprocess
@@ -14,23 +13,20 @@ def get_audio_duration(audio_path):
     except Exception:
         return 30.0
 
-# 🌟 আপনার দেওয়া নমুনার পোস্টার ইমেজ থেকে অডিওর লেন্থ অনুযায়ী সরাসরি টিকটক ভিডিও তৈরি
-def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
+def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design_id=None, save_poster_path=None):
     print(f"  [🎨 Poster Video Engine] Generating Video from Poster Image: '{output_path}'")
     if not os.path.exists(audio_path): return False
 
     from tiktok_designer import render_poster_image
 
     audio_duration = get_audio_duration(audio_path)
-    temp_poster_img = f"_tmp_poster_{random.randint(100000, 999999)}.png"
+    temp_poster_img = save_poster_path or f"_tmp_poster_{random.randint(100000, 999999)}.png"
 
-    # ১. পোস্টার ইমেজ তৈরি
-    render_poster_image(job_data, temp_poster_img)
+    render_poster_image(job_data, temp_poster_img, design_id=design_id)
 
     if os.path.exists(output_path): os.remove(output_path)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    # ২. এফএফএমপেগ দিয়ে পোস্টার + ভয়েসওভার অডিও মিলিয়ে ১০৮০x১৯২০ ভিডিও রেন্ডার
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1",
@@ -55,13 +51,12 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24):
         print(f"  ❌ [FFmpeg Error]: {e}")
         success = False
 
-    if os.path.exists(temp_poster_img):
+    if not save_poster_path and os.path.exists(temp_poster_img):
         try: os.remove(temp_poster_img)
         except Exception: pass
 
     return success
 
-# সাধারণ ফেসবুক/ইউটিউব ভিডিও রেন্ডারার
 def render_vertical_video(image_paths, audio_path, output_path, fps=24):
     if not image_paths or not os.path.exists(audio_path): return False
     valid_images = [p for p in image_paths if os.path.exists(p)]
@@ -83,15 +78,17 @@ def render_vertical_video(image_paths, audio_path, output_path, fps=24):
     frame_count = 0
     for idx, img_path in enumerate(valid_images):
         try:
-            img = Image.open(img_path).convert('RGB')
-            if img.size[1] == 0: continue
-            num_f = frames_per_image + (1 if idx < remainder else 0)
-            resized = img.resize((720, 1280), resampling)
-
-            for f in range(num_f):
-                frame = resized.copy()
-                frame.save(os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"), "JPEG", quality=88)
-                frame_count += 1
+            with Image.open(img_path) as raw_img:
+                img = raw_img.convert('RGB')
+                if img.size[1] == 0: continue
+                num_f = frames_per_image + (1 if idx < remainder else 0)
+                if num_f <= 0: continue
+                resized = img.resize((720, 1280), resampling)
+                base_frame = os.path.join(temp_dir, f"base_{idx}.jpg")
+                resized.save(base_frame, "JPEG", quality=88)
+                for _ in range(num_f):
+                    shutil.copyfile(base_frame, os.path.join(temp_dir, f"frame_{frame_count:05d}.jpg"))
+                    frame_count += 1
         except Exception: pass
 
     if frame_count == 0:
@@ -113,7 +110,8 @@ def render_vertical_video(image_paths, audio_path, output_path, fps=24):
     try:
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-    except Exception: success = False
+    except Exception:
+        success = False
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     return success
