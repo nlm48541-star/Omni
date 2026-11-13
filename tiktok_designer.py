@@ -190,9 +190,15 @@ def clean_org_name(org_name):
     return clean if len(clean) > 2 else org_name
 
 def quad_bezier(p0, p1, p2, steps=48):
-    return [((1-t)**2*p0[0] + 2*(1-t)*t*p1[0] + t**2*p2[0],
-             (1-t)**2*p0[1] + 2*(1-t)*t*p1[1] + t**2*p2[1])
-            for t in (i / steps for i in range(steps + 1))]
+    pts = []
+    for i in range(steps + 1):
+        t = i / steps
+        u = 1.0 - t
+        pts.append((
+            u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0],
+            u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]
+        ))
+    return pts
 
 def _aa_overlay_draw(base_im, draw_fn):
     W, H = base_im.size
@@ -215,13 +221,13 @@ def _extract_poster_content(job_data):
     org = clean_org_name(job_data.get("org_name", "সরকারি প্রতিষ্ঠান"))
     hook_top = remove_emojis(job_data.get("hook_top", "এসএসসি/এইচএসসি/স্নাতক পাশে")).strip()
     hook_bottom = remove_emojis(job_data.get("hook_bottom", "বড় চাকরির সুযোগ!")).strip()
-    hook_full = remove_emojis(job_data.get("hook_full", "")).strip() or f"{hook_top} {hook_bottom}".strip()
+    hook_full = remove_emojis(job_data.get("hook_full", "")).strip() or (hook_top + " " + hook_bottom).strip()
 
     main_summary = remove_emojis(job_data.get("poster_main_summary", "")).strip()
     if not main_summary:
-        h1 = remove_emojis(job_data.get("poster_headline_1", f"{org} বিশাল নিয়োগ")).strip()
+        h1 = remove_emojis(job_data.get("poster_headline_1", org + " বিশাল নিয়োগ")).strip()
         p1 = job_data.get("poster_p1_lines", [])
-        main_summary = f"{h1} – {' '.join(p1)}".strip() if p1 else f"{org} এ বিশাল নিয়োগ সার্কুলার প্রকাশ।"
+        main_summary = (h1 + " – " + " ".join(p1)).strip() if p1 else (org + " এ বিশাল নিয়োগ সার্কুলার প্রকাশ।")
 
     start_date = remove_emojis(job_data.get("start_date", "চলমান")).strip()
     end_date = remove_emojis(job_data.get("end_date", "শীঘ্রই শেষ হবে")).strip()
@@ -247,7 +253,11 @@ def _extract_poster_content(job_data):
             q = remove_emojis(p.get("qualification", "যোগ্যতানুযায়ী")).strip()[:22]
             pname = remove_emojis(p.get("post_name", "বিভিন্ন পদ")).strip()
             pvac = remove_emojis(p.get("vacancy", "০১")).strip()
-            rows.append({"badge": q or "যোগ্যতানুযায়ী", "lead": pname[:22], "details": f"{pname} - {pvac}টি পদে আবেদন করতে পারবেন।"})
+            rows.append({
+                "badge": q or "যোগ্যতানুযায়ী",
+                "lead": pname[:22],
+                "details": pname + " - " + pvac + "টি পদে আবেদন করতে পারবেন।"
+            })
 
     while len(rows) < 2:
         if not rows:
@@ -267,6 +277,11 @@ def _build_date_fee_spans(info, text_color, red_color):
     if sd == "চলমান":
         return [("আবেদন চলছে, শেষ তারিখ ", text_color), (ed, red_color), (" পর্যন্ত। আবেদন ফি ", text_color), (fee, red_color)]
     return [("আবেদন শুরু ", text_color), (sd, red_color), (" থেকে ", text_color), (ed, red_color), (" পর্যন্ত। আবেদন ফি ", text_color), (fee, red_color)]
+
+def _format_date_range_txt(info):
+    if info["start_date"] == "চলমান":
+        return "চলমান (শেষ: " + info["end_date"] + ")"
+    return info["start_date"] + " থেকে " + info["end_date"] + " পর্যন্ত"
 
 def _draw_tilted_hero(im, y_top, info, bg_col, top_col=(255, 255, 255), bot_col=(253, 224, 71), angle=2.4):
     pw, ph = 940, 232
@@ -325,20 +340,20 @@ def _draw_inline_pill_row(draw, row, cur_y, pill_col, text_col=(17, 24, 39)):
 
 def _draw_wave_corners(od, SW, SH, s, tl_layers, br_layers):
     for (tx, cx, cy, ly), col in tl_layers:
-        pts = [(0, 0), (tx*s, 0)] + quad_bezier((tx*s, 0), (cx*s, cy*s), (0, ly*s))
+        pts = [(0, 0), (tx * s, 0)] + quad_bezier((tx * s, 0), (cx * s, cy * s), (0, ly * s))
         od.polygon(pts, fill=col)
     for (bx, cx, cy, ry), col in br_layers:
-        pts = [(SW, SH), (SW - bx*s, SH)] + quad_bezier((SW - bx*s, SH), (SW - cx*s, SH - cy*s), (SW, SH - ry*s))
+        pts = [(SW, SH), (SW - bx * s, SH)] + quad_bezier((SW - bx * s, SH), (SW - cx * s, SH - cy * s), (SW, SH - ry * s))
         od.polygon(pts, fill=col)
 
 def _draw_diag_stripes(od, SW, SH, s, col1, col2, mirror_top_left=True):
     if mirror_top_left:
-        od.polygon([(0, 0), (310*s, 0), (0, 310*s)], fill=col1)
-        od.polygon([(310*s, 0), (355*s, 0), (0, 355*s), (0, 310*s)], fill=(255, 255, 255, 255))
-        od.polygon([(355*s, 0), (415*s, 0), (0, 415*s), (0, 355*s)], fill=col2)
-    od.polygon([(SW, SH), (SW - 350*s, SH), (SW, SH - 350*s)], fill=col1)
-    od.polygon([(SW - 350*s, SH), (SW - 395*s, SH), (SW, SH - 395*s), (SW, SH - 350*s)], fill=(255, 255, 255, 255))
-    od.polygon([(SW - 395*s, SH), (SW - 455*s, SH), (SW, SH - 455*s), (SW, SH - 395*s)], fill=col2)
+        od.polygon([(0, 0), (310 * s, 0), (0, 310 * s)], fill=col1)
+        od.polygon([(310 * s, 0), (355 * s, 0), (0, 355 * s), (0, 310 * s)], fill=(255, 255, 255, 255))
+        od.polygon([(355 * s, 0), (415 * s, 0), (0, 415 * s), (0, 355 * s)], fill=col2)
+    od.polygon([(SW, SH), (SW - 350 * s, SH), (SW, SH - 350 * s)], fill=col1)
+    od.polygon([(SW - 350 * s, SH), (SW - 395 * s, SH), (SW, SH - 395 * s), (SW, SH - 350 * s)], fill=(255, 255, 255, 255))
+    od.polygon([(SW - 395 * s, SH), (SW - 455 * s, SH), (SW, SH - 455 * s), (SW, SH - 395 * s)], fill=col2)
 
 def _draw_summary(draw, info, start_y, col=(17, 24, 39)):
     sf, ssz, slines = fit_multiline_font(draw, info["main_summary"], get_body_font, 54, 38, 950, 3)
@@ -350,6 +365,7 @@ def _draw_summary(draw, info, start_y, col=(17, 24, 39)):
 
 def _draw_date_fee_box(draw, info, y0, fill_col, text_col, red_col, outline_col=None, left_stripe_col=None):
     spans = _build_date_fee_spans(info, text_col, red_col)
+    sz, f, lines = 44, get_body_font(44), []
     for sz in range(44, 31, -2):
         f = get_body_font(sz)
         lines = wrap_colored_spans(draw, spans, f, sz, max_width=910)
@@ -389,9 +405,11 @@ def _render_design_1(info, output_path):
     im = Image.new("RGB", (W, H), (247, 250, 243))
 
     def decor(od, SW, SH, s):
-        _draw_wave_corners(od, SW, SH, s,
+        _draw_wave_corners(
+            od, SW, SH, s,
             [((390, 140, 60, 270), (221, 242, 161, 255)), ((310, 110, 55, 215), (151, 215, 0, 255)), ((170, 70, 35, 115), (6, 78, 21, 255))],
-            [((450, 160, 70, 290), (221, 242, 161, 255)), ((360, 125, 60, 225), (151, 215, 0, 255)), ((205, 75, 40, 125), (6, 78, 21, 255))])
+            [((450, 160, 70, 290), (221, 242, 161, 255)), ((360, 125, 60, 225), (151, 215, 0, 255)), ((205, 75, 40, 125), (6, 78, 21, 255))]
+        )
         top, bot = [], []
         for i in range(61):
             t = i / 60.0
@@ -417,7 +435,7 @@ def _render_design_1(info, output_path):
 
     lbl = get_body_font(44)
     draw_mixed_text(draw, 292, box_y0 + 52, "আবেদন শুরু", lbl, 44, BLACK, anchor="mm")
-    dtxt = f"{info['start_date']} থেকে {info['end_date']} পর্যন্ত" if info["start_date"] != "চলমান" else f"চলমান (শেষ: {info['end_date']})"
+    dtxt = _format_date_range_txt(info)
     df, dsz, dlines = fit_multiline_font(draw, dtxt, get_body_font, 44, 32, 445, 2)
     dy = box_y0 + (116 if len(dlines) > 1 else 146)
     for dl in dlines:
@@ -450,7 +468,8 @@ def _render_design_1(info, output_path):
             ty += lh
         cur_y += ch + 28
 
-    _draw_stadium_cta(draw, info, min(1570, max(cur_y + 16, 1485)), GREEN, (250, 204, 21), (255, 255, 255), (253, 224, 71))
+    cta_y0 = min(1660, max(cur_y + 22, 1495))
+    _draw_stadium_cta(draw, info, cta_y0, GREEN, (250, 204, 21), (255, 255, 255), (253, 224, 71))
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     im.save(output_path, "PNG", quality=95)
     return output_path
@@ -464,11 +483,13 @@ def _render_design_2(info, output_path):
     im = Image.new("RGB", (W, H), (255, 255, 255))
 
     def decor(od, SW, SH, s):
-        od.ellipse([SW - 330*s, -160*s, SW + 180*s, 360*s], fill=(224, 242, 254, 255))
-        od.ellipse([-210*s, SH - 420*s, 290*s, SH + 180*s], fill=(224, 242, 254, 255))
-        _draw_wave_corners(od, SW, SH, s,
+        od.ellipse([SW - 330 * s, -160 * s, SW + 180 * s, 360 * s], fill=(224, 242, 254, 255))
+        od.ellipse([-210 * s, SH - 420 * s, 290 * s, SH + 180 * s], fill=(224, 242, 254, 255))
+        _draw_wave_corners(
+            od, SW, SH, s,
             [((360, 145, 65, 235), (250, 204, 21, 255)), ((260, 95, 55, 175), (0, 51, 102, 255))],
-            [((450, 160, 85, 290), (250, 204, 21, 255)), ((330, 115, 65, 215), (0, 51, 102, 255))])
+            [((450, 160, 85, 290), (250, 204, 21, 255)), ((330, 115, 65, 215), (0, 51, 102, 255))]
+        )
 
     im = _aa_overlay_draw(im, decor)
     draw = ImageDraw.Draw(im)
@@ -485,7 +506,7 @@ def _render_design_2(info, output_path):
     for row in info["rows"]:
         lead, det = row.get("lead", ""), row["details"]
         if lead and det.startswith(lead):
-            ptxt = f"{row['badge']} – {lead} -"
+            ptxt = row["badge"] + " – " + lead + " -"
             rtxt = det[len(lead):].lstrip(" -–—:,")
         else:
             ptxt, rtxt = row["badge"], det
@@ -503,7 +524,8 @@ def _render_design_2(info, output_path):
                 cur_y += rsz + 14
         cur_y += 30
 
-    _draw_stadium_cta(draw, info, min(1570, max(cur_y + 12, 1485)), NAVY, GOLD, GOLD, GOLD)
+    cta_y0 = min(1660, max(cur_y + 18, 1495))
+    _draw_stadium_cta(draw, info, cta_y0, NAVY, GOLD, GOLD, GOLD)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     im.save(output_path, "PNG", quality=95)
     return output_path
@@ -527,11 +549,11 @@ def _render_design_3(info, output_path):
     draw.line([(65, cur_y + 10), (1015, cur_y + 10)], fill=(156, 163, 175), width=2)
     cur_y = _draw_inline_pill_row(draw, info["rows"][1], cur_y + 36, NAVY, BLACK)
 
-    cta_y0 = min(1570, max(cur_y + 20, 1485))
+    cta_y0 = min(1660, max(cur_y + 24, 1495))
     draw.rounded_rectangle([42, cta_y0, 1038, cta_y0 + 235], radius=48, fill=NAVY)
     draw_mixed_text(draw, W // 2, cta_y0 + 58, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
     draw.rounded_rectangle([185, cta_y0 + 108, 895, cta_y0 + 206], radius=49, fill=GOLD)
-    draw_mixed_text(draw, W // 2, cta_y0 + 157, f"whatsapp: {info['wa_number']}", get_english_bold_font(54), 54, BLACK, anchor="mm")
+    draw_mixed_text(draw, W // 2, cta_y0 + 157, "whatsapp: " + info["wa_number"], get_english_bold_font(54), 54, BLACK, anchor="mm")
     for dy in [145, 169]:
         draw.line([(72, cta_y0 + dy), (165, cta_y0 + dy)], fill=GOLD, width=4)
         draw.line([(915, cta_y0 + dy), (1008, cta_y0 + dy)], fill=GOLD, width=4)
@@ -547,9 +569,11 @@ def _render_design_4(info, output_path):
     W, H = 1080, 1920
     GREEN, GOLD, RED, BLACK = (6, 78, 21), (250, 204, 21), (220, 38, 38), (17, 24, 39)
     im = Image.new("RGB", (W, H), (249, 250, 245))
-    im = _aa_overlay_draw(im, lambda od, SW, SH, s: _draw_wave_corners(od, SW, SH, s,
+    im = _aa_overlay_draw(im, lambda od, SW, SH, s: _draw_wave_corners(
+        od, SW, SH, s,
         [((380, 140, 65, 265), (190, 242, 100, 255)), ((295, 105, 55, 205), (101, 163, 13, 255)), ((185, 65, 35, 125), (6, 78, 21, 255))],
-        [((430, 155, 70, 280), (190, 242, 100, 255)), ((320, 115, 55, 210), (101, 163, 13, 255)), ((195, 70, 35, 125), (6, 78, 21, 255))]))
+        [((430, 155, 70, 280), (190, 242, 100, 255)), ((320, 115, 55, 210), (101, 163, 13, 255)), ((195, 70, 35, 125), (6, 78, 21, 255))]
+    ))
     _draw_tilted_hero(im, 108, info, GREEN)
     draw = ImageDraw.Draw(im)
 
@@ -561,11 +585,11 @@ def _render_design_4(info, output_path):
     draw.line([(65, cur_y + 10), (1015, cur_y + 10)], fill=(134, 239, 172), width=2)
     cur_y = _draw_inline_pill_row(draw, info["rows"][1], cur_y + 36, GREEN, BLACK)
 
-    cta_y0 = min(1570, max(cur_y + 20, 1485))
+    cta_y0 = min(1660, max(cur_y + 24, 1495))
     draw.rounded_rectangle([55, cta_y0, 1025, cta_y0 + 235], radius=56, fill=GREEN)
     draw_mixed_text(draw, W // 2, cta_y0 + 58, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
     draw.rounded_rectangle([115, cta_y0 + 108, 965, cta_y0 + 206], radius=49, fill=GOLD)
-    draw_mixed_text(draw, W // 2, cta_y0 + 157, f"whatsapp: {info['wa_number']}", get_english_bold_font(58), 58, BLACK, anchor="mm")
+    draw_mixed_text(draw, W // 2, cta_y0 + 157, "whatsapp: " + info["wa_number"], get_english_bold_font(58), 58, BLACK, anchor="mm")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     im.save(output_path, "PNG", quality=95)
@@ -591,7 +615,7 @@ def _render_design_5(info, output_path):
 
     cur_y = box_y1 + 58
     for idx, row in enumerate(info["rows"]):
-        txt = f"{row['badge']} – {row['details']}"
+        txt = row["badge"] + " – " + row["details"]
         rf, rsz, rlines = fit_multiline_font(draw, txt, get_body_font, 46, 34, 940, 3)
         for rl in rlines:
             draw_mixed_text(draw, W // 2, cur_y, rl, rf, rsz, BLACK, anchor="mm")
@@ -600,7 +624,7 @@ def _render_design_5(info, output_path):
             draw.line([(200, cur_y + 10), (880, cur_y + 10)], fill=GREEN, width=3)
             cur_y += 52
 
-    cta_y0 = min(1570, max(cur_y + 22, 1485))
+    cta_y0 = min(1660, max(cur_y + 24, 1495))
     draw.rounded_rectangle([45, cta_y0, 1035, cta_y0 + 230], radius=44, fill=GREEN)
     draw_mixed_text(draw, W // 2, cta_y0 + 58, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
     draw.line([(85, cta_y0 + 106), (995, cta_y0 + 106)], fill=(255, 255, 255), width=3)
@@ -634,14 +658,14 @@ def _render_design_6(info, output_path):
 
     cur_y = box_y1 + 58
     for row in info["rows"]:
-        txt = f"{row['badge']} – {row['details']}"
+        txt = row["badge"] + " – " + row["details"]
         rf, rsz, rlines = fit_multiline_font(draw, txt, get_body_font, 46, 34, 940, 3)
         for rl in rlines:
             draw_mixed_text(draw, W // 2, cur_y, rl, rf, rsz, BLACK, anchor="mm")
             cur_y += rsz + 16
         cur_y += 22
 
-    line_y = min(1535, max(cur_y + 10, 1455))
+    line_y = min(1620, max(cur_y + 14, 1465))
     draw.line([(45, line_y), (1035, line_y)], fill=GREEN, width=4)
     draw.rounded_rectangle([165, line_y + 28, 915, line_y + 124], radius=48, fill=GREEN)
     draw_mixed_text(draw, W // 2, line_y + 76, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
@@ -682,7 +706,7 @@ def _render_design_7(info, output_path):
 
     ym = (box_y0 + box_y1) // 2
     draw_mixed_text(draw, 188, ym, "আবেদন শুরু", get_body_font(42), 42, BLACK, anchor="mm")
-    dtxt = f"{info['start_date']} থেকে {info['end_date']} পর্যন্ত" if info["start_date"] != "চলমান" else f"চলমান, শেষ: {info['end_date']}"
+    dtxt = _format_date_range_txt(info)
     df, dsz, dlines = fit_multiline_font(draw, dtxt, get_body_font, 40, 30, 345, 2)
     dy = ym - ((len(dlines) - 1) * (dsz + 10)) // 2
     for dl in dlines:
@@ -692,10 +716,11 @@ def _render_design_7(info, output_path):
     fee_spans = [("আবেদন ফি ", BLACK), (info["fee"], RED)]
     ff = get_body_font(40)
     flines = wrap_colored_spans(draw, fee_spans, ff, 40, max_width=300)
+    f_sz = 40
     if len(flines) > 2:
-        ff = get_body_font(32)
-        flines = wrap_colored_spans(draw, fee_spans, ff, 32, max_width=300)
-    f_sz = 40 if len(flines) <= 2 else 32
+        f_sz = 32
+        ff = get_body_font(f_sz)
+        flines = wrap_colored_spans(draw, fee_spans, ff, f_sz, max_width=300)
     fy = ym - ((len(flines) - 1) * (f_sz + 10)) // 2
     for fl in flines:
         draw_colored_spans_line(draw, 874, fy, fl, ff, f_sz)
@@ -704,7 +729,7 @@ def _render_design_7(info, output_path):
     cur_y = box_y1 + 36
     card_styles = [((232, 248, 229), (22, 101, 52)), ((254, 215, 170), ORANGE)]
     for idx, row in enumerate(info["rows"]):
-        txt = f"{row['badge']} – {row['details']}"
+        txt = row["badge"] + " – " + row["details"]
         rf, rsz, rlines = fit_multiline_font(draw, txt, get_body_font, 44, 32, 920, 3)
         lh = rsz + 14
         ch = max(175, len(rlines) * lh + 56)
@@ -716,11 +741,11 @@ def _render_design_7(info, output_path):
             ty += lh
         cur_y += ch + 30
 
-    fy0 = min(1620, max(cur_y + 24, 1525))
+    fy0 = min(1685, max(cur_y + 24, 1545))
     draw.rectangle([0, fy0, W, fy0 + 12], fill=(245, 158, 11))
     draw.rectangle([0, fy0 + 12, W, H], fill=GREEN)
     draw_mixed_text(draw, W // 2, fy0 + 82, "আবেদন করতে যোগাযোগ করুন।", get_body_font(46), 46, (255, 255, 255), anchor="mm")
-    draw_mixed_text(draw, W // 2, fy0 + 162, f"whatsapp: {info['wa_number']}", get_english_bold_font(62), 62, (250, 204, 21), anchor="mm")
+    draw_mixed_text(draw, W // 2, fy0 + 162, "whatsapp: " + info["wa_number"], get_english_bold_font(62), 62, (250, 204, 21), anchor="mm")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     im.save(output_path, "PNG", quality=95)
@@ -735,12 +760,12 @@ def _render_design_8(info, output_path):
     im = Image.new("RGB", (W, H), (255, 255, 255))
 
     def decor(od, SW, SH, s):
-        od.polygon([(0, SH), (0, SH - 180*s), (150*s, SH)], fill=(6, 78, 21, 255))
-        od.polygon([(150*s, SH), (185*s, SH), (0, SH - 215*s), (0, SH - 180*s)], fill=(255, 255, 255, 255))
-        od.polygon([(185*s, SH), (225*s, SH), (0, SH - 255*s), (0, SH - 215*s)], fill=(6, 78, 21, 255))
-        od.polygon([(SW, SH), (SW, SH - 180*s), (SW - 150*s, SH)], fill=(6, 78, 21, 255))
-        od.polygon([(SW - 150*s, SH), (SW - 185*s, SH), (SW, SH - 215*s), (SW, SH - 180*s)], fill=(255, 255, 255, 255))
-        od.polygon([(SW - 185*s, SH), (SW - 225*s, SH), (SW, SH - 255*s), (SW, SH - 215*s)], fill=(6, 78, 21, 255))
+        od.polygon([(0, SH), (0, SH - 180 * s), (150 * s, SH)], fill=(6, 78, 21, 255))
+        od.polygon([(150 * s, SH), (185 * s, SH), (0, SH - 215 * s), (0, SH - 180 * s)], fill=(255, 255, 255, 255))
+        od.polygon([(185 * s, SH), (225 * s, SH), (0, SH - 255 * s), (0, SH - 215 * s)], fill=(6, 78, 21, 255))
+        od.polygon([(SW, SH), (SW, SH - 180 * s), (SW - 150 * s, SH)], fill=(6, 78, 21, 255))
+        od.polygon([(SW - 150 * s, SH), (SW - 185 * s, SH), (SW, SH - 215 * s), (SW, SH - 180 * s)], fill=(255, 255, 255, 255))
+        od.polygon([(SW - 185 * s, SH), (SW - 225 * s, SH), (SW, SH - 255 * s), (SW, SH - 215 * s)], fill=(6, 78, 21, 255))
 
     im = _aa_overlay_draw(im, decor)
     draw = ImageDraw.Draw(im)
@@ -760,7 +785,7 @@ def _render_design_8(info, output_path):
 
     _draw_headered_box(draw, [45, box_y0, 520, box_y1], 68, 26, GREEN, GREEN, MINT_BG)
     draw_mixed_text(draw, 282, box_y0 + 34, "আবেদন শুরু", get_body_font(40), 40, (255, 255, 255), anchor="mm")
-    dtxt = f"{info['start_date']} থেকে {info['end_date']} পর্যন্ত" if info["start_date"] != "চলমান" else f"চলমান (শেষ: {info['end_date']})"
+    dtxt = _format_date_range_txt(info)
     df, dsz, dlines = fit_multiline_font(draw, dtxt, get_body_font, 40, 30, 425, 2)
     dy = box_y0 + (122 if len(dlines) > 1 else 148)
     for dl in dlines:
@@ -790,10 +815,10 @@ def _render_design_8(info, output_path):
             ty += lh
         cur_y += ch + 26
 
-    cta_y0 = min(1570, max(cur_y + 18, 1485))
+    cta_y0 = min(1660, max(cur_y + 22, 1495))
     draw.rounded_rectangle([75, cta_y0, 1005, cta_y0 + 225], radius=112, fill=ORANGE)
     draw_mixed_text(draw, W // 2, cta_y0 + 66, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
-    draw_mixed_text(draw, W // 2, cta_y0 + 148, f"whatsapp: {info['wa_number']}", get_english_bold_font(60), 60, (253, 224, 71), anchor="mm")
+    draw_mixed_text(draw, W // 2, cta_y0 + 148, "whatsapp: " + info["wa_number"], get_english_bold_font(60), 60, (253, 224, 71), anchor="mm")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     im.save(output_path, "PNG", quality=95)
@@ -809,11 +834,11 @@ def _render_design_9(info, output_path):
 
     def decor(od, SW, SH, s):
         _draw_diag_stripes(od, SW, SH, s, (250, 204, 21, 255), (6, 78, 21, 255), True)
-        top_c = quad_bezier((35*s, 130*s), (540*s, 72*s), (1045*s, 130*s))
-        bot_gold = quad_bezier((1045*s, 338*s), (540*s, 366*s), (35*s, 338*s))
-        bot_green = quad_bezier((1045*s, 326*s), (540*s, 352*s), (35*s, 326*s))
-        od.polygon(top_c + [(1045*s, 338*s)] + bot_gold + [(35*s, 130*s)], fill=(250, 204, 21, 255))
-        od.polygon(top_c + [(1045*s, 326*s)] + bot_green + [(35*s, 130*s)], fill=(6, 78, 21, 255))
+        top_c = quad_bezier((35 * s, 130 * s), (540 * s, 72 * s), (1045 * s, 130 * s))
+        bot_gold = quad_bezier((1045 * s, 338 * s), (540 * s, 366 * s), (35 * s, 338 * s))
+        bot_green = quad_bezier((1045 * s, 326 * s), (540 * s, 352 * s), (35 * s, 326 * s))
+        od.polygon(top_c + [(1045 * s, 338 * s)] + bot_gold + [(35 * s, 130 * s)], fill=(250, 204, 21, 255))
+        od.polygon(top_c + [(1045 * s, 326 * s)] + bot_green + [(35 * s, 130 * s)], fill=(6, 78, 21, 255))
 
     im = _aa_overlay_draw(im, decor)
     draw = ImageDraw.Draw(im)
@@ -829,7 +854,7 @@ def _render_design_9(info, output_path):
 
     _draw_headered_box(draw, [45, box_y0, 520, box_y1], 68, 26, GREEN, GREEN, CREAM)
     draw_mixed_text(draw, 282, box_y0 + 34, "আবেদন শুরু", get_body_font(40), 40, (255, 255, 255), anchor="mm")
-    dtxt = f"{info['start_date']} থেকে {info['end_date']} পর্যন্ত" if info["start_date"] != "চলমান" else f"চলমান (শেষ: {info['end_date']})"
+    dtxt = _format_date_range_txt(info)
     df, dsz, dlines = fit_multiline_font(draw, dtxt, get_body_font, 40, 30, 425, 2)
     dy = box_y0 + (122 if len(dlines) > 1 else 148)
     for dl in dlines:
@@ -868,25 +893,26 @@ def _render_design_9(info, output_path):
             ty += lh
         cur_y += ch + 28
 
-    cta_y0 = min(1560, max(cur_y + 18, 1480))
+    cta_y0 = min(1655, max(cur_y + 22, 1490))
     draw.rounded_rectangle([45, cta_y0, 1035, cta_y0 + 240], radius=58, fill=GREEN)
     draw_mixed_text(draw, W // 2, cta_y0 + 58, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
     draw.rounded_rectangle([95, cta_y0 + 108, 985, cta_y0 + 212], radius=52, fill=GOLD)
-    draw_mixed_text(draw, W // 2, cta_y0 + 160, f"whatsapp: {info['wa_number']}", get_english_bold_font(62), 62, GREEN, anchor="mm")
+    draw_mixed_text(draw, W // 2, cta_y0 + 160, "whatsapp: " + info["wa_number"], get_english_bold_font(62), 62, GREEN, anchor="mm")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     im.save(output_path, "PNG", quality=95)
     return output_path
 
 # =========================================================================
-# 🎨 DESIGN 10: Original Classic Cream Poster Design (Preserved)
+# 🎨 DESIGN 10: Original Classic Cream Poster Design (Preserved & 3.10 Safe)
 # =========================================================================
 def _render_design_10(job_data, output_path):
     W, H = 1080, 1920
     im = Image.new("RGB", (W, H), (253, 247, 215))
     draw = ImageDraw.Draw(im)
 
-    h1 = remove_emojis(job_data.get("poster_headline_1", "")) or f"{clean_org_name(job_data.get('org_name', 'সরকারি প্রতিষ্ঠান'))} বিশাল নিয়োগ"
+    org_label = clean_org_name(job_data.get("org_name", "সরকারি প্রতিষ্ঠান"))
+    h1 = remove_emojis(job_data.get("poster_headline_1", "")) or (org_label + " বিশাল নিয়োগ")
     h2 = remove_emojis(job_data.get("poster_headline_2", "সুযোগ!"))
     head_font = get_header_font(66)
     GREEN, BLACK, CRIMSON = (20, 90, 40), (17, 24, 39), (153, 27, 27)
@@ -911,12 +937,15 @@ def _render_design_10(job_data, output_path):
     p1_raw = job_data.get("poster_p1_lines", [])
     if not p1_raw:
         posts = job_data.get("posts", [])
-        total_vac = sum([int(re.findall(r'\d+', p.get('vacancy', '1'))[0]) for p in posts if re.findall(r'\d+', p.get('vacancy', ''))] or [len(posts)])
+        vac_nums = [int(re.findall(r'\d+', p.get('vacancy', '1'))[0]) for p in posts if re.findall(r'\d+', p.get('vacancy', ''))]
+        total_vac = sum(vac_nums) if vac_nums else len(posts)
         vac_bn = re.sub(r'(\d)', lambda m: "০১২৩৪৫৬৭৮৯"[int(m.group(1))], str(total_vac))
         qual = posts[0].get('qualification', 'যোগ্যতা অনুযায়ী') if posts else "যোগ্যতানুযায়ী"
-        p1_lines = wrap_mixed_text(draw, f"{qual} পদে {vac_bn} পদে আবেদনের সুযোগ।", body_font, 48, max_width=880)
+        p1_lines = wrap_mixed_text(draw, qual + " পদে " + vac_bn + " পদে আবেদনের সুযোগ।", body_font, 48, max_width=880)
     else:
-        p1_lines = [wl for line in p1_raw for wl in wrap_mixed_text(draw, line, body_font, 48, max_width=880)]
+        p1_lines = []
+        for line in p1_raw:
+            p1_lines.extend(wrap_mixed_text(draw, line, body_font, 48, max_width=880))
 
     cur_y += 25
     for l in p1_lines:
@@ -928,10 +957,10 @@ def _render_design_10(job_data, output_path):
     ed_date = str(job_data.get("end_date", "শীঘ্রই শেষ হবে")).strip()
     fee_line = str(job_data.get("poster_fee_line", "আবেদন ফি বিজ্ঞপ্তিমতে।")).strip()
 
-    for sl in wrap_mixed_text(draw, f"আবেদন শুরুর তারিখ: {st_date}", body_font, 46, max_width=880):
+    for sl in wrap_mixed_text(draw, "আবেদন শুরুর তারিখ: " + st_date, body_font, 46, max_width=880):
         draw_mixed_text(draw, W // 2, cur_y, sl, body_font, 46, BLACK, anchor="mm")
         cur_y += 60
-    for el in wrap_mixed_text(draw, f"আবেদনের শেষ তারিখ: {ed_date}। {fee_line}", body_font, 46, max_width=880):
+    for el in wrap_mixed_text(draw, "আবেদনের শেষ তারিখ: " + ed_date + "। " + fee_line, body_font, 46, max_width=880):
         draw_mixed_text(draw, W // 2, cur_y, el, body_font, 46, BLACK, anchor="mm")
         cur_y += 60
 
@@ -939,10 +968,18 @@ def _render_design_10(job_data, output_path):
     p3_raw = job_data.get("poster_p3_lines", [])
     if not p3_raw:
         posts = job_data.get("posts", [])
-        p3_txt = f"{' এবং '.join([f'{p.get('post_name','')} – {p.get('vacancy','০১')} টি' for p in posts[:2]])} পদে আবেদন করা যাবে।" if posts else "বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে আবেদন করা যাবে।"
+        if posts:
+            sample_items = [p.get("post_name", "") + " – " + p.get("vacancy", "০১") + " টি" for p in posts[:2]]
+            p3_txt = " এবং ".join(sample_items) + " পদে আবেদন করা যাবে।"
+        else:
+            p3_txt = "বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে আবেদন করা যাবে।"
         p3_lines = wrap_mixed_text(draw, p3_txt, body_font, 46, max_width=880)
     else:
-        p3_lines = [wl for line in p3_raw for cl in [re.sub(r'আবেদনের শেষ তারিখ.*$', '', line).strip()] if cl for wl in wrap_mixed_text(draw, cl, body_font, 46, max_width=880)]
+        p3_lines = []
+        for line in p3_raw:
+            cl = re.sub(r'আবেদনের শেষ তারিখ.*$', '', line).strip()
+            if cl:
+                p3_lines.extend(wrap_mixed_text(draw, cl, body_font, 46, max_width=880))
 
     for l in p3_lines:
         draw_mixed_text(draw, W // 2, cur_y, l, body_font, 46, CRIMSON, anchor="mm")
@@ -986,6 +1023,6 @@ def render_poster_image(job_data, output_path, design_id=None):
     return DESIGN_RENDERERS[design_id](_extract_poster_content(job_data), output_path)
 
 def prepare_tiktok_slides(job_data, output_prefix="poster", design_id=None):
-    out_path = f"{output_prefix}_1.png"
+    out_path = output_prefix + "_1.png"
     render_poster_image(job_data, out_path, design_id=design_id)
     return [out_path]
