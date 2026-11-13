@@ -143,15 +143,24 @@ def sanitize_voiceover_script(script):
 def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
     months = r'(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগষ্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)'
     date_pat = rf'([০-৯\d]{{1,2}}\s*{months})'
-    
+
     combined = f"{title} {plain_text}"
     st_date, ed_date = "চলমান", "শীঘ্রই শেষ হবে"
-    
+
     st_m = re.search(rf'(?:শুরু|থেকে|প্রকাশ)\s*[:\-\—]?\s*{date_pat}', combined, re.I)
     if st_m: st_date = st_m.group(1).strip()
-    
+
     ed_m = re.search(rf'(?:শেষ|পর্যন্ত|সময়সীমা)\s*[:\-\—]?\s*{date_pat}', combined, re.I)
     if ed_m: ed_date = ed_m.group(1).strip()
+
+    fee_str = "বিজ্ঞপ্তিমতে"
+    fee_m = re.search(r'(?:আবেদন\s*ফি|পরীক্ষার\s*ফি|ফি)[^০-৯\d\n]{0,20}((?:[০-৯\d]{2,4}\s*(?:/-|টাকা)?(?:\s*(?:ও|,|এবং)\s*[০-৯\d]{2,4}\s*(?:/-|টাকা)?)*))', combined, re.I)
+    if fee_m:
+        extracted = fee_m.group(1).strip()
+        if extracted:
+            fee_str = extracted if ("/-" in extracted or "টাকা" in extracted) else f"{extracted}/-"
+    elif re.search(r'বিনামূল্যে|ফি\s*লাগবে\s*না|কোনো\s*ফি\s*নেই', combined, re.I):
+        fee_str = "বিনামূল্যে"
 
     posts = []
     if html_text:
@@ -164,16 +173,16 @@ def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
                     vac_m = re.search(r'(\d+|[০-৯]+)', cols[1])
                     p_vac = vac_m.group(1) if vac_m else "০১"
                     p_qual = re.sub(r'[\r\n\t]+', ' ', cols[2])[:35].strip()
-                    
+
                     if len(p_name) > 2:
                         posts.append({"post_name": p_name, "vacancy": p_vac, "qualification": p_qual})
 
-    return st_date, ed_date, posts
+    return st_date, ed_date, fee_str, posts
 
 def smart_fallback_data(title, article_text="", raw_html=""):
     clean = remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip())
-    st_d, ed_d, scraped_posts = extract_dates_and_posts_from_html_or_text(raw_html, article_text, title)
-    
+    st_d, ed_d, fee_str, scraped_posts = extract_dates_and_posts_from_html_or_text(raw_html, article_text, title)
+
     org_candidate = clean
     org_candidate = re.sub(r'(\d+|[০-৯]+)\s*পদে', '', org_candidate)
     org_candidate = re.sub(r'(?:নতুন\s*)?নিয়োগ\s*বিজ্ঞপ্তি.*$', '', org_candidate, flags=re.IGNORECASE)
@@ -185,22 +194,139 @@ def smart_fallback_data(title, article_text="", raw_html=""):
     vac_m = re.search(r'(\d+|[০-৯]+)\s*পদে', clean)
     vac_str = vac_m.group(1) if vac_m else "বিভিন্ন"
 
+    p1 = scraped_posts[0] if scraped_posts else {"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": vac_str, "qualification": "এসএসসি/স্নাতক"}
+    p2 = scraped_posts[1] if len(scraped_posts) > 1 else {"post_name": "অন্যান্য পদসমূহ", "vacancy": "বিভিন্ন", "qualification": "বিজ্ঞপ্তি অনুযায়ী"}
+
+    qual_rows = [
+        {
+            "badge": p1.get("qualification", "যোগ্যতানুযায়ী")[:22] or "যোগ্যতানুযায়ী",
+            "lead": p1.get("post_name", "বিভিন্ন পদ")[:24],
+            "details": f"{p1.get('post_name', 'বিভিন্ন পদ')} - {p1.get('vacancy', '০১')}টি পদে আবেদন করতে পারবেন।"
+        },
+        {
+            "badge": p2.get("qualification", "অন্যান্য যোগ্যতা")[:22] or "অন্যান্য যোগ্যতা",
+            "lead": p2.get("post_name", "অন্যান্য পদ")[:24],
+            "details": f"{p2.get('post_name', 'অন্যান্য পদ')} - {p2.get('vacancy', '০১')}টি সহ বিজ্ঞপ্তির অন্যান্য পদে আবেদন করা যাবে।"
+        }
+    ]
+
     return {
         "org_name": org_candidate,
+        "hook_top": "যোগ্যতানুযায়ী আবেদন",
+        "hook_bottom": "বড় চাকরির সুযোগ!",
+        "hook_full": "নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশ!",
+        "poster_main_summary": f"{org_candidate} এ – {vac_str} পদে বিশাল নিয়োগ সার্কুলার প্রকাশ।",
+        "application_fee": fee_str,
+        "poster_qual_rows": qual_rows,
         "poster_headline_1": f"{org_candidate} বিশাল নিয়োগ",
         "poster_headline_2": "সুযোগ!",
-        "poster_p1_lines": [f"প্রয়োজনীয় শিক্ষাগত যোগ্যতায় {org_candidate}রে", f"{vac_str} পদে আবেদনের দুর্দান্ত সুযোগ।"],
-        "poster_fee_line": "আবেদন ফি বিজ্ঞপ্তিমতে।",
+        "poster_p1_lines": [f"প্রয়োজনীয় শিক্ষাগত যোগ্যতায় {org_candidate} এ", f"{vac_str} পদে আবেদনের দুর্দান্ত সুযোগ।"],
+        "poster_fee_line": f"আবেদন ফি {fee_str}।",
         "poster_p3_lines": ["বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে", "আগ্রহী প্রার্থীরা আবেদন করতে পারবেন।"],
         "start_date": st_d,
         "end_date": ed_d,
-        "posts": scraped_posts or [{"post_name": "বিজ্ঞপ্তিতে উল্লেখিত পদ", "vacancy": "০১", "qualification": "বিজ্ঞপ্তি অনুযায়ী"}],
+        "posts": scraped_posts or [p1],
         "voiceover_script": f"নতুন নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে। {clean} এর জন্য আগ্রহী প্রার্থীরা আবেদন করতে পারেন। ঘরে বসে নির্ভুলভাবে আবেদন করতে স্ক্রিনে দেওয়া নাম্বারে হোয়াটসঅ্যাপ করুন।",
         "scripts": [],
         "optimized_title": clean[:90]
     }
 
+def normalize_poster_fields(data):
+    if not isinstance(data, dict):
+        return data
+
+    org = str(data.get("org_name", "সরকারি প্রতিষ্ঠান")).strip()
+    hook_top = str(data.get("hook_top", "")).strip()
+    hook_bottom = str(data.get("hook_bottom", "")).strip()
+    hook_full = str(data.get("hook_full", "")).strip()
+
+    if not hook_top:
+        hook_top = "এসএসসি/এইচএসসি/স্নাতক পাশে"
+    if not hook_bottom:
+        h2 = str(data.get("poster_headline_2", "")).strip()
+        hook_bottom = h2 if h2 and h2 != "সুযোগ!" else "বড় চাকরির সুযোগ!"
+    if not hook_full:
+        hook_full = f"{hook_top} {hook_bottom}".strip()
+
+    data["hook_top"] = hook_top
+    data["hook_bottom"] = hook_bottom
+    data["hook_full"] = hook_full
+
+    if not data.get("poster_main_summary"):
+        h1 = str(data.get("poster_headline_1", "")).strip()
+        p1 = data.get("poster_p1_lines", [])
+        if h1 and p1:
+            data["poster_main_summary"] = f"{h1} – {' '.join(p1[:1])}".strip()
+        else:
+            data["poster_main_summary"] = f"{org} এ বিশাল নিয়োগ সার্কুলার প্রকাশ।"
+
+    fee = str(data.get("application_fee", "")).strip()
+    if not fee:
+        fee_line = str(data.get("poster_fee_line", "")).strip()
+        cleaned_fee = re.sub(r'^আবেদন\s*ফি\s*[:\-]?\s*', '', fee_line).strip(" .।")
+        fee = cleaned_fee if cleaned_fee else "বিজ্ঞপ্তিমতে"
+    data["application_fee"] = fee
+
+    if not data.get("poster_fee_line"):
+        data["poster_fee_line"] = f"আবেদন ফি {fee}।"
+
+    qual_rows = data.get("poster_qual_rows", [])
+    if not isinstance(qual_rows, list) or len(qual_rows) == 0:
+        posts = data.get("posts", [])
+        derived = []
+        for p in posts[:2]:
+            q_label = str(p.get("qualification", "যোগ্যতানুযায়ী")).strip()
+            if len(q_label) > 22:
+                q_label = q_label.split(',')[0].split('/')[0][:22].strip()
+            if "পাশে" not in q_label and any(k in q_label for k in ["এসএসসি", "এইচএসসি", "স্নাতক", "ডিপ্লোমা", "অষ্টম"]):
+                q_label = f"{q_label} পাশে"
+            pname = str(p.get("post_name", "বিভিন্ন পদ")).strip()
+            pvac = str(p.get("vacancy", "০১")).strip()
+            derived.append({
+                "badge": q_label or "যোগ্যতানুযায়ী",
+                "lead": pname[:24],
+                "details": f"{pname} - {pvac}টি পদে আবেদন করতে পারবেন।"
+            })
+        if len(derived) == 0:
+            p3 = data.get("poster_p3_lines", ["বিজ্ঞপ্তিতে উল্লেখিত বিভিন্ন পদে আবেদন করা যাবে।"])
+            derived = [
+                {"badge": "যোগ্যতানুযায়ী", "lead": "বিভিন্ন পদ", "details": " ".join(p3)},
+                {"badge": "আবেদন তথ্য", "lead": "বিস্তারিত", "details": "যোগ্যতা ও অভিজ্ঞতা অনুযায়ী সকল প্রার্থী আবেদন করতে পারবেন।"}
+            ]
+        elif len(derived) == 1:
+            derived.append({
+                "badge": "অন্যান্য তথ্য",
+                "lead": "শর্তাবলি",
+                "details": "বিজ্ঞপ্তির শর্তাবলি অনুযায়ী নির্ধারিত সময়ের মধ্যে আবেদন সম্পন্ন করুন।"
+            })
+        qual_rows = derived
+    elif len(qual_rows) == 1:
+        qual_rows.append({
+            "badge": "অন্যান্য তথ্য",
+            "lead": "আবেদন প্রক্রিয়া",
+            "details": "বিজ্ঞপ্তিতে উল্লেখিত শর্তাবলি অনুযায়ী নির্ধারিত সময়ের মধ্যে আবেদন সম্পন্ন করুন।"
+        })
+
+    normalized_rows = []
+    for r in qual_rows[:2]:
+        if isinstance(r, dict):
+            badge = str(r.get("badge", "যোগ্যতানুযায়ী")).strip()
+            details = str(r.get("details", "")).strip()
+            lead = str(r.get("lead", "")).strip()
+            if not lead and details:
+                lead = re.split(r'[\-\–\—:,]', details)[0].strip()[:24]
+            normalized_rows.append({"badge": badge, "lead": lead, "details": details})
+    data["poster_qual_rows"] = normalized_rows
+
+    if not data.get("poster_headline_1"):
+        data["poster_headline_1"] = f"{org} বিশাল নিয়োগ"
+    if not data.get("poster_headline_2"):
+        data["poster_headline_2"] = hook_bottom
+
+    return data
+
 def normalize_scripts_count(data, target_count):
+    data = normalize_poster_fields(data)
     scripts = data.get("scripts", [])
     single = data.get("voiceover_script", "")
     if single and not scripts:
@@ -237,40 +363,63 @@ def generate_job_data_and_script(title, article_text, raw_html, image_paths, scr
     full_content = f"Title: {clean_title}\n\nWebpage Article Details:\n{article_text[:3000]}"
 
     prompt = f"""You are a professional Bengali Job Circular Visual Poster Designer and Voiceover Writer.
-Analyze this circular details:
+Analyze this circular details carefully:
 
 Content:
 {full_content}
 
 CRITICAL RULES FOR POSTER & SCRIPTS (STRICT NO EMOJIS):
-1. POSTER LAYOUT EXTRACTION:
-   - "poster_headline_1": Short first line in Bengali (e.g. "কুমিল্লা বিশ্ববিদ্যালয়ে বিশাল নিয়োগ")
-   - "poster_headline_2": Short punchy hook (e.g. "বড় সুযোগ!")
-   - "poster_p1_lines": Array of 1-2 short punchy Bengali lines about qualification & vacancies (e.g. ["৩৫টি পদে শিক্ষক ও কর্মকর্তা নিয়োগ", "যোগ্যতা: এসএসসি থেকে স্নাতকোত্তর"])
-   - "poster_fee_line": Short text about application fee/method (e.g. "আবেদন ফি বিজ্ঞপ্তিমতে।")
-   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts & vacancy counts (STRICTLY DO NOT REPEAT DEADLINE DATES HERE).
-   - DO NOT output any emojis (no laptop, no people emoji, clean Bengali text only).
+1. HERO HOOKS & MAIN SUMMARY (Concise, impactful Bengali, zero emojis):
+   - "org_name": Official organization name in Bengali.
+   - "hook_top": Education qualification hook (2-4 words, e.g. "এসএসসি/এইচএসসি পাশে" or "স্নাতক পাশে" or "অষ্টম/এসএসসি পাশে").
+   - "hook_bottom": Short punchy hook (2-3 words, e.g. "সরকারি চাকরি!" or "সুবর্ণ সুযোগ চাকরি!" or "বড় চাকরির সুযোগ!").
+   - "hook_full": Combined 1-line hero title (max 6 words, e.g. "এসএসসি/এইচএসসি পাশে সরকারি চাকরি!").
+   - "poster_main_summary": Single crisp sentence (12-18 words) with organization name, total vacancy count, and announcement (e.g. "বাংলাদেশের মহা-হিসাব নিরীক্ষক ও নিয়ন্ত্রক এর কার্যালয়ে (সিএজি) – ৩৪৭ পদে বিশাল নিয়োগ সার্কুলার প্রকাশ।").
 
-2. SCRIPTS:
+2. EXACT DATES & APPLICATION FEE:
+   - "start_date": Exact opening date (e.g. "৩ নভেম্বর" or "চলমান").
+   - "end_date": Exact deadline date (e.g. "২৫ নভেম্বর").
+   - "application_fee": Exact concise fee only (e.g. "১১২/- ও ৫৬/-" or "২২৩/-" or "বিনামূল্যে" or "বিজ্ঞপ্তিমতে").
+
+3. QUALIFICATION-WISE POSTS ROWS (EXACTLY 2 ROWS):
+   - "poster_qual_rows": Array of exactly 2 objects grouping the key circular posts by education qualification:
+     [
+       {{"badge": "এসএসসি পাশে", "lead": "অফিস সহায়ক", "details": "অফিস সহায়ক - ২০৯টি, (২৩তম গ্রেড)"}},
+       {{"badge": "এইচএসসি পাশে", "lead": "জুনিয়র অডিটর", "details": "জুনিয়র অডিটর - ৭০টি, কম্পিউটার মুদ্রাক্ষরিক - ৬২টি পদে (১৩তম গ্রেড) আবেদন করতে পারবেন।"}}
+     ]
+   - Keep each "badge" very short (2-3 words max), "lead" 1-3 words (main post name), "details" concise (10-18 words max).
+
+4. LEGACY POSTER FIELDS (keep populated too):
+   - "poster_headline_1": Short headline (e.g. "সিএজিতে বিশাল নিয়োগ")
+   - "poster_headline_2": Short hook (e.g. "বড় সুযোগ!")
+   - "poster_p1_lines": Array of 1-2 short punchy lines about qualification & vacancies.
+   - "poster_fee_line": Short fee sentence (e.g. "আবেদন ফি ১১২/- ও ৫৬/-।")
+   - "poster_p3_lines": Array of 1-2 short lines highlighting key posts (DO NOT repeat deadline dates here).
+   - "posts": Array of {{"post_name": "...", "vacancy": "০১", "qualification": "..."}}.
+
+5. SCRIPTS:
    - Provide "scripts": Array of exactly {scripts_count} UNIQUE spoken Bengali voiceover scripts (100-120 words each).
    - Strict Outro CTA: "আবেদনটি নির্ভুলভাবে সম্পন্ন করতে স্ক্রিনে দেওয়া নাম্বারে হোয়াটসঅ্যাপে মেসেজ দিন।"
-
-3. EXACT DATES SEPARATION:
-   - "org_name": Official organization name.
-   - "start_date": Exact opening date (e.g. "০১ অক্টোবর" or "চলমান").
-   - "end_date": Exact deadline date (e.g. "২৬ অক্টোবর").
-   - "posts": Array of {{"post_name": "...", "vacancy": "০১", "qualification": "..."}}.
 
 Return strictly valid JSON:
 {{
   "org_name": "...",
+  "hook_top": "...",
+  "hook_bottom": "...",
+  "hook_full": "...",
+  "poster_main_summary": "...",
+  "start_date": "...",
+  "end_date": "...",
+  "application_fee": "...",
+  "poster_qual_rows": [
+    {{"badge": "...", "lead": "...", "details": "..."}},
+    {{"badge": "...", "lead": "...", "details": "..."}}
+  ],
   "poster_headline_1": "...",
   "poster_headline_2": "বড় সুযোগ!",
   "poster_p1_lines": ["..."],
   "poster_fee_line": "আবেদন ফি বিজ্ঞপ্তিমতে।",
   "poster_p3_lines": ["..."],
-  "start_date": "...",
-  "end_date": "...",
   "posts": [{{"post_name": "...", "vacancy": "০১", "qualification": "..."}}],
   "scripts": ["..."]
 }}"""
