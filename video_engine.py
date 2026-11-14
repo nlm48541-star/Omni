@@ -14,47 +14,41 @@ def get_audio_duration(audio_path):
         return 30.0
 
 def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design_id=None, save_poster_path=None):
-    print(f"  [🎨 Poster Video Engine] Generating Video from Poster Image: '{output_path}'")
-    if not os.path.exists(audio_path): return False
+    print(f"  [🎬 TikTok Motion Video] Generating pure-code 9:16 motion graphics: '{output_path}'")
+    if not os.path.exists(audio_path):
+        return False
 
+    try:
+        from tiktok_motion_engine import render_motion_graphics_video
+        if render_motion_graphics_video(job_data, audio_path, output_path, fps=fps):
+            return True
+    except Exception as e:
+        print(f"  ⚠️ [Motion Engine Fallback Notice] {e}")
+
+    # যদি কোনো কারণে মোশন ইঞ্জিন ব্যর্থ হয়, নিরাপদ পোস্টার ব্যাকআপ
     from tiktok_designer import render_poster_image
-
     audio_duration = get_audio_duration(audio_path)
     temp_poster_img = save_poster_path or f"_tmp_poster_{random.randint(100000, 999999)}.png"
-
     render_poster_image(job_data, temp_poster_img, design_id=design_id)
 
     if os.path.exists(output_path): os.remove(output_path)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     cmd = [
-        "ffmpeg", "-y",
-        "-loop", "1",
-        "-t", str(audio_duration),
-        "-i", temp_poster_img,
-        "-i", audio_path,
-        "-c:v", "libx264",
-        "-tune", "stillimage",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-shortest",
-        output_path
+        "ffmpeg", "-y", "-loop", "1", "-t", str(audio_duration),
+        "-i", temp_poster_img, "-i", audio_path,
+        "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k", "-shortest", output_path
     ]
-
     try:
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         success = os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-        if success:
-            print(f"  ✅ [SUCCESS] Poster Video Rendered ({round(os.path.getsize(output_path)/(1024*1024), 2)} MB, {round(audio_duration, 1)}s)")
-    except Exception as e:
-        print(f"  ❌ [FFmpeg Error]: {e}")
+    except Exception:
         success = False
 
     if not save_poster_path and os.path.exists(temp_poster_img):
         try: os.remove(temp_poster_img)
         except Exception: pass
-
     return success
 
 def render_vertical_video(image_paths, audio_path, output_path, fps=24):
