@@ -10,17 +10,27 @@ from PIL import Image
 TRACKER_FILE = "key_tracker.json"
 _LIVE_MODEL_CACHE = {}
 
+# ওপেন রাউটারের শীর্ষস্থানীয় সক্রিয় ফ্রি মডেল (বড় ও সেরা মডেলগুলো প্রথমে সাজানো)
 OPENROUTER_MODELS = [
-    "openrouter/free",
-    "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free"
+    "nvidia/nemotron-3-ultra:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "meta-llama/llama-4-scout:free",
+    "meta-llama/llama-4-maverick:free",
+    "qwen/qwen-3.8-27b:free",
+    "google/gemma-4-31b-it:free",
+    "deepseek/deepseek-r1:free",
+    "baidu/ernie-5.5-flash-preview:free",
+    "openrouter/free"
+]
+
+OLLAMA_MODELS = [
+    "gemma4:31b", "gemma4", "deepseek-v4.1-flash", "glm-5.3-flash",
+    "minimax-m3.1-flash", "kimi-k3.1-pro", "gpt-oss:120b", "gpt-oss:20b"
 ]
 
 GROQ_MODELS = [
-    "openai/gpt-oss-120b",
     "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
     "qwen/qwen3.6-27b",
     "openai/gpt-oss-20b",
     "llama-3.3-70b-versatile",
@@ -28,11 +38,6 @@ GROQ_MODELS = [
 ]
 
 CEREBRAS_MODELS = ["gpt-oss-120b", "qwen-3.8-27b", "qwen3-32b", "llama3.3-70b", "llama3.1-8b"]
-
-OLLAMA_MODELS = [
-    "gemma4:31b", "gemma4", "deepseek-v4.1-flash", "glm-5.3-flash",
-    "minimax-m3.1-flash", "kimi-k3.1-pro", "gpt-oss:120b", "gpt-oss:20b"
-]
 
 def parse_multi_keys(env_var_names):
     if isinstance(env_var_names, str):
@@ -136,19 +141,38 @@ def sanitize_voiceover_script(script):
     return f"{text} {cta_sentence}".strip()
 
 def _get_live_openrouter_models():
-    if "openrouter" in _LIVE_MODEL_CACHE: return _LIVE_MODEL_CACHE["openrouter"]
+    """বড় ও শক্তিশালী ফ্রি মডেলগুলোকে প্রাধান্য দেয় এবং ক্ষুদ্র বা ব্রোকেন মডেল বাদ দেয়"""
+    if "openrouter" in _LIVE_MODEL_CACHE:
+        return _LIVE_MODEL_CACHE["openrouter"]
     models = list(OPENROUTER_MODELS)
+    bad_hints = ["coder", "small", "1.7b", "1b", "2b", "3b", "nano", "inkling", "particle", "liquid"]
     try:
         r = requests.get("https://openrouter.ai/api/v1/models", timeout=12)
         if r.status_code == 200:
             for m in r.json().get("data", []):
-                mid, pr = m.get("id", ""), m.get("pricing", {}) or {}
-                if mid.endswith(":free") or (str(pr.get("prompt")) == "0" and str(pr.get("completion")) == "0"):
-                    if mid and mid not in models and "coder" not in mid.lower():
-                        models.append(mid)
+                mid = m.get("id", "")
+                pr = m.get("pricing", {}) or {}
+                is_free = mid.endswith(":free") or (str(pr.get("prompt")) == "0" and str(pr.get("completion")) == "0")
+                if is_free and mid not in models and not any(b in mid.lower() for b in bad_hints):
+                    models.append(mid)
     except Exception: pass
     _LIVE_MODEL_CACHE["openrouter"] = models[:10]
     return _LIVE_MODEL_CACHE["openrouter"]
+
+def _get_live_ollama_models(api_key):
+    if "ollama" in _LIVE_MODEL_CACHE: return _LIVE_MODEL_CACHE["ollama"]
+    models = list(OLLAMA_MODELS)
+    try:
+        r = requests.get(get_ollama_base_url() + "/api/tags", headers={"Authorization": "Bearer " + api_key}, timeout=12)
+        if r.status_code == 200:
+            live = [m.get("name") or m.get("model", "") for m in r.json().get("models", []) if (m.get("name") or m.get("model"))]
+            if live:
+                pri = [m for m in OLLAMA_MODELS if m in live]
+                oth = [m for m in live if m not in pri and "embed" not in m.lower()]
+                models = pri + oth
+    except Exception: pass
+    _LIVE_MODEL_CACHE["ollama"] = models[:10]
+    return _LIVE_MODEL_CACHE["ollama"]
 
 def _get_live_groq_models(api_key):
     ck = "groq_" + api_key[:8]
@@ -165,21 +189,6 @@ def _get_live_groq_models(api_key):
     except Exception: pass
     _LIVE_MODEL_CACHE[ck] = models[:8]
     return _LIVE_MODEL_CACHE[ck]
-
-def _get_live_ollama_models(api_key):
-    if "ollama" in _LIVE_MODEL_CACHE: return _LIVE_MODEL_CACHE["ollama"]
-    models = list(OLLAMA_MODELS)
-    try:
-        r = requests.get(get_ollama_base_url() + "/api/tags", headers={"Authorization": "Bearer " + api_key}, timeout=12)
-        if r.status_code == 200:
-            live = [m.get("name") or m.get("model", "") for m in r.json().get("models", []) if (m.get("name") or m.get("model"))]
-            if live:
-                pri = [m for m in OLLAMA_MODELS if m in live]
-                oth = [m for m in live if m not in pri and "embed" not in m.lower()]
-                models = pri + oth
-    except Exception: pass
-    _LIVE_MODEL_CACHE["ollama"] = models[:10]
-    return _LIVE_MODEL_CACHE["ollama"]
 
 def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
     months = r'(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগষ্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)'
@@ -401,15 +410,17 @@ Return strictly valid JSON only:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:2] if encode_image_base64(p)]
 
+    # 🌟 ১. ১ম অগ্রাধিকার: OpenRouter Cloud API (সক্রিয় ও সেরা ফ্রি মডেলগুলো)
     openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
     if openrouter_keys:
         total_k, start_idx = len(openrouter_keys), get_saved_key_index("openrouter", len(openrouter_keys))
+        print(f"\n--- [Priority 1: OpenRouter Cloud API] ({total_k} keys, {len(_get_live_openrouter_models())} verified free models) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = openrouter_keys[k_idx]
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://github.com/omnisync", "X-Title": "OmniSync"}
             for model in _get_live_openrouter_models():
-                vis = any(v in model.lower() for v in ["openrouter/free", "vision", "vl", "gemma-3", "gemini"])
+                vis = any(v in model.lower() for v in ["openrouter/free", "super-vl", "vision", "vl", "gemma-4"])
                 for use_imgs, use_jf in [(vis and bool(base64_imgs), True), (False, False)]:
                     mc = [{"type": "text", "text": prompt}] if use_imgs else prompt
                     if use_imgs:
@@ -430,9 +441,40 @@ Return strictly valid JSON only:
                                 save_key_index("openrouter", (k_idx + 1) % total_k, total_k); break
                     except Exception as e: print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
 
+    # 🌟 ২. ২য় অগ্রাধিকার: Ollama Cloud API (আপনার পছন্দ অনুযায়ী ২ নম্বরে আনা হয়েছে)
+    ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
+    if ollama_keys:
+        total_k, start_idx = len(ollama_keys), get_saved_key_index("ollama", len(ollama_keys))
+        ep = get_ollama_base_url() + "/api/chat"
+        print(f"\n--- [Priority 2: Ollama Cloud API] ({total_k} keys detected) ---")
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = ollama_keys[k_idx]
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+            for model in _get_live_ollama_models(api_key):
+                vis = any(v in model.lower() for v in ["gemma4", "vl", "vision"])
+                for use_imgs in ([True, False] if (vis and base64_imgs) else [False]):
+                    mo = {"role": "user", "content": prompt}
+                    if use_imgs: mo["images"] = base64_imgs[:2]
+                    try:
+                        resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.35}}, timeout=120)
+                        if resp.status_code == 200:
+                            data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
+                            if data and (data.get("org_name") or data.get("poster") or data.get("motion")):
+                                save_key_index("ollama", k_idx, total_k)
+                                print(f"  ✅ [Ollama SUCCESS] Model: '{model}' (Key #{k_idx+1})")
+                                return normalize_scripts_count(data, scripts_count)
+                        else:
+                            print(f"  ⚠️ [Ollama] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
+                            if resp.status_code in [401, 402, 429]:
+                                save_key_index("ollama", (k_idx + 1) % total_k, total_k); break
+                    except Exception as e: print(f"  ⚠️ [Ollama] '{model}' error: {e}")
+
+    # 🌟 ৩. ৩য় অগ্রাধিকার: Groq Cloud API
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k, start_idx = len(groq_keys), get_saved_key_index("groq", len(groq_keys))
+        print(f"\n--- [Priority 3: Groq Cloud API] ({total_k} keys detected) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = groq_keys[k_idx]
@@ -458,9 +500,11 @@ Return strictly valid JSON only:
                     except Exception as e:
                         print(f"  ⚠️ [Groq] '{g_model}' error: {e}"); break
 
+    # 🌟 ৪. ৪র্থ অগ্রাধিকার: Cerebras Cloud API
     cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
     if cerebras_keys:
         total_k, start_idx = len(cerebras_keys), get_saved_key_index("cerebras", len(cerebras_keys))
+        print(f"\n--- [Priority 4: Cerebras Cloud API] ({total_k} keys detected) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = cerebras_keys[k_idx]
@@ -483,33 +527,6 @@ Return strictly valid JSON only:
                                 save_key_index("cerebras", (k_idx + 1) % total_k, total_k); break
                             if resp.status_code != 400: break
                     except Exception: break
-
-    ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
-    if ollama_keys:
-        total_k, start_idx = len(ollama_keys), get_saved_key_index("ollama", len(ollama_keys))
-        ep = get_ollama_base_url() + "/api/chat"
-        for offset in range(total_k):
-            k_idx = (start_idx + offset) % total_k
-            api_key = ollama_keys[k_idx]
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-            for model in _get_live_ollama_models(api_key):
-                vis = any(v in model.lower() for v in ["gemma4", "vl", "vision"])
-                for use_imgs in ([True, False] if (vis and base64_imgs) else [False]):
-                    mo = {"role": "user", "content": prompt}
-                    if use_imgs: mo["images"] = base64_imgs[:2]
-                    try:
-                        resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.35}}, timeout=120)
-                        if resp.status_code == 200:
-                            data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
-                            if data and (data.get("org_name") or data.get("poster") or data.get("motion")):
-                                save_key_index("ollama", k_idx, total_k)
-                                print(f"  ✅ [Ollama SUCCESS] Model: '{model}' (Key #{k_idx+1})")
-                                return normalize_scripts_count(data, scripts_count)
-                        else:
-                            print(f"  ⚠️ [Ollama] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                            if resp.status_code in [401, 402, 429]:
-                                save_key_index("ollama", (k_idx + 1) % total_k, total_k); break
-                    except Exception as e: print(f"  ⚠️ [Ollama] '{model}' error: {e}")
 
     print("  ⚠️ [Notice] All AI providers unavailable. Utilizing Local Fallback...")
     return normalize_scripts_count(smart_fallback_data(title, article_text, raw_html), scripts_count)
