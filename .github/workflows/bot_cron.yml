@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [run-sync]
+  # আপনি চাইলে প্রতি ১ ঘণ্টা পর পর অটোমেটিক চলার জন্য নিচের ২ লাইন আনকমেন্ট করতে পারেন:
+  # schedule:
+  #   - cron: '0 * * * *'
 
 permissions:
   contents: write
@@ -44,11 +47,17 @@ jobs:
           # ফেসবুক ও হোয়াটসঅ্যাপ সেটিংস
           FB_TOKEN: ${{ secrets.FB_TOKEN }}
           RENDER_WA_URL: ${{ secrets.RENDER_WA_URL }}
+          WHATSAPP_NUMBER: ${{ secrets.WHATSAPP_NUMBER }}
+
+          # 🌟 মোশন গ্রাফিক্স ম্যাপিং সেটিংস (৩টি TikTok, নির্দিষ্ট ৩টি FB ও ৩টি YT)
+          MOTION_FB_PAGES: ${{ secrets.MOTION_FB_PAGES }}
+          MOTION_YT_CHANNELS: ${{ secrets.MOTION_YT_CHANNELS }}
+          TIKTOK_STYLE_MAP: ${{ secrets.TIKTOK_STYLE_MAP }}
 
           # 🌟 YouTube অপশন ১: ১টি সিক্রেটে সব চ্যানেল (সবচেয়ে সহজ)
           YT_CHANNELS_JSON: ${{ secrets.YT_CHANNELS_JSON }}
 
-          # 🌟 YouTube অপশন ২: ২৪টি আলাদা সিক্রেট (Client ID, Secret, Refresh Token)
+          # 🌟 YouTube অপশন ২: আলাদা সিক্রেট (Client ID, Secret, Refresh Token)
           YT_CLIENT_ID_1: ${{ secrets.YT_CLIENT_ID_1 }}
           YT_CLIENT_SECRET_1: ${{ secrets.YT_CLIENT_SECRET_1 }}
           YT_REFRESH_TOKEN_1: ${{ secrets.YT_REFRESH_TOKEN_1 }}
@@ -86,13 +95,9 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET || secrets.CLIENT_SECRET }}
           YT_REFRESH_TOKENS: ${{ secrets.YT_REFRESH_TOKENS }}
 
-          # TikTok / Buffer ৩টি অ্যাকাউন্ট ও মাল্টি-প্রোফাইল সেটিংস
+          # TikTok / Buffer সেটিংস (১টি Buffer অ্যাকাউন্ট দিয়ে ৩টি TikTok)
           BUFFER_TOKEN_1: ${{ secrets.BUFFER_TOKEN_1 }}
           BUFFER_PROFILES_1: ${{ secrets.BUFFER_PROFILES_1 }}
-          BUFFER_TOKEN_2: ${{ secrets.BUFFER_TOKEN_2 }}
-          BUFFER_PROFILES_2: ${{ secrets.BUFFER_PROFILES_2 }}
-          BUFFER_TOKEN_3: ${{ secrets.BUFFER_TOKEN_3 }}
-          BUFFER_PROFILES_3: ${{ secrets.BUFFER_PROFILES_3 }}
           BUFFER_PROFILE_ID: ${{ secrets.BUFFER_PROFILE_ID }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
 
