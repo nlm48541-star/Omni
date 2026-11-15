@@ -13,19 +13,27 @@ def get_audio_duration(audio_path):
     except Exception:
         return 30.0
 
-def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design_id=None, save_poster_path=None):
-    print(f"  [🎬 TikTok Motion Video] Generating pure-code 9:16 motion graphics: '{output_path}'")
+def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design_id=None, save_poster_path=None, style_id=1):
+    print(f"  [🎬 Motion Video Dispatcher] Rendering Style #{style_id}: '{output_path}'")
     if not os.path.exists(audio_path):
         return False
 
     try:
-        from tiktok_motion_engine import render_motion_graphics_video
-        if render_motion_graphics_video(job_data, audio_path, output_path, fps=fps):
-            return True
+        if style_id == 2:
+            from tiktok_motion_style2 import render_motion_style_2
+            if render_motion_style_2(job_data, audio_path, output_path, fps=fps):
+                return True
+        elif style_id == 3:
+            from tiktok_motion_style3 import render_motion_style_3
+            if render_motion_style_3(job_data, audio_path, output_path, fps=fps):
+                return True
+        else:
+            from tiktok_motion_engine import render_motion_graphics_video
+            if render_motion_graphics_video(job_data, audio_path, output_path, fps=fps):
+                return True
     except Exception as e:
-        print(f"  ⚠️ [Motion Engine Fallback Notice] {e}")
+        print(f"  ⚠️ [Motion Engine Style #{style_id} Fallback Notice] {e}")
 
-    # যদি কোনো কারণে মোশন ইঞ্জিন ব্যর্থ হয়, নিরাপদ পোস্টার ব্যাকআপ
     from tiktok_designer import render_poster_image
     audio_duration = get_audio_duration(audio_path)
     temp_poster_img = save_poster_path or f"_tmp_poster_{random.randint(100000, 999999)}.png"
@@ -37,8 +45,9 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design
     cmd = [
         "ffmpeg", "-y", "-loop", "1", "-t", str(audio_duration),
         "-i", temp_poster_img, "-i", audio_path,
+        "-map", "0:v:0", "-map", "1:a:0",
         "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k", "-shortest", output_path
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2", "-shortest", output_path
     ]
     try:
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -96,6 +105,7 @@ def render_vertical_video(image_paths, audio_path, output_path, fps=24):
         "ffmpeg", "-y", "-framerate", str(fps),
         "-i", os.path.join(temp_dir, "frame_%05d.jpg"),
         "-i", audio_path,
+        "-map", "0:v:0", "-map", "1:a:0",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-ar", "44100", "-ac", "2",
         "-shortest", output_path
