@@ -10,34 +10,67 @@ from PIL import Image
 TRACKER_FILE = "key_tracker.json"
 _LIVE_MODEL_CACHE = {}
 
-# ওপেন রাউটারের শীর্ষস্থানীয় সক্রিয় ফ্রি মডেল (বড় ও সেরা মডেলগুলো প্রথমে সাজানো)
+# =========================================================================
+# 🌟 ১. ১ম প্রায়োরিটি — OpenRouter (বড় থেকে ছোট ক্রমে সক্রিয় ফ্রি মডেলসমূহ)
+# =========================================================================
 OPENROUTER_MODELS = [
-    "nvidia/nemotron-3-ultra:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "qwen/qwen3-coder:free",
+    "nvidia/nemotron-3.5-super-vl:free",           # 120B Vision
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-120b:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-4-31b-it:free",                 # 31B Vision
+    "google/gemma-4-26b-a4b-it:free",             # 26B Vision
+    "openrouter/free"                             # অটো-রাউটার ব্যাকআপ
+]
+
+OPENROUTER_VISION_MODELS = {
     "nvidia/nemotron-3.5-super-vl:free",
-    "meta-llama/llama-4-scout:free",
-    "meta-llama/llama-4-maverick:free",
-    "qwen/qwen-3.8-27b:free",
     "google/gemma-4-31b-it:free",
-    "deepseek/deepseek-r1:free",
-    "baidu/ernie-5.5-flash-preview:free",
+    "google/gemma-4-26b-a4b-it:free",
     "openrouter/free"
-]
+}
 
+# =========================================================================
+# 🌟 ২. ২য় প্রায়োরিটি — Ollama Cloud API (স্ট্যান্ডার্ড ট্যাগ, বড় থেকে ছোট)
+# =========================================================================
 OLLAMA_MODELS = [
-    "gemma4:31b", "gemma4", "deepseek-v4.1-flash", "glm-5.3-flash",
-    "minimax-m3.1-flash", "kimi-k3.1-pro", "gpt-oss:120b", "gpt-oss:20b"
+    "kimi-k2.6",               # 1.04T (Vision)
+    "glm-5.2",                 # 753B
+    "mistral-large-3:675b",    # 675B (Vision)
+    "deepseek-v4.1-flash",     # 552B (Vision)
+    "deepseek-v4-pro",
+    "qwen3.5:397b",            # 397B
+    "minimax-m3",
+    "glm-5.3-flash",           # Vision
+    "gpt-oss:120b",            # 120B
+    "nemotron-3-super",        # 120B
+    "gemma4:31b"               # 31B (Vision)
 ]
 
+OLLAMA_VISION_MODELS = {
+    "kimi-k2.6", "mistral-large-3:675b", "deepseek-v4.1-flash",
+    "glm-5.3-flash", "gemma4:31b"
+}
+
+# =========================================================================
+# 🌟 ৩. ৩য় প্রায়োরিটি — Groq Cloud (শুধু বড় মডেল)
+# =========================================================================
 GROQ_MODELS = [
-    "qwen/qwen3.8-27b",
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.6-27b",
-    "openai/gpt-oss-20b",
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant"
+    "openai/gpt-oss-120b",       # 120B
+    "llama-3.3-70b-versatile"    # 70B
 ]
 
-CEREBRAS_MODELS = ["gpt-oss-120b", "qwen-3.8-27b", "qwen3-32b", "llama3.3-70b", "llama3.1-8b"]
+# =========================================================================
+# 🌟 ৪. সবার শেষে — Google Gemini (আল্টিমেট ক্লাউড ফলব্যাক)
+# =========================================================================
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite"
+]
 
 def parse_multi_keys(env_var_names):
     if isinstance(env_var_names, str):
@@ -73,15 +106,13 @@ def save_key_index(platform, index, total_keys):
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception: pass
 
-def get_ollama_base_url():
-    raw = os.environ.get("OLLAMA_API_URL", "").strip()
-    if not raw or not raw.startswith("http"):
-        return "https://ollama.com"
+def get_ollama_chat_endpoint():
+    raw = os.environ.get("OLLAMA_API_URL", "https://ollama.com").strip()
     base = raw.rstrip("/")
-    for suffix in ["/api/chat", "/api", "/v1"]:
-        if base.endswith(suffix):
-            base = base[:-len(suffix)]
-    return base.rstrip("/")
+    for sfx in ["/api/chat", "/api", "/v1"]:
+        if base.endswith(sfx):
+            base = base[:-len(sfx)]
+    return f"{base.rstrip('/')}/api/chat"
 
 def encode_image_base64(image_path, max_dim=1024):
     try:
@@ -135,60 +166,11 @@ def sanitize_voiceover_script(script):
     ]
     for pat in bad_patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
+    # স্ক্রিপ্টে ফোন নাম্বার মুখে উচ্চারণ করা পুরোপুরি বন্ধ
     text = re.sub(r'(?:\+?88)?(?:01|০১)[-\s]?[\d০-৯]{3,4}[-\s]?[\d০-৯]{5,6}', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     cta_sentence = "আমাদের মাধ্যমে নির্ভুলভাবে আবেদন সম্পন্ন করতে স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে যোগাযোগ করুন।"
     return f"{text} {cta_sentence}".strip()
-
-def _get_live_openrouter_models():
-    """বড় ও শক্তিশালী ফ্রি মডেলগুলোকে প্রাধান্য দেয় এবং ক্ষুদ্র বা ব্রোকেন মডেল বাদ দেয়"""
-    if "openrouter" in _LIVE_MODEL_CACHE:
-        return _LIVE_MODEL_CACHE["openrouter"]
-    models = list(OPENROUTER_MODELS)
-    bad_hints = ["coder", "small", "1.7b", "1b", "2b", "3b", "nano", "inkling", "particle", "liquid"]
-    try:
-        r = requests.get("https://openrouter.ai/api/v1/models", timeout=12)
-        if r.status_code == 200:
-            for m in r.json().get("data", []):
-                mid = m.get("id", "")
-                pr = m.get("pricing", {}) or {}
-                is_free = mid.endswith(":free") or (str(pr.get("prompt")) == "0" and str(pr.get("completion")) == "0")
-                if is_free and mid not in models and not any(b in mid.lower() for b in bad_hints):
-                    models.append(mid)
-    except Exception: pass
-    _LIVE_MODEL_CACHE["openrouter"] = models[:10]
-    return _LIVE_MODEL_CACHE["openrouter"]
-
-def _get_live_ollama_models(api_key):
-    if "ollama" in _LIVE_MODEL_CACHE: return _LIVE_MODEL_CACHE["ollama"]
-    models = list(OLLAMA_MODELS)
-    try:
-        r = requests.get(get_ollama_base_url() + "/api/tags", headers={"Authorization": "Bearer " + api_key}, timeout=12)
-        if r.status_code == 200:
-            live = [m.get("name") or m.get("model", "") for m in r.json().get("models", []) if (m.get("name") or m.get("model"))]
-            if live:
-                pri = [m for m in OLLAMA_MODELS if m in live]
-                oth = [m for m in live if m not in pri and "embed" not in m.lower()]
-                models = pri + oth
-    except Exception: pass
-    _LIVE_MODEL_CACHE["ollama"] = models[:10]
-    return _LIVE_MODEL_CACHE["ollama"]
-
-def _get_live_groq_models(api_key):
-    ck = "groq_" + api_key[:8]
-    if ck in _LIVE_MODEL_CACHE: return _LIVE_MODEL_CACHE[ck]
-    models = list(GROQ_MODELS)
-    try:
-        r = requests.get("https://api.groq.com/openai/v1/models", headers={"Authorization": "Bearer " + api_key}, timeout=12)
-        if r.status_code == 200:
-            live_ids = [m.get("id", "") for m in r.json().get("data", []) if m.get("id")]
-            chat_ids = [m for m in live_ids if not any(b in m.lower() for b in ["whisper", "guard", "orpheus", "tts", "playai", "safeguard"])]
-            pri = [m for m in GROQ_MODELS if m in chat_ids]
-            oth = [m for m in chat_ids if m not in pri]
-            if pri or oth: models = pri + oth
-    except Exception: pass
-    _LIVE_MODEL_CACHE[ck] = models[:8]
-    return _LIVE_MODEL_CACHE[ck]
 
 def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
     months = r'(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগষ্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)'
@@ -410,23 +392,36 @@ Return strictly valid JSON only:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:2] if encode_image_base64(p)]
 
-    # 🌟 ১. ১ম অগ্রাধিকার: OpenRouter Cloud API (সক্রিয় ও সেরা ফ্রি মডেলগুলো)
+    # =========================================================================
+    # 🌟 ১. ১ম প্রায়োরিটি — OpenRouter (বড় থেকে ছোট ক্রমে সক্রিয় ফ্রি মডেল)
+    # =========================================================================
     openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
     if openrouter_keys:
         total_k, start_idx = len(openrouter_keys), get_saved_key_index("openrouter", len(openrouter_keys))
-        print(f"\n--- [Priority 1: OpenRouter Cloud API] ({total_k} keys, {len(_get_live_openrouter_models())} verified free models) ---")
+        print(f"\n--- [Priority 1: OpenRouter Cloud API] ({total_k} keys, {len(OPENROUTER_MODELS)} curated models) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = openrouter_keys[k_idx]
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://github.com/omnisync", "X-Title": "OmniSync"}
-            for model in _get_live_openrouter_models():
-                vis = any(v in model.lower() for v in ["openrouter/free", "super-vl", "vision", "vl", "gemma-4"])
-                for use_imgs, use_jf in [(vis and bool(base64_imgs), True), (False, False)]:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/omnisync",
+                "X-Title": "OmniSync"
+            }
+            for model in OPENROUTER_MODELS:
+                is_vis = model in OPENROUTER_VISION_MODELS and bool(base64_imgs)
+                for use_imgs in ([True, False] if is_vis else [False]):
                     mc = [{"type": "text", "text": prompt}] if use_imgs else prompt
                     if use_imgs:
-                        for b64 in base64_imgs[:2]: mc.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-                    pl = {"model": model, "messages": [{"role": "user", "content": mc}], "temperature": 0.35, "max_tokens": 5500}
-                    if use_jf: pl["response_format"] = {"type": "json_object"}
+                        for b64 in base64_imgs[:2]:
+                            mc.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+                    
+                    pl = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": mc}],
+                        "temperature": 0.35,
+                        "max_tokens": 5500
+                    }
                     try:
                         resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=pl, timeout=90)
                         if resp.status_code == 200:
@@ -438,26 +433,37 @@ Return strictly valid JSON only:
                         else:
                             print(f"  ⚠️ [OpenRouter] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
                             if resp.status_code in [401, 402, 429]:
-                                save_key_index("openrouter", (k_idx + 1) % total_k, total_k); break
-                    except Exception as e: print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
+                                save_key_index("openrouter", (k_idx + 1) % total_k, total_k)
+                                break
+                    except Exception as e:
+                        print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
 
-    # 🌟 ২. ২য় অগ্রাধিকার: Ollama Cloud API (আপনার পছন্দ অনুযায়ী ২ নম্বরে আনা হয়েছে)
+    # =========================================================================
+    # 🌟 ২. ২য় প্রায়োরিটি — Ollama Cloud API (স্ট্যান্ডার্ড ট্যাগ, বড় থেকে ছোট)
+    # =========================================================================
     ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
     if ollama_keys:
         total_k, start_idx = len(ollama_keys), get_saved_key_index("ollama", len(ollama_keys))
-        ep = get_ollama_base_url() + "/api/chat"
-        print(f"\n--- [Priority 2: Ollama Cloud API] ({total_k} keys detected) ---")
+        ep = get_ollama_chat_endpoint()
+        print(f"\n--- [Priority 2: Ollama Cloud API] ({total_k} keys, {len(OLLAMA_MODELS)} models) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = ollama_keys[k_idx]
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-            for model in _get_live_ollama_models(api_key):
-                vis = any(v in model.lower() for v in ["gemma4", "vl", "vision"])
-                for use_imgs in ([True, False] if (vis and base64_imgs) else [False]):
+            for model in OLLAMA_MODELS:
+                is_vis = model in OLLAMA_VISION_MODELS and bool(base64_imgs)
+                for use_imgs in ([True, False] if is_vis else [False]):
                     mo = {"role": "user", "content": prompt}
-                    if use_imgs: mo["images"] = base64_imgs[:2]
+                    if use_imgs:
+                        mo["images"] = base64_imgs[:2]
+                    pl = {
+                        "model": model,
+                        "messages": [mo],
+                        "stream": False,
+                        "options": {"temperature": 0.35}
+                    }
                     try:
-                        resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.35}}, timeout=120)
+                        resp = requests.post(ep, headers=headers, json=pl, timeout=120)
                         if resp.status_code == 200:
                             data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                             if data and (data.get("org_name") or data.get("poster") or data.get("motion")):
@@ -467,10 +473,14 @@ Return strictly valid JSON only:
                         else:
                             print(f"  ⚠️ [Ollama] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
                             if resp.status_code in [401, 402, 429]:
-                                save_key_index("ollama", (k_idx + 1) % total_k, total_k); break
-                    except Exception as e: print(f"  ⚠️ [Ollama] '{model}' error: {e}")
+                                save_key_index("ollama", (k_idx + 1) % total_k, total_k)
+                                break
+                    except Exception as e:
+                        print(f"  ⚠️ [Ollama] '{model}' error: {e}")
 
-    # 🌟 ৩. ৩য় অগ্রাধিকার: Groq Cloud API
+    # =========================================================================
+    # 🌟 ৩. ৩য় প্রায়োরিটি — Groq Cloud (শুধু বড় মডেল: gpt-oss-120b, llama-3.3-70b)
+    # =========================================================================
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k, start_idx = len(groq_keys), get_saved_key_index("groq", len(groq_keys))
@@ -479,10 +489,19 @@ Return strictly valid JSON only:
             k_idx = (start_idx + offset) % total_k
             api_key = groq_keys[k_idx]
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-            for g_model in _get_live_groq_models(api_key):
+            for g_model in GROQ_MODELS:
                 for use_jf in [True, False]:
-                    pl = {"model": g_model, "messages": [{"role": "system", "content": "Output strictly valid JSON."}, {"role": "user", "content": prompt}], "temperature": 0.35, "max_tokens": 5500}
-                    if use_jf: pl["response_format"] = {"type": "json_object"}
+                    pl = {
+                        "model": g_model,
+                        "messages": [
+                            {"role": "system", "content": "You are a professional Bengali job circular copywriter. Output strictly valid JSON only."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.35,
+                        "max_tokens": 5500
+                    }
+                    if use_jf:
+                        pl["response_format"] = {"type": "json_object"}
                     try:
                         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=pl, timeout=90)
                         if resp.status_code == 200:
@@ -495,38 +514,57 @@ Return strictly valid JSON only:
                         else:
                             print(f"  ⚠️ [Groq] '{g_model}' HTTP {resp.status_code}: {resp.text[:120]}")
                             if resp.status_code in [401, 402, 429]:
-                                save_key_index("groq", (k_idx + 1) % total_k, total_k); break
+                                save_key_index("groq", (k_idx + 1) % total_k, total_k)
+                                break
                             if resp.status_code != 400: break
                     except Exception as e:
-                        print(f"  ⚠️ [Groq] '{g_model}' error: {e}"); break
+                        print(f"  ⚠️ [Groq] '{g_model}' error: {e}")
+                        break
 
-    # 🌟 ৪. ৪র্থ অগ্রাধিকার: Cerebras Cloud API
-    cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
-    if cerebras_keys:
-        total_k, start_idx = len(cerebras_keys), get_saved_key_index("cerebras", len(cerebras_keys))
-        print(f"\n--- [Priority 4: Cerebras Cloud API] ({total_k} keys detected) ---")
+    # =========================================================================
+    # 🌟 ৪. সবার শেষে — Google Gemini (আল্টিমেট ক্লাউড ফলব্যাক)
+    # =========================================================================
+    gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
+    if gemini_keys:
+        total_k, start_idx = len(gemini_keys), get_saved_key_index("gemini", len(gemini_keys))
+        print(f"\n--- [Priority 4 (Final Cloud): Google Gemini] ({total_k} keys detected) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
-            api_key = cerebras_keys[k_idx]
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-            for c_model in CEREBRAS_MODELS:
-                for use_jf in [True, False]:
-                    pl = {"model": c_model, "messages": [{"role": "system", "content": "Output strictly valid JSON."}, {"role": "user", "content": prompt}], "temperature": 0.35, "max_tokens": 5500}
-                    if use_jf: pl["response_format"] = {"type": "json_object"}
-                    try:
-                        resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=pl, timeout=90)
-                        if resp.status_code == 200:
-                            data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
+            api_key = gemini_keys[k_idx]
+            for g_model in GEMINI_MODELS:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={api_key}"
+                parts = [{"text": prompt}]
+                if base64_imgs:
+                    for b64 in base64_imgs[:2]:
+                        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": b64}})
+                pl = {
+                    "contents": [{"parts": parts}],
+                    "generationConfig": {
+                        "temperature": 0.35,
+                        "responseMimeType": "application/json"
+                    }
+                }
+                try:
+                    resp = requests.post(url, json=pl, timeout=60)
+                    if resp.status_code == 200:
+                        candidates = resp.json().get("candidates", [])
+                        if candidates:
+                            raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            data = parse_json_safely(raw_text)
                             if data and (data.get("org_name") or data.get("poster") or data.get("motion")):
-                                save_key_index("cerebras", k_idx, total_k)
-                                print(f"  ✅ [Cerebras SUCCESS] Model: '{c_model}' (Key #{k_idx+1})")
+                                save_key_index("gemini", k_idx, total_k)
+                                print(f"  ✅ [Gemini SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
                                 return normalize_scripts_count(data, scripts_count)
+                    else:
+                        print(f"  ⚠️ [Gemini] '{g_model}' HTTP {resp.status_code}: {resp.text[:120]}")
+                        if resp.status_code in [400, 401, 403, 429]:
+                            save_key_index("gemini", (k_idx + 1) % total_k, total_k)
                             break
-                        else:
-                            if resp.status_code in [401, 402, 429]:
-                                save_key_index("cerebras", (k_idx + 1) % total_k, total_k); break
-                            if resp.status_code != 400: break
-                    except Exception: break
+                except Exception as e:
+                    print(f"  ⚠️ [Gemini] '{g_model}' error: {e}")
 
-    print("  ⚠️ [Notice] All AI providers unavailable. Utilizing Local Fallback...")
+    # =========================================================================
+    # 🌟 ৫. স্মার্ট লোকাল ফলব্যাক
+    # =========================================================================
+    print("  ⚠️ [Notice] All Cloud AI providers unavailable. Utilizing Local Fallback...")
     return normalize_scripts_count(smart_fallback_data(title, article_text, raw_html), scripts_count)
