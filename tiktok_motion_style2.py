@@ -9,7 +9,7 @@ from tiktok_designer import (
 )
 from tiktok_motion_engine import (
     ease_out_cubic, ease_in_out_cubic, ease_out_back, to_bn_num,
-    split_posts_uniformly, uniform_batch_y_positions,
+    compute_motion_scene_bounds, split_posts_uniformly, uniform_batch_y_positions,
     _paste_sprite, _render_masked_rise, _make_minimal_card,
     _make_text_sprite, _make_word_sprites, _make_whatsapp_sprite,
     _draw_minimal_icon, _make_curl_sprite, _apply_transition,
@@ -177,7 +177,7 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24):
     ImageDraw.Draw(sheen_sp).polygon([(70, 0), (170, 0), (100, s6_pill_empty.height), (0, s6_pill_empty.height)], fill=(255, 255, 255, 85))
     s6_sub_words = _make_word_sprites("আবেদনের জন্য মেসেজ দিন", _get_style2_font, 54, 36, 900, 1, pal["ink"], W // 2, 1075)
 
-    bounds = [0.0, 0.14, 0.30, 0.62, 0.78, 0.90, 1.0]
+    bounds = compute_motion_scene_bounds(duration)
     trans_styles = ["push_left", "curl", "push_left", "curl", "push_left"]
     trans_sec = min(0.42, duration * 0.03)
     countup_cache, gauge_cache = {}, {}
@@ -263,14 +263,16 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24):
             batch_trans = 0.40
 
             def draw_b(entries, cur_bt, extra_dx=0, fade_m=1.0):
+                active_c = int(abs_t * 0.45) % max(1, len(entries))
                 for idx_c, c in enumerate(entries):
                     st = 0.06 + idx_c * 0.20
                     if cur_bt <= st: continue
                     cp = ease_out_cubic((cur_bt - st) / 0.34)
+                    act_sc = 1.018 if (cur_bt > 1.3 and idx_c == active_c and extra_dx == 0) else 1.0
                     cx = W // 2 + int(220 * (1.0 - cp)) + extra_dx
                     cy = c["cy"]
                     op = min(1.0, (cur_bt - st) / 0.18) * fade_m
-                    _paste_sprite(frame, c["bg"], cx, cy, opacity=op)
+                    _paste_sprite(frame, c["bg"], cx, cy, scale=act_sc, opacity=op)
                     bar_p = ease_out_cubic((cur_bt - st - 0.04) / 0.28)
                     if bar_p > 0.02:
                         y_tb = cy - c["h"] // 2 + 22
