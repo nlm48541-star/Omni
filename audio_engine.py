@@ -2,17 +2,16 @@
 import os
 import re
 import time
-import asyncio
-import edge_tts
-import concurrent.futures
+import shutil
+import subprocess
+from pathlib import Path
+import numpy as np
+import soundfile as sf
 
-# Microsoft Edge-এর সেরা ৪টি বাংলা নিউরাল ভয়েস (একটি ফেইল করলে স্বয়ংক্রিয়ভাবে পরেরটি নিবে)
-EDGE_VOICES = [
-    "bn-BD-PradeepNeural",    # বাংলাদেশ পুরুষ (মূল ভয়েস)
-    "bn-BD-NabanitaNeural",   # বাংলাদেশ নারী
-    "bn-IN-BashkarNeural",    # বাংলা পুরুষ
-    "bn-IN-TanishaaNeural"    # বাংলা নারী
-]
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "300"
+
+_NINADA_INSTANCE = None
 
 PHONE_DIGIT_WORDS = {
     '0': "জিরো", '1': "ওয়ান", '2': "টু", '3': "থ্রি", '4': "ফোর",
@@ -30,6 +29,14 @@ NUM_WORDS_1_TO_99 = {
     70: "সত্তর", 71: "একাত্তর", 72: "বাহাত্তর", 73: "তিয়াত্তর", 74: "চৌহাত্তর", 75: "পঁচাত্তর", 76: "ছিয়াত্তর", 77: "সাতাত্তর", 78: "আটাত্তর", 79: "উনাশি",
     80: "আশি", 81: "একাশি", 82: "বিরাশি", 83: "তিরাশি", 84: "চুরাশি", 85: "পঁচাশি", 86: "ছিয়াশি", 87: "সাতাশি", 88: "অষ্টআশি", 89: "ঊননব্বই",
     90: "নব্বই", 91: "একানব্বই", 92: "বানব্বই", 93: "তিরানব্বই", 94: "চুরানব্বই", 95: "পঁচানব্বই", 96: "ছিয়ানব্বই", 97: "সাতানব্বই", 98: "আটানব্বই", 99: "নিরানব্বই"
+}
+
+COMMON_ENG_TO_BN = {
+    "whatsapp": "হোয়াটসঅ্যাপ", "ssc": "এসএসসি", "hsc": "এইচএসসি",
+    "bsc": "বিএসসি", "msc": "এমএসসি", "bba": "বিবিএ", "mba": "এমবিএ",
+    "cgpa": "সিজিপিএ", "gpa": "জিপিএ", "ngo": "এনজিও", "pdf": "পিডিএফ",
+    "online": "অনলাইন", "email": "ইমেইল", "circular": "সার্কুলার",
+    "job": "জব", "bank": "ব্যাংক", "diploma": "ডিপ্লোমা"
 }
 
 def int_to_bangla_words(n):
@@ -66,49 +73,110 @@ def convert_all_numbers_to_bangla_words(text):
 
 def clean_script_for_speech(raw_text):
     if not raw_text: return ""
-    text = convert_all_numbers_to_bangla_words(raw_text)
-    # সমস্ত ব্র্যাকেট ও অপ্রয়োজনীয় চিহ্ন মুছে ফেলা যাতে Edge-TTS কোনো ত্রুটি ছাড়া পড়তে পারে
-    text = re.sub(r'[\*\_\|\#\~\[\]\{\}\<\>\@\$\^\&\+\=\_\\\/]', ' ', text)
+    text = str(raw_text)
+    for eng, bn in COMMON_ENG_TO_BN.items():
+        text = re.sub(rf'\b{eng}\b', bn, text, flags=re.IGNORECASE)
+    text = convert_all_numbers_to_bangla_words(text)
     text = re.sub(r'https?://\S+|wa\.me/\S+', '', text)
+    text = re.sub(r'[\*\_\|\#\~\[\]\{\}\<\>\@\$\^\&\+\=\_\\\/\(\)]', ' ', text)
+    # Ninada বাংলা মডেলের জন্য স্বাভাবিক দাঁড়ি ও কমা অক্ষুণ্ণ রাখা
+    text = re.sub(r'[^\u0980-\u09FF\s,।?!\-]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-def _run_edge_tts_coroutine(speech_text, voice_name, output_audio_path):
-    async def _make():
-        communicate = edge_tts.Communicate(speech_text, voice_name, rate="+0%", pitch="+0Hz")
-        await communicate.save(output_audio_path)
+def _get_ninada_tts():
+    global _NINADA_INSTANCE
+    if _NINADA_INSTANCE is None:
+        from ninada import Ninada
+        print("  [🎙️ Ninada TTS] Initializing Ninada v5 (lang='bn', voice='male')...")
+        _NINADA_INSTANCE = Ninada(lang="bn")
+    return _NINADA_INSTANCE
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(_make())
-    finally:
-        loop.close()
+def _apply_ninada_tempo_and_mastering(raw_wav_path: Path, out_audio_path: Path):
+    if not shutil.which("ffmpeg"):
+        shutil.copy2(raw_wav_path, out_audio_path)
+        return
 
-def synthesize_with_edge_tts(speech_text, output_audio_path):
-    """
-    Microsoft Edge Neural TTS:
-    ৪টি বাংলা ভয়েস দিয়ে একের পর এক চেষ্টা করবে যাতে ১০০% ক্ষেত্রে সফলভাবে অডিও ফাইল তৈরি হয়।
-    """
-    os.makedirs(os.path.dirname(output_audio_path) or ".", exist_ok=True)
+    af_chain = (
+        "atempo=0.92,"
+        "highpass=f=80,"
+        "equalizer=f=250:t=q:w=1.2:g=2.5,"
+        "equalizer=f=4500:t=q:w=1.5:g=-3.5,"
+        "acompressor=threshold=-18dB:ratio=2.5:attack=10:release=100,"
+        "loudnorm=I=-16:TP=-1.5:LRA=11"
+    )
+    cmd = ["ffmpeg", "-y", "-i", str(raw_wav_path), "-af", af_chain]
+    if str(out_audio_path).lower().endswith(".mp3"):
+        cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "1"])
+    else:
+        cmd.extend(["-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1"])
+    cmd.append(str(out_audio_path))
 
-    for voice in EDGE_VOICES:
-        for attempt in range(2):
+    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode != 0 or not out_audio_path.exists() or out_audio_path.stat().st_size < 1000:
+        shutil.copy2(raw_wav_path, out_audio_path)
+
+def synthesize_with_ninada(speech_text, output_audio_path):
+    out_path = Path(output_audio_path).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_wav = out_path.with_suffix(".ninada_raw.wav")
+
+    for attempt in range(3):
+        try:
+            tts = _get_ninada_tts()
+            wav_bytes = None
             try:
-                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                fut = executor.submit(_run_edge_tts_coroutine, speech_text, voice, output_audio_path)
-                fut.result(timeout=60)
-                executor.shutdown(wait=False)
+                wav_bytes = tts.speak(speech_text, lang="bn", voice="male")
+            except Exception:
+                wav_bytes = None
 
-                if os.path.exists(output_audio_path) and os.path.getsize(output_audio_path) > 1000:
-                    print(f"  ✅ [Edge TTS SUCCESS] Generated using voice '{voice}' ({round(os.path.getsize(output_audio_path)/1024, 1)} KB)")
-                    return True
-            except Exception as e:
-                try: executor.shutdown(wait=False)
+            if wav_bytes and len(wav_bytes) > 2000:
+                with open(tmp_wav, "wb") as f:
+                    f.write(wav_bytes)
+            else:
+                # বড় স্ক্রিপ্টের ক্ষেত্রে বাক্য ভেঙে সেফটি সিন্থেসিস
+                sentences = [s.strip() for s in re.split(r'(?<=[।!?])\s+', speech_text) if len(s.strip()) > 3]
+                if not sentences:
+                    sentences = [speech_text]
+
+                chunks_pcm = []
+                sr = 24000
+                pause = np.zeros(int(sr * 0.25), dtype=np.float32)
+
+                for idx, s in enumerate(sentences):
+                    b = tts.speak(s, lang="bn", voice="male")
+                    if b and len(b) > 1000:
+                        c_wav = out_path.with_suffix(f".chunk_{idx}.wav")
+                        with open(c_wav, "wb") as cf:
+                            cf.write(b)
+                        data, c_sr = sf.read(str(c_wav), dtype="float32")
+                        sr = c_sr
+                        if c_wav.exists():
+                            c_wav.unlink()
+                        chunks_pcm.append(np.asarray(data, dtype=np.float32).reshape(-1))
+                        if idx < len(sentences) - 1:
+                            chunks_pcm.append(pause)
+
+                if not chunks_pcm:
+                    raise RuntimeError("Ninada returned empty audio chunks")
+                merged = np.concatenate(chunks_pcm) if len(chunks_pcm) > 1 else chunks_pcm[0]
+                sf.write(str(tmp_wav), merged, sr, subtype="PCM_16")
+
+            _apply_ninada_tempo_and_mastering(tmp_wav, out_path)
+            if tmp_wav.exists():
+                tmp_wav.unlink()
+
+            if out_path.exists() and out_path.stat().st_size > 1000:
+                print(f"  ✅ [Ninada Male SUCCESS] Mastered audio ready ({round(out_path.stat().st_size / 1024, 1)} KB)")
+                return True
+        except Exception as e:
+            print(f"  ⚠️ [Ninada Attempt #{attempt+1}] {e}")
+            if tmp_wav.exists():
+                try: tmp_wav.unlink()
                 except Exception: pass
-                time.sleep(1)
+            time.sleep(1.5)
 
-    print("  ❌ [Edge TTS Error] All voices failed to respond.")
+    print("  ❌ [Ninada Error] Audio synthesis failed after retries.")
     return False
 
 def generate_single_audio_task(text, output_path, key_idx=0):
@@ -116,7 +184,7 @@ def generate_single_audio_task(text, output_path, key_idx=0):
     if not speech_text:
         print("  ⚠️ Empty text provided for audio synthesis.")
         return False
-    return synthesize_with_edge_tts(speech_text, output_path)
+    return synthesize_with_ninada(speech_text, output_path)
 
 def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None):
     return generate_single_audio_task(text, output_audio_path, key_idx=key_offset)
