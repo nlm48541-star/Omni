@@ -10,5 +10,8 @@ google-auth-oauthlib
 google-auth-httplib2
 fonttools
 gdown
-google-genai
-edge-tts>=7.0.0
+ninada
+onnxruntime>=1.18.0
+numpy>=1.24.0,<2.0.0
+soundfile>=0.12.1
+huggingface_hub
