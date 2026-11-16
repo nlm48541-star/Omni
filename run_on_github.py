@@ -65,7 +65,6 @@ def pick_random_design_id(used_designs):
     return chosen
 
 def split_motion_and_standard_targets(items, spec_str, id_getter=None, max_motion=3):
-    """নির্দিষ্ট ৩টি আইটেমকে মোশন গ্রাফিক্সের জন্য এবং বাকি ৫টিকে সাধারণ ভিডিওর জন্য আলাদা করে।"""
     if not items:
         return [], []
     spec = str(spec_str or "").strip()
@@ -202,8 +201,8 @@ async def process_sync(config, memory):
             downloaded_imgs = []
             for i_idx, u in enumerate(extract_article_images(entry, entry_link, raw_desc)):
                 try:
-                    ir = requests.get(u, headers=HEADERS, timeout=25)
-                    if ir.status_code == 200:
+                    ir = requests.get(u, headers={**HEADERS, "Referer": entry_link}, timeout=25)
+                    if ir.status_code == 200 and len(ir.content) > 2000:
                         p = f"tmp_raw_{link_hash}_{i_idx}.jpg"
                         with open(p, 'wb') as f:
                             f.write(ir.content)
@@ -225,7 +224,6 @@ async def process_sync(config, memory):
             tiktok_caption = f"{article_title[:90]} | নতুন নিয়োগ বিজ্ঞপ্তি\n\nআবেদন করতে WhatsApp: 01540503092 নাম্বারে যোগাযোগ করুন।\n\n#bdjobs #jobcircular #career #bangladesh"
             video_final_title = article_title[:85].strip()
 
-            # ১. প্রথমে মোট ৮টি স্ক্রিপ্ট দিয়ে ৮টি অডিও জেনারেট করা
             audio_paths = []
             first_valid_audio = None
             for a_idx in range(total_scripts_needed):
@@ -253,7 +251,6 @@ async def process_sync(config, memory):
                 poster_files_to_cleanup.append(p_path)
                 return p_path
 
-            # ২. প্রথম ৩টি অডিও দিয়ে ৩টি মোশন গ্রাফিক্স ভিডিও -> TikTok + নির্দিষ্ট ৩ FB + ৩ YT
             for m_idx in range(motion_count):
                 m_audio = audio_paths[m_idx] if m_idx < len(audio_paths) else first_valid_audio
                 if not m_audio or not os.path.exists(m_audio):
@@ -304,7 +301,6 @@ async def process_sync(config, memory):
                         try: os.remove(motion_vid_path)
                         except Exception: pass
 
-            # ৩. বাকি ৫টি অডিও দিয়ে ৫টি সাধারণ ভিডিও -> বাকি ৫ YT + বাকি ৫ FB
             for s_idx in range(standard_count):
                 a_pos = motion_count + s_idx
                 s_audio = audio_paths[a_pos] if a_pos < len(audio_paths) else first_valid_audio
@@ -343,7 +339,6 @@ async def process_sync(config, memory):
                         try: os.remove(std_vid_path)
                         except Exception: pass
 
-            # ৪. টেলিগ্রাম ও হোয়াটসঅ্যাপ ছবি পোস্ট (আগের মতোই বহাল)
             if not article_poster_path:
                 article_poster_path = _make_poster("social")
 
