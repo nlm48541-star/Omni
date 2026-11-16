@@ -51,6 +51,21 @@ def ease_out_back(t, s=1.55):
     t = max(0.0, min(1.0, t))
     return 1.0 + (s + 1.0) * ((t - 1.0) ** 3) + s * ((t - 1.0) ** 2)
 
+def compute_motion_scene_bounds(duration):
+    """অডিও লম্বা হলেও শুরু ও শেষের সিন যাতে অতিরিক্ত স্থির না থাকে তার জন্য ডায়নামিক সিন-পেসিং।"""
+    s1_t = min(7.0, duration * 0.14)
+    s2_t = min(8.5, duration * 0.16)
+    s5_t = min(10.5, duration * 0.13)
+    s6_t = max(4.5, min(9.5, duration * 0.11))
+    mid_t = max(2.0, duration - (s1_t + s2_t + s5_t + s6_t))
+    s3_t, s4_t = mid_t * 0.56, mid_t * 0.44
+    b1 = s1_t / duration
+    b2 = (s1_t + s2_t) / duration
+    b3 = (s1_t + s2_t + s3_t) / duration
+    b4 = (s1_t + s2_t + s3_t + s4_t) / duration
+    b5 = max(b4 + 0.05, (duration - s6_t) / duration)
+    return [0.0, b1, b2, b3, b4, min(0.96, b5), 1.0]
+
 def split_posts_uniformly(posts):
     items = list(posts[:20])
     n = len(items)
@@ -66,10 +81,8 @@ def split_posts_uniformly(posts):
 
 def uniform_batch_y_positions(batch_len, max_per_b=None):
     m = max_per_b or batch_len
-    if m <= 1:
-        return [840]
-    if m == 2:
-        return [735, 1085][:batch_len]
+    if m <= 1: return [840]
+    if m == 2: return [735, 1085][:batch_len]
     if m == 3:
         if batch_len == 1: return [935]
         if batch_len == 2: return [780, 1090]
@@ -466,7 +479,7 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24):
     ImageDraw.Draw(sheen_sp).polygon([(70, 0), (170, 0), (100, s6_pill_empty.height), (0, s6_pill_empty.height)], fill=(255, 255, 255, 65))
     s6_sub_words = _make_word_sprites("আবেদনের জন্য মেসেজ দিন", get_body_font, 54, 38, 900, 1, pal["muted"], W // 2, 1080)
 
-    bounds = [0.0, 0.14, 0.30, 0.62, 0.78, 0.90, 1.0]
+    bounds = compute_motion_scene_bounds(duration)
     trans_styles = ["curl", "push_left", "curl", "push_left", "curl"]
     trans_sec = min(0.42, duration * 0.03)
     countup_cache = {}
@@ -535,12 +548,14 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24):
             batch_trans = 0.40
 
             def draw_batch(entries, cur_bt, extra_dy=0, fade_mult=1.0):
+                active_c = int(abs_t * 0.45) % max(1, len(entries))
                 for idx_c, c in enumerate(entries):
                     st = 0.06 + idx_c * 0.20
                     if cur_bt <= st: continue
                     cp = ease_out_back((cur_bt - st) / 0.34)
+                    act_sc = 1.018 if (cur_bt > 1.3 and idx_c == active_c and extra_dy == 0) else 1.0
                     cy = c["cy"] + int(60 * (1.0 - min(1.0, cp))) + extra_dy
-                    _paste_sprite(frame, c["bg"], W // 2, cy, scale=0.92 + 0.08 * cp, opacity=min(1.0, (cur_bt - st) / 0.18) * fade_mult)
+                    _paste_sprite(frame, c["bg"], W // 2, cy, scale=(0.92 + 0.08 * cp) * act_sc, opacity=min(1.0, (cur_bt - st) / 0.18) * fade_mult)
                     bar_p = ease_out_cubic((cur_bt - (st + 0.04)) / 0.30)
                     if bar_p > 0.02:
                         y_tb = cy - c["h"] // 2 + 24
@@ -568,13 +583,13 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24):
             hl_w = int(120 * ease_out_cubic(min(1.0, local_t / 0.45)))
             fd.rounded_rectangle([W // 2 - hl_w, 424, W // 2 + hl_w, 430], radius=3, fill=pal["accent"])
             positions = [(295, 705), (785, 705), (295, 1185), (785, 1185)]
-            active_idx = int(abs_t * 1.1) % 4
+            active_idx = int(abs_t * 0.9) % 4
             for idx, item in enumerate(s4_cards):
                 st = 0.08 + idx * 0.16
                 if local_t <= st: continue
                 gx, gy = positions[idx]
                 cp = ease_out_back((local_t - st) / 0.34)
-                act_sc = 1.025 if (local_t > 1.2 and idx == active_idx) else 1.0
+                act_sc = 1.028 if (local_t > 1.2 and idx == active_idx) else 1.0
                 _paste_sprite(frame, item["bg"], gx, gy, scale=(0.78 + 0.22 * cp) * act_sc, opacity=min(1.0, (local_t - st) / 0.18))
                 if local_t > st + 0.06:
                     ip = ease_out_back((local_t - (st + 0.06)) / 0.30)
