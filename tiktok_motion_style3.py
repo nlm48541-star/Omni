@@ -9,7 +9,7 @@ from tiktok_designer import (
 )
 from tiktok_motion_engine import (
     ease_out_cubic, ease_in_out_cubic, ease_out_back, to_bn_num,
-    split_posts_uniformly, uniform_batch_y_positions,
+    compute_motion_scene_bounds, split_posts_uniformly, uniform_batch_y_positions,
     _paste_sprite, _render_masked_rise, _make_minimal_card,
     _make_text_sprite, _make_word_sprites, _make_whatsapp_sprite,
     _draw_minimal_icon, _make_curl_sprite, _apply_transition,
@@ -182,7 +182,7 @@ def render_motion_style_3(job_data, audio_path, output_path, fps=24):
     ImageDraw.Draw(sheen_sp).polygon([(65, 0), (160, 0), (95, s6_pill_empty.height), (0, s6_pill_empty.height)], fill=(255, 255, 255, 65))
     s6_sub_words = _make_word_sprites("আবেদনের জন্য মেসেজ দিন", _get_style3_body_font, 52, 36, 840, 1, pal["muted"], W // 2, 1065)
 
-    bounds = [0.0, 0.14, 0.30, 0.62, 0.78, 0.90, 1.0]
+    bounds = compute_motion_scene_bounds(duration)
     trans_styles = ["push_left", "curl", "push_left", "curl", "push_left"]
     trans_sec = min(0.42, duration * 0.03)
     countup_cache = {}
@@ -260,15 +260,17 @@ def render_motion_style_3(job_data, audio_path, output_path, fps=24):
             batch_trans = 0.40
 
             def draw_b(entries, cur_bt, extra_dy=0, fade_m=1.0):
+                active_c = int(abs_t * 0.45) % max(1, len(entries))
                 for idx_c, c in enumerate(entries):
                     st = 0.06 + idx_c * 0.20
                     if cur_bt <= st: continue
                     cp = ease_out_back((cur_bt - st) / 0.34)
+                    act_sc = 1.018 if (cur_bt > 1.3 and idx_c == active_c and extra_dy == 0) else 1.0
                     dx = int(((-1 if idx_c % 2 == 0 else 1) * 180) * (1.0 - min(1.0, cp)))
                     cx = W // 2 + dx
                     cy = c["cy"] + extra_dy
                     op = min(1.0, (cur_bt - st) / 0.18) * fade_m
-                    _paste_sprite(frame, c["bg"], cx, cy, scale=0.94 + 0.06 * cp, opacity=op)
+                    _paste_sprite(frame, c["bg"], cx, cy, scale=(0.94 + 0.06 * cp) * act_sc, opacity=op)
                     _paste_sprite(frame, c["idx"], cx - 390, cy - int(c["h"] * 0.20), scale=0.6 + 0.4 * ease_out_back((cur_bt - st) / 0.30), opacity=op)
                     if cur_bt > st + 0.05:
                         _render_masked_rise(frame, c["title"], cx - 55, cy - int(c["h"] * 0.18), (cur_bt - st - 0.05) / 0.26, rise_px=24)
@@ -292,14 +294,14 @@ def render_motion_style_3(job_data, audio_path, output_path, fps=24):
             hl_w = int(120 * ease_out_cubic(min(1.0, local_t / 0.42)))
             fd.rounded_rectangle([W // 2 - hl_w, 422, W // 2 + hl_w, 428], radius=3, fill=pal["accent"])
             positions = [(295, 700), (785, 700), (295, 1175), (785, 1175)]
-            active_idx = int(abs_t * 1.1) % 4
+            active_idx = int(abs_t * 0.9) % 4
             for idx, item in enumerate(s4_cards):
                 st = 0.08 + idx * 0.16
                 if local_t <= st: continue
                 gx, gy = positions[idx]
                 cp = ease_out_back((local_t - st) / 0.34)
                 op = min(1.0, (local_t - st) / 0.18)
-                act_sc = 1.025 if (local_t > 1.2 and idx == active_idx) else 1.0
+                act_sc = 1.028 if (local_t > 1.2 and idx == active_idx) else 1.0
                 _paste_sprite(frame, item["bg"], gx, gy, scale=(0.78 + 0.22 * cp) * act_sc, opacity=op)
                 if local_t > st + 0.06:
                     _paste_sprite(frame, item["icon"], gx, gy - 115 + int(4 * math.sin(abs_t * 2.5 + idx)), scale=0.45 + 0.55 * ease_out_back((local_t - st - 0.06) / 0.30))
