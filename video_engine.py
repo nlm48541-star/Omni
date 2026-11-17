@@ -13,7 +13,7 @@ def get_audio_duration(audio_path):
     except Exception:
         return 30.0
 
-def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design_id=None, save_poster_path=None, style_id=1):
+def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design_id=None, save_poster_path=None, style_id=1, script_index=0):
     print(f"  [🎬 Motion Video Dispatcher] Rendering Style #{style_id}: '{output_path}'")
     if not os.path.exists(audio_path):
         return False
@@ -21,15 +21,15 @@ def render_tiktok_motion_video(job_data, audio_path, output_path, fps=24, design
     try:
         if style_id == 2:
             from tiktok_motion_style2 import render_motion_style_2
-            if render_motion_style_2(job_data, audio_path, output_path, fps=fps):
+            if render_motion_style_2(job_data, audio_path, output_path, fps=fps, script_index=script_index):
                 return True
         elif style_id == 3:
             from tiktok_motion_style3 import render_motion_style_3
-            if render_motion_style_3(job_data, audio_path, output_path, fps=fps):
+            if render_motion_style_3(job_data, audio_path, output_path, fps=fps, script_index=script_index):
                 return True
         else:
             from tiktok_motion_engine import render_motion_graphics_video
-            if render_motion_graphics_video(job_data, audio_path, output_path, fps=fps):
+            if render_motion_graphics_video(job_data, audio_path, output_path, fps=fps, script_index=script_index):
                 return True
     except Exception as e:
         print(f"  ⚠️ [Motion Engine Style #{style_id} Fallback Notice] {e}")
