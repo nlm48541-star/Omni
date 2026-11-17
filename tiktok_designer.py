@@ -777,7 +777,7 @@ def _split_two_tone(text):
     return (" ".join(words[:-1]) + " ", words[-1]) if len(words) >= 2 else ("", str(text).strip())
 
 def _draw_two_tone_fitted(draw, cx, cy, p1, p2, c1, c2, font_fn, start_sz, min_sz, max_w):
-    spans = ([ (p1, c1) ] if p1 else []) + ([ (p2, c2) ] if p2 else [])
+    spans = ([(p1, c1)] if p1 else []) + ([(p2, c2)] if p2 else [])
     if not spans: return
     full = (p1 or "") + (p2 or "")
     for sz in range(start_sz, min_sz - 1, -2):
@@ -787,6 +787,13 @@ def _draw_two_tone_fitted(draw, cx, cy, p1, p2, c1, c2, font_fn, start_sz, min_s
     f = font_fn(min_sz); lines = wrap_colored_spans(draw, spans, f, min_sz, max_width=max_w); lh = min_sz + 10
     ty = cy - ((len(lines) - 1) * lh) // 2
     for lt in lines[:2]: draw_colored_spans_line(draw, cx, ty, lt, f, min_sz); ty += lh
+
+def _draw_dot_grid(od, x0, y0, cols, rows, step_px, r_px, col, s):
+    for r in range(rows):
+        for c in range(cols):
+            cx = (x0 + c * step_px) * s
+            cy = (y0 + r * step_px) * s
+            od.ellipse([cx - r_px * s, cy - r_px * s, cx + r_px * s, cy + r_px * s], fill=col)
 
 def _draw_radiating_rays(od, x_left, x_right, cy, s, ray_cols, length=68, spread=36, w_out=11, w_in=5):
     cols = ray_cols if isinstance(ray_cols, list) else [ray_cols, ray_cols, ray_cols]
@@ -1008,7 +1015,7 @@ def _render_design_12(info, output_path):
             ((480, 180, 50, 195), (250, 204, 21, 255)),
             ((430, 155, 40, 155), (76, 11, 110, 255))
         ])
-        _draw_radiating_rays(od, 102, 978, 258, s, (76, 11, 110, 255), length=58, spread=32)
+        _draw_radiating_rays(od, 88, 992, 262, s, (76, 11, 110, 255), length=52, spread=30)
     im = _aa_overlay_draw(im, decor)
     hero_end = _draw_brush_hero(im, 128, info, PURPLE)
     draw = ImageDraw.Draw(im)
@@ -1033,7 +1040,8 @@ def _render_design_12(info, output_path):
     dlh = dsz + 10; dy = box_y0 + 70 + (162 - len(dlines) * dlh) // 2 + dlh // 2
     for dl in dlines: draw_colored_spans_line(draw, 286, dy, dl, df, dsz); dy += dlh
 
-    draw_mixed_text(draw, 760, box_y0 + 108, info["fee_title"], get_body_font(40), 40, BLACK, anchor="mm")
+    ft_f, ft_sz = fit_single_line_font(draw, info["fee_title"], get_body_font, 40, 26, 430)
+    draw_mixed_text(draw, 760, box_y0 + 108, info["fee_title"], ft_f, ft_sz, BLACK, anchor="mm")
     ff, fsz, flines = fit_multiline_font(draw, info["fee_text"], get_body_font, 52, 28, 430, 2)
     fy = box_y0 + (164 if len(flines) == 1 else 150)
     for fl in flines: draw_mixed_text(draw, 760, fy, fl, ff, fsz, RED, anchor="mm"); fy += fsz + 8
@@ -1161,7 +1169,7 @@ def _render_design_16(info, output_path):
         _draw_wave_corners(od, SW, SH, s,
             [((340, 120, 50, 220), (190, 242, 100, 255)), ((235, 85, 38, 155), (250, 204, 21, 255)), ((145, 52, 24, 95), (6, 78, 21, 255))],
             [((410, 150, 62, 255), (190, 242, 100, 255)), ((295, 105, 45, 190), (250, 204, 21, 255)), ((185, 65, 28, 115), (6, 78, 21, 255))])
-        _draw_radiating_rays(od, 92, 988, 265, s, (250, 204, 21, 255), length=64, spread=34)
+        _draw_radiating_rays(od, 88, 992, 306, s, (250, 204, 21, 255), length=58, spread=34)
     im = _aa_overlay_draw(im, decor)
     hero_end = _draw_tilted_box_hero(im, 134, info, GREEN, dashed=True)
     draw = ImageDraw.Draw(im)
@@ -1280,7 +1288,7 @@ def _render_design_20(info, output_path):
         top_g = quad_bezier((0, 1735 * s), (520 * s, 1855 * s), (SW, 1740 * s))
         od.polygon(top_g + [(SW, SH), (0, SH)], fill=GREEN + (255,))
         _draw_dot_grid(od, 36, 36, 4, 3, 28, 5, GREEN + (255,), s)
-        _draw_dot_grid(od, 944, 775, 4, 3, 28, 5, GREEN + (255,), s)
+        _draw_dot_grid(od, 998, 785, 4, 3, 20, 4, GREEN + (255,), s)
     im = _aa_overlay_draw(im, decor); draw = ImageDraw.Draw(im)
     draw.rounded_rectangle([46, 155, 1034, 305], radius=75, fill=GREEN)
     _draw_two_tone_fitted(draw, W // 2, 230, info["hook_top"] + " ", info["hook_bottom"], (255, 255, 255), GOLD, get_body_font, 56, 32, 880)
@@ -1292,13 +1300,13 @@ def _render_design_20(info, output_path):
         spans = [(row["badge"] + " – ", GREEN), (row["details"], BLACK)]
         sz, f, lines = 44, get_body_font(44), []
         for sz in range(44, 30, -2):
-            f = get_body_font(sz); lines = wrap_colored_spans(draw, spans, f, sz, max_width=840)
+            f = get_body_font(sz); lines = wrap_colored_spans(draw, spans, f, sz, max_width=815)
             if len(lines) <= 3: break
         lh = sz + 13; ch = max(148, len(lines) * lh + 46)
-        draw.rounded_rectangle([68, cur_y, 1012, cur_y + ch], radius=34, fill=(253, 243, 208))
-        draw.rounded_rectangle([94, cur_y + 22, 108, cur_y + ch - 22], radius=7, fill=GREEN)
+        draw.rounded_rectangle([60, cur_y, 988, cur_y + ch], radius=34, fill=(253, 243, 208))
+        draw.rounded_rectangle([86, cur_y + 22, 100, cur_y + ch - 22], radius=7, fill=GREEN)
         ty = cur_y + (ch - len(lines) * lh) // 2 + lh // 2
-        for lt in lines: draw_colored_spans_line(draw, 558, ty, lt, f, sz); ty += lh
+        for lt in lines: draw_colored_spans_line(draw, 542, ty, lt, f, sz); ty += lh
         cur_y += ch + 22
 
     cta_y0 = cur_y + 18
@@ -1377,7 +1385,7 @@ def _render_design_24(info, output_path):
     def decor(od, SW, SH, s):
         _draw_diag_stripes(od, SW, SH, s, ORANGE + (255,), NAVY + (255,), True)
         od.ellipse([SW - 160 * s, 210 * s, SW + 120 * s, 490 * s], fill=(254, 243, 199, 170))
-        _draw_radiating_rays(od, 92, 988, 265, s, ORANGE + (255,), length=62, spread=34)
+        _draw_radiating_rays(od, 88, 992, 306, s, ORANGE + (255,), length=58, spread=34)
     im = _aa_overlay_draw(im, decor)
     hero_end = _draw_tilted_box_hero(im, 134, info, NAVY, shadow_col=ORANGE)
     draw = ImageDraw.Draw(im)
@@ -1401,7 +1409,7 @@ def _render_design_25(info, output_path):
             [((340, 125, 50, 215), (163, 230, 53, 255)), ((235, 85, 36, 150), GREEN + (255,))],
             [((390, 145, 58, 240), (163, 230, 53, 255)), ((265, 95, 42, 175), GREEN + (255,))])
         od.ellipse([SW - 170 * s, 90 * s, SW + 90 * s, 350 * s], fill=(219, 234, 254, 170))
-        _draw_radiating_rays(od, 92, 988, 265, s, GREEN + (255,), length=60, spread=32)
+        _draw_radiating_rays(od, 94, 986, 318, s, GREEN + (255,), length=56, spread=32)
     im = _aa_overlay_draw(im, decor)
     hero_end = _draw_layered_tilted_hero(im, 108, info, (254, 249, 218), GREEN, NAVY)
     draw = ImageDraw.Draw(im)
