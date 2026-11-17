@@ -259,7 +259,7 @@ async def process_sync(config, memory):
                 motion_vid_path = f"tmp_motion_{link_hash}_s{style_id}_{m_idx+1}.mp4"
                 print(f"\n--- [Motion Phase #{m_idx+1}/{motion_count} | Style #{style_id}] ---")
 
-                if render_tiktok_motion_video(job_data, m_audio, motion_vid_path, style_id=style_id):
+                if render_tiktok_motion_video(job_data, m_audio, motion_vid_path, style_id=style_id, script_index=m_idx):
                     if m_idx < len(tiktok_targets):
                         tk_acc = tiktok_targets[m_idx]
                         if save_to_gdrive:
