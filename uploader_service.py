@@ -160,29 +160,86 @@ def get_all_tiktok_buffer_targets(config=None):
 
 def upload_to_public_host(video_path):
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
-    hosts = [
-        ("Catbox", "https://catbox.moe/user/api.php", {"reqtype": "fileupload"}, "fileToUpload"),
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": (clean_filename, vf, "video/mp4")}, timeout=120)
+        if r.status_code == 200:
+            raw_u = (r.json().get("data") or {}).get("url", "").strip()
+            if raw_u.startswith("http"):
+                pub_url = raw_u.replace("http://", "https://").replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
+                print(f"    🌐 [Host OK (tmpfiles.org)] {pub_url}")
+                return pub_url
+        print(f"    ⚠️ [Host Notice (tmpfiles.org)] HTTP {r.status_code}: {r.text[:100]}")
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (tmpfiles.org)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://tmpfile.link/api/upload", files={"file": (clean_filename, vf, "video/mp4")}, headers={"Accept": "application/json"}, timeout=120)
+        if r.status_code in [200, 201]:
+            body = r.json()
+            pub_url = (body.get("downloadLink") or body.get("downloadUrl") or "").strip()
+            if pub_url.startswith("http"):
+                print(f"    🌐 [Host OK (tmpfile.link)] {pub_url}")
+                return pub_url
+        print(f"    ⚠️ [Host Notice (tmpfile.link)] HTTP {r.status_code}: {r.text[:100]}")
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (tmpfile.link)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://uguu.se/upload", files={"files[]": (clean_filename, vf, "video/mp4")}, timeout=120)
+        if r.status_code == 200:
+            files_arr = r.json().get("files") or []
+            if files_arr and str(files_arr[0].get("url", "")).startswith("http"):
+                pub_url = files_arr[0]["url"].strip()
+                print(f"    🌐 [Host OK (uguu.se)] {pub_url}")
+                return pub_url
+        print(f"    ⚠️ [Host Notice (uguu.se)] HTTP {r.status_code}: {r.text[:100]}")
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (uguu.se)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.put(f"https://ul.sto.care/{clean_filename}", data=vf, headers={"Content-Type": "video/mp4"}, timeout=120)
+        if r.status_code in [200, 201]:
+            m_url = re.search(r'https?://\S+', r.text.strip())
+            if m_url:
+                pub_url = m_url.group(0)
+                print(f"    🌐 [Host OK (sto.care)] {pub_url}")
+                return pub_url
+        print(f"    ⚠️ [Host Notice (sto.care)] HTTP {r.status_code}: {r.text[:100]}")
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (sto.care)] {e}")
+
+    for name, url, data, file_key in [
         ("Litterbox", "https://litterbox.catbox.moe/resources/internals/api.php", {"reqtype": "fileupload", "time": "24h"}, "fileToUpload"),
-        ("Pixeldrain", "https://pixeldrain.com/api/file", {}, "file")
-    ]
-    for name, url, data, file_key in hosts:
+        ("Catbox", "https://catbox.moe/user/api.php", {"reqtype": "fileupload"}, "fileToUpload"),
+    ]:
         try:
             with open(video_path, 'rb') as vf:
-                r = requests.post(url, data=data, files={file_key: (clean_filename, vf, "video/mp4")}, headers=HEADERS, timeout=90)
-            if r.status_code in [200, 201]:
-                if name == "Pixeldrain":
-                    fid = r.json().get("id")
-                    if fid:
-                        pub_url = f"https://pixeldrain.com/api/file/{fid}"
-                        print(f"    🌐 [Host OK ({name})] {pub_url}")
-                        return pub_url
-                elif r.text.strip().startswith("http"):
-                    pub_url = r.text.strip()
-                    print(f"    🌐 [Host OK ({name})] {pub_url}")
-                    return pub_url
+                r = requests.post(url, data=data, files={file_key: (clean_filename, vf, "video/mp4")}, headers={"User-Agent": "curl/8.5.0"}, timeout=90)
+            if r.status_code in [200, 201] and r.text.strip().startswith("http"):
+                pub_url = r.text.strip()
+                print(f"    🌐 [Host OK ({name})] {pub_url}")
+                return pub_url
             print(f"    ⚠️ [Host Notice ({name})] HTTP {r.status_code}: {r.text[:100]}")
         except Exception as e:
             print(f"    ⚠️ [Host Error ({name})] {e}")
+
+    pd_key = os.environ.get("PIXELDRAIN_API_KEY", "").strip()
+    if pd_key:
+        try:
+            with open(video_path, 'rb') as vf:
+                r = requests.post("https://pixeldrain.com/api/file", files={"file": (clean_filename, vf, "video/mp4")}, auth=("", pd_key), timeout=90)
+            if r.status_code in [200, 201] and r.json().get("id"):
+                pub_url = f"https://pixeldrain.com/api/file/{r.json()['id']}"
+                print(f"    🌐 [Host OK (Pixeldrain)] {pub_url}")
+                return pub_url
+        except Exception as e:
+            print(f"    ⚠️ [Host Error (Pixeldrain)] {e}")
+
     print("    ❌ [Public Host FAILED] All media hosts rejected the video upload!")
     return None
 
