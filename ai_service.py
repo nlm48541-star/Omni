@@ -9,19 +9,20 @@ from PIL import Image
 
 TRACKER_FILE = "key_tracker.json"
 
-# শুধু সচল ফ্রি মডেলসমূহ (৪০৪ পেইড হওয়া মডেল বাদ দেওয়া হয়েছে)
 OPENROUTER_MODELS = [
     "nvidia/nemotron-3.5-super-vl:free",           # 120B Vision
     "google/gemma-4-31b-it:free",                 # 31B Vision
     "google/gemma-4-26b-a4b-it:free",             # 26B Vision
-    "nvidia/nemotron-3-ultra-550b-a55b:free",     # 550B Text
-    "openrouter/free"                             # Auto-router fallback
+    "dots-studio/dots-3-note-preview:free",       # Multimodal Vision
+    "openrouter/free",                            # Auto-router fallback
+    "nvidia/nemotron-3-ultra-550b-a55b:free"      # 550B Text fallback
 ]
 
 OPENROUTER_VISION_MODELS = {
     "nvidia/nemotron-3.5-super-vl:free",
     "google/gemma-4-31b-it:free",
     "google/gemma-4-26b-a4b-it:free",
+    "dots-studio/dots-3-note-preview:free",
     "openrouter/free"
 }
 
@@ -271,13 +272,25 @@ def normalize_poster_fields(data):
     }
 
     bad_post_labels = {"সর্বোচ্চ বেতন", "বয়সসীমা", "বেতন", "আবেদন ফি", "যোগ্যতা"}
+    bad_vals = {"নির্দিষ্ট নয়", "উল্লেখ নেই", "জানা যায়নি", "n/a", "none", "null"}
     raw_pm = m.get("posts") if isinstance(m.get("posts"), list) else []
-    clean_pm = [it for it in raw_pm if isinstance(it, dict) and str(it.get("post_name", "")).strip() not in bad_post_labels]
+    clean_pm = []
+    for it in raw_pm:
+        if not isinstance(it, dict): continue
+        pn = str(it.get("post_name", "")).strip()
+        if not pn or pn in bad_post_labels: continue
+        vac = str(it.get("vacancy", "")).strip()
+        if not vac or vac.lower() in bad_vals: vac = "নিয়োগ"
+        qual = str(it.get("qualification", "")).strip()
+        if qual.lower() in bad_vals: qual = ""
+        grade = str(it.get("salary_grade", "")).strip()
+        if grade.lower() in bad_vals: grade = ""
+        clean_pm.append({"post_name": pn, "vacancy": vac, "qualification": qual, "salary_grade": grade})
 
     sal_rng = str(m.get("salary_range") or "বিজ্ঞপ্তি অনুযায়ী").strip()
-    if sal_rng == "নির্দিষ্ট নয়": sal_rng = "বিজ্ঞপ্তি অনুযায়ী"
+    if sal_rng.lower() in bad_vals: sal_rng = "বিজ্ঞপ্তি অনুযায়ী"
     app_fee = str(m.get("application_fee") or f_text).strip()
-    if app_fee == "নির্দিষ্ট নয়": app_fee = "বিজ্ঞপ্তি অনুযায়ী"
+    if app_fee.lower() in bad_vals: app_fee = "বিজ্ঞপ্তি অনুযায়ী"
 
     data["motion"] = {
         "org_name": str(m.get("org_name") or org).strip(),
@@ -371,7 +384,7 @@ TASK 3 — MOTION GRAPHICS SLOTS ("motion", MINIMAL & CONCISE):
   * "total_vacancy_num": Integer total vacancy count (e.g. 169, or 0 if unspecified).
   * "total_vacancy_display": e.g. "১৬৯টি" (or "বিভিন্ন পদ").
   * "highlights": Array with 1 concise 3-4 word tag (e.g. ["স্থায়ী সরকারি চাকরি"]).
-  * "posts": Array of REAL job post names from the text/images (up to 20): [{{"post_name": "...", "vacancy": "৮৫টি", "qualification": "এসএসসি পাশ", "salary_grade": "২০তম গ্রেড"}}]. NEVER put "বয়সসীমা" or "সর্বোচ্চ বেতন" as a post_name!
+  * "posts": Array of REAL job post names from the text/images (up to 20): [{{"post_name": "...", "vacancy": "৮৫টি", "qualification": "এসএসসি পাশ", "salary_grade": "২০তম গ্রেড"}}]. NEVER put "বয়সসীমা", "সর্বোচ্চ বেতন" or "নির্দিষ্ট নয়"!
   * "age_limit": Concise (e.g. "১৮–৩২ বছর").
   * "salary_range": Concise (e.g. "৮,২৫০ – ২৪,৬৮০/-" or "বিজ্ঞপ্তি অনুযায়ী", NEVER "নির্দিষ্ট নয়").
   * "application_fee": Concise (e.g. "১১২/- ও ৫৬/-" or "বিনামূল্যে" or "বিজ্ঞপ্তি অনুযায়ী").
@@ -389,69 +402,112 @@ Return strictly valid JSON only:
 
     base64_imgs = [encode_image_base64(p) for p in image_paths[:2] if encode_image_base64(p)]
 
-    # ১. OpenRouter (ভিশন মডেল আগে, যখন ছবি থাকে)
-    openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
-    if openrouter_keys:
+    def _try_openrouter(vision_only):
+        openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
+        if not openrouter_keys: return None
         total_k, start_idx = len(openrouter_keys), get_saved_key_index("openrouter", len(openrouter_keys))
-        print(f"\n--- [Priority 1: OpenRouter Cloud API] ({total_k} keys, VisionFirst={bool(base64_imgs)}) ---")
+        models = [m for m in OPENROUTER_MODELS if (m in OPENROUTER_VISION_MODELS) == vision_only]
+        if not models: return None
+        print(f"\n--- [OpenRouter Cloud API | Vision={vision_only}] ({total_k} keys) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = openrouter_keys[k_idx]
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://github.com/omnisync", "X-Title": "OmniSync"}
-            for model in OPENROUTER_MODELS:
-                is_vis = model in OPENROUTER_VISION_MODELS and bool(base64_imgs)
-                for use_imgs in ([True, False] if is_vis else [False]):
-                    mc = [{"type": "text", "text": prompt}] if use_imgs else prompt
-                    if use_imgs:
-                        for b64 in base64_imgs[:2]: mc.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-                    try:
-                        resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json={"model": model, "messages": [{"role": "user", "content": mc}], "temperature": 0.35, "max_tokens": 5500}, timeout=90)
-                        if resp.status_code == 200:
-                            data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                            if _is_quality_ai_result(data):
-                                save_key_index("openrouter", k_idx, total_k)
-                                print(f"  ✅ [OpenRouter SUCCESS] Model: '{model}' (Key #{k_idx+1})")
-                                return normalize_scripts_count(data, scripts_count)
-                        else:
-                            print(f"  ⚠️ [OpenRouter] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                            if resp.status_code in [401, 402, 429]:
-                                save_key_index("openrouter", (k_idx + 1) % total_k, total_k); break
-                    except Exception as e: print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
+            for model in models:
+                use_imgs = vision_only and bool(base64_imgs)
+                mc = [{"type": "text", "text": prompt}] if use_imgs else prompt
+                if use_imgs:
+                    for b64 in base64_imgs[:2]: mc.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+                try:
+                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json={"model": model, "messages": [{"role": "user", "content": mc}], "temperature": 0.35, "max_tokens": 5500}, timeout=75)
+                    if resp.status_code == 200:
+                        msg_obj = resp.json().get('choices', [{}])[0].get('message', {})
+                        raw_out = msg_obj.get('content') or msg_obj.get('reasoning') or ""
+                        data = parse_json_safely(raw_out)
+                        if _is_quality_ai_result(data):
+                            save_key_index("openrouter", k_idx, total_k)
+                            print(f"  ✅ [OpenRouter SUCCESS] Model: '{model}' (Key #{k_idx+1})")
+                            return normalize_scripts_count(data, scripts_count)
+                        print(f"  ⚠️ [OpenRouter] '{model}' returned incomplete JSON/short script, trying next...")
+                    else:
+                        print(f"  ⚠️ [OpenRouter] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
+                        if resp.status_code in [401, 402, 429]:
+                            save_key_index("openrouter", (k_idx + 1) % total_k, total_k); break
+                except Exception as e: print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
+        return None
 
-    # ২. Ollama Cloud (URL বাগ ফিক্সড)
-    ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
-    if ollama_keys:
+    def _try_ollama(vision_only):
+        ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
+        if not ollama_keys: return None
         total_k, start_idx = len(ollama_keys), get_saved_key_index("ollama", len(ollama_keys))
         ep = get_ollama_chat_endpoint()
-        print(f"\n--- [Priority 2: Ollama Cloud API] ({total_k} keys, Endpoint={ep}) ---")
+        models = [m for m in OLLAMA_MODELS if (m in OLLAMA_VISION_MODELS) == vision_only]
+        if not models: return None
+        print(f"\n--- [Ollama Cloud API | Vision={vision_only}] ({total_k} keys) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = ollama_keys[k_idx]
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-            for model in OLLAMA_MODELS:
-                is_vis = model in OLLAMA_VISION_MODELS and bool(base64_imgs)
-                for use_imgs in ([True, False] if is_vis else [False]):
-                    mo = {"role": "user", "content": prompt}
-                    if use_imgs: mo["images"] = base64_imgs[:2]
-                    try:
-                        resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.35}}, timeout=120)
-                        if resp.status_code == 200:
-                            data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
-                            if _is_quality_ai_result(data):
-                                save_key_index("ollama", k_idx, total_k)
-                                print(f"  ✅ [Ollama SUCCESS] Model: '{model}' (Key #{k_idx+1})")
-                                return normalize_scripts_count(data, scripts_count)
-                        else:
-                            print(f"  ⚠️ [Ollama] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                            if resp.status_code in [401, 402, 429]:
-                                save_key_index("ollama", (k_idx + 1) % total_k, total_k); break
-                    except Exception as e: print(f"  ⚠️ [Ollama] '{model}' error: {e}")
+            for model in models:
+                mo = {"role": "user", "content": prompt}
+                if vision_only and base64_imgs: mo["images"] = base64_imgs[:2]
+                try:
+                    resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.35}}, timeout=100)
+                    if resp.status_code == 200:
+                        data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
+                        if _is_quality_ai_result(data):
+                            save_key_index("ollama", k_idx, total_k)
+                            print(f"  ✅ [Ollama SUCCESS] Model: '{model}' (Key #{k_idx+1})")
+                            return normalize_scripts_count(data, scripts_count)
+                    else:
+                        print(f"  ⚠️ [Ollama] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
+                        if resp.status_code in [401, 402, 429]:
+                            save_key_index("ollama", (k_idx + 1) % total_k, total_k); break
+                except Exception as e: print(f"  ⚠️ [Ollama] '{model}' error: {e}")
+        return None
 
-    # ৩. Groq Cloud
+    def _try_gemini():
+        gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
+        if not gemini_keys: return None
+        total_k, start_idx = len(gemini_keys), get_saved_key_index("gemini", len(gemini_keys))
+        print(f"\n--- [Google Gemini Vision/Text] ({total_k} keys) ---")
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = gemini_keys[k_idx]
+            for g_model in GEMINI_MODELS:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={api_key}"
+                parts = [{"text": prompt}]
+                for b64 in base64_imgs[:2]: parts.append({"inlineData": {"mimeType": "image/jpeg", "data": b64}})
+                try:
+                    resp = requests.post(url, json={"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.35, "responseMimeType": "application/json"}}, timeout=60)
+                    if resp.status_code == 200:
+                        cands = resp.json().get("candidates", [])
+                        if cands:
+                            data = parse_json_safely(cands[0].get("content", {}).get("parts", [{}])[0].get("text", ""))
+                            if _is_quality_ai_result(data):
+                                save_key_index("gemini", k_idx, total_k)
+                                print(f"  ✅ [Gemini SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
+                                return normalize_scripts_count(data, scripts_count)
+                    else:
+                        print(f"  ⚠️ [Gemini] '{g_model}' HTTP {resp.status_code}: {resp.text[:120]}")
+                        if resp.status_code in [400, 401, 403, 429]:
+                            save_key_index("gemini", (k_idx + 1) % total_k, total_k); break
+                except Exception as e: print(f"  ⚠️ [Gemini] '{g_model}' error: {e}")
+        return None
+
+    if base64_imgs:
+        for fn in [lambda: _try_openrouter(True), lambda: _try_ollama(True), _try_gemini]:
+            res = fn()
+            if res: return res
+
+    for fn in [lambda: _try_openrouter(False), lambda: _try_ollama(False)]:
+        res = fn()
+        if res: return res
+
     groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
     if groq_keys:
         total_k, start_idx = len(groq_keys), get_saved_key_index("groq", len(groq_keys))
-        print(f"\n--- [Priority 3: Groq Cloud API] ({total_k} keys) ---")
+        print(f"\n--- [Groq Cloud API] ({total_k} keys) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
             api_key = groq_keys[k_idx]
@@ -477,33 +533,9 @@ Return strictly valid JSON only:
                     except Exception as e:
                         print(f"  ⚠️ [Groq] '{g_model}' error: {e}"); break
 
-    # ৪. Google Gemini
-    gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
-    if gemini_keys:
-        total_k, start_idx = len(gemini_keys), get_saved_key_index("gemini", len(gemini_keys))
-        print(f"\n--- [Priority 4 (Final Cloud): Google Gemini] ({total_k} keys) ---")
-        for offset in range(total_k):
-            k_idx = (start_idx + offset) % total_k
-            api_key = gemini_keys[k_idx]
-            for g_model in GEMINI_MODELS:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={api_key}"
-                parts = [{"text": prompt}]
-                for b64 in base64_imgs[:2]: parts.append({"inlineData": {"mimeType": "image/jpeg", "data": b64}})
-                try:
-                    resp = requests.post(url, json={"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.35, "responseMimeType": "application/json"}}, timeout=60)
-                    if resp.status_code == 200:
-                        cands = resp.json().get("candidates", [])
-                        if cands:
-                            data = parse_json_safely(cands[0].get("content", {}).get("parts", [{}])[0].get("text", ""))
-                            if _is_quality_ai_result(data):
-                                save_key_index("gemini", k_idx, total_k)
-                                print(f"  ✅ [Gemini SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
-                                return normalize_scripts_count(data, scripts_count)
-                    else:
-                        print(f"  ⚠️ [Gemini] '{g_model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                        if resp.status_code in [400, 401, 403, 429]:
-                            save_key_index("gemini", (k_idx + 1) % total_k, total_k); break
-                except Exception as e: print(f"  ⚠️ [Gemini] '{g_model}' error: {e}")
+    if not base64_imgs:
+        res = _try_gemini()
+        if res: return res
 
     print("  ⚠️ [Notice] Utilizing Local Fallback...")
     return normalize_scripts_count(smart_fallback_data(title, article_text, raw_html), scripts_count)
