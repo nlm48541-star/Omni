@@ -113,7 +113,19 @@ jobs:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_API_URL: ${{ secrets.OLLAMA_API_URL }}
 
-          # ভয়েস এআই প্ল্যাটফর্মসমূহ
+          # ভয়েস এআই প্ল্যাটফর্মসমূহ (Priority #1: Kaggle IndicF5 | Priority #2: Ninada Backup)
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_DATASET_SLUG: ${{ secrets.KAGGLE_DATASET_SLUG }}
+          KAGGLE_WORKER_SLUG: ${{ secrets.KAGGLE_WORKER_SLUG }}
+          KAGGLE_DEFAULT_VOICE: ${{ secrets.KAGGLE_DEFAULT_VOICE }}
+          KAGGLE_SPEECH_SPEED: ${{ secrets.KAGGLE_SPEECH_SPEED }}
+          KAGGLE_NFE_STEP: ${{ secrets.KAGGLE_NFE_STEP }}
+          KAGGLE_REF_AUDIO_PATH: ${{ secrets.KAGGLE_REF_AUDIO_PATH }}
+          KAGGLE_REF_TEXT: ${{ secrets.KAGGLE_REF_TEXT }}
+          DISABLE_KAGGLE_TTS: ${{ secrets.DISABLE_KAGGLE_TTS }}
+
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_VOICE_ID: ${{ secrets.GEMINI_VOICE_ID }}
