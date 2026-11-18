@@ -13,7 +13,7 @@ from tiktok_motion_engine import (
     _paste_sprite, _render_masked_rise, _make_minimal_card,
     _make_text_sprite, _make_word_sprites, _make_whatsapp_sprite,
     _draw_minimal_icon, _make_curl_sprite, _apply_transition,
-    _stream_frames_to_ffmpeg
+    _stream_frames_to_ffmpeg, _draw_box_text
 )
 
 DARK_PALETTES = [
@@ -121,7 +121,7 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
             bf, bsz = fit_single_line_font(ImageDraw.Draw(b_sp), core["cat_badge"], _get_style2_font, 58, 38, 520)
             draw_mixed_text(ImageDraw.Draw(b_sp), b_sp.width // 2, b_sp.height // 2, core["cat_badge"], bf, bsz, pal["bg"], anchor="mm")
             a["badge_sp"] = b_sp
-            a["hook_words"] = _make_word_sprites(core["hook_short"], _get_style2_font, 54, 36, 880, 2, pal["muted"], W // 2, 1155)
+            a["hook_words"] = _make_word_sprites(core["hook_short"], _get_style2_font, 54, 34, 880, 2, pal["muted"], W // 2, 1155)
 
         elif k == "vacancy":
             a["static_num"] = _make_text_sprite(bt["value"], _get_style2_font, 158, 66, 410, 1, pal["ink"])
@@ -132,29 +132,20 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
                 draw_mixed_text(ImageDraw.Draw(t_sp), t_sp.width // 2, ty2, l2, tf2, tsz2, pal["accent"], anchor="mm")
                 ty2 += tsz2 + 10
             a["tag_sp"] = t_sp
-            a["chips"] = []
-            for txt in bt.get("sub_chips", [])[:1]:
-                csp = _make_minimal_card(860, 108, radius=26, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=35)
-                cf, csz = fit_single_line_font(ImageDraw.Draw(csp), txt, _get_style2_font, 40, 28, 790)
-                draw_mixed_text(ImageDraw.Draw(csp), csp.width // 2, csp.height // 2, txt, cf, csz, pal["muted"], anchor="mm")
-                a["chips"].append(csp)
+            a["chips"] = [_draw_box_text(860, 122, txt, _get_style2_font, 38, 26, pal["muted"], pal["card"], pal["border"], max_lines=2, pad=22, radius=26) for txt in bt.get("sub_chips", [])[:1]]
 
         elif k == "post_spotlight":
             it = bt["post"]
-            a["card_bg"] = _make_minimal_card(920, 560, radius=36, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=45)
+            a["card_bg"] = _make_minimal_card(920, 610, radius=36, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=45)
             a["idx_badge"] = _make_minimal_card(104, 104, radius=24, fill=pal["accent_soft"], border=pal["accent"], border_w=2, pad=8, shadow_alpha=0)
             draw_mixed_text(ImageDraw.Draw(a["idx_badge"]), a["idx_badge"].width // 2, a["idx_badge"].height // 2, bn_nums[(bt["index"] - 1) % 4], _get_style2_font(42), 42, pal["accent"], anchor="mm")
-            a["title_sp"] = _make_text_sprite(it["post_name"], _get_style2_font, 58, 32, 680, 2, pal["ink"], align="lm")
+            a["title_sp"] = _make_text_sprite(it["post_name"], _get_style2_font, 52, 28, 670, 3, pal["ink"], align="lm")
             b_sp = _make_minimal_card(320, 114, radius=28, fill=pal["accent_soft"], border=pal["accent"], border_w=2, pad=10, shadow_alpha=0)
             vf_b, vsz_b = fit_single_line_font(ImageDraw.Draw(b_sp), it["vacancy"], _get_style2_font, 56, 30, 275)
             draw_mixed_text(ImageDraw.Draw(b_sp), b_sp.width // 2, b_sp.height // 2, it["vacancy"], vf_b, vsz_b, pal["accent"], anchor="mm")
             a["vac_sp"] = b_sp
-            a["qual_sp"] = _make_minimal_card(830, 112, radius=24, fill=pal["bg"], border=pal["border"], border_w=2, pad=8, shadow_alpha=0)
-            qf, qsz = fit_single_line_font(ImageDraw.Draw(a["qual_sp"]), f"যোগ্যতা: {it['qualification']}", _get_style2_font, 40, 28, 770)
-            draw_mixed_text(ImageDraw.Draw(a["qual_sp"]), a["qual_sp"].width // 2, a["qual_sp"].height // 2, f"যোগ্যতা: {it['qualification']}", qf, qsz, pal["ink"], anchor="mm")
-            a["grade_sp"] = _make_minimal_card(830, 112, radius=24, fill=pal["bg"], border=pal["border"], border_w=2, pad=8, shadow_alpha=0)
-            gf, gsz = fit_single_line_font(ImageDraw.Draw(a["grade_sp"]), f"গ্রেড/বেতন: {it['salary_grade']}", _get_style2_font, 40, 28, 770)
-            draw_mixed_text(ImageDraw.Draw(a["grade_sp"]), a["grade_sp"].width // 2, a["grade_sp"].height // 2, f"গ্রেড/বেতন: {it['salary_grade']}", gf, gsz, pal["muted"], anchor="mm")
+            a["qual_sp"] = _draw_box_text(830, 118, f"যোগ্যতা: {it['qualification']}", _get_style2_font, 38, 26, pal["ink"], pal["bg"], pal["border"], max_lines=2, pad=8, radius=24)
+            a["grade_sp"] = _draw_box_text(830, 118, f"গ্রেড/বেতন: {it['salary_grade']}", _get_style2_font, 38, 26, pal["muted"], pal["bg"], pal["border"], max_lines=2, pad=8, radius=24)
 
         elif k == "post_pair":
             cards = []
@@ -162,10 +153,10 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
                 cy = 670 if len(bt["posts"]) == 1 else ([660, 1015][idx_p])
                 bg_c = _make_minimal_card(930, 295, radius=28, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=45)
                 num_b = _make_minimal_card(96, 96, radius=22, fill=pal["accent_soft"], border=pal["accent"], border_w=2, pad=8, shadow_alpha=0)
-                draw_mixed_text(ImageDraw.Draw(num_b), num_b.width // 2, num_b.height // 2, bn_nums[(idx_p) % 4], _get_style2_font(38), 38, pal["accent"], anchor="mm")
-                t_sp = _make_text_sprite(it["post_name"], _get_style2_font, 52, 32, 465, 2, pal["ink"], align="lm")
-                v_sp = _make_text_sprite(it["vacancy"], _get_style2_font, 54, 30, 225, 1, pal["accent"], align="rm")
-                m_sp = _make_text_sprite(it["meta"], _get_style2_font, 40, 28, 720, 2, pal["muted"], align="lm")
+                draw_mixed_text(ImageDraw.Draw(num_b), num_b.width // 2, num_b.height // 2, bn_nums[idx_p % 4], _get_style2_font(38), 38, pal["accent"], anchor="mm")
+                t_sp = _make_text_sprite(it["post_name"], _get_style2_font, 48, 28, 465, 2, pal["ink"], align="lm")
+                v_sp = _make_text_sprite(it["vacancy"], _get_style2_font, 52, 28, 225, 1, pal["accent"], align="rm")
+                m_sp = _make_text_sprite(it["meta"], _get_style2_font, 38, 26, 720, 2, pal["muted"], align="lm")
                 cards.append({"bg": bg_c, "idx": num_b, "title": t_sp, "vac": v_sp, "meta": m_sp, "cy": cy, "h": 295})
             a["cards"] = cards
 
@@ -173,13 +164,13 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
             a["hero_bg"] = _make_minimal_card(920, 265, radius=32, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=45)
             a["icon_sp"] = _make_dark_icon(bt.get("icon", "info"), pal, size=116)
             a["lbl_sp"] = _make_text_sprite(bt.get("main_label", ""), _get_style2_font, 38, 28, 670, 1, pal["muted"], align="lm")
-            a["val_sp"] = _make_text_sprite(bt.get("main_val", ""), _get_style2_font, 52, 32, 680, 2, pal["accent"] if k == "focus_card" else pal["ink"], align="lm")
+            a["val_sp"] = _make_text_sprite(bt.get("main_val", ""), _get_style2_font, 50, 30, 680, 2, pal["accent"] if k == "focus_card" else pal["ink"], align="lm")
             chips = []
             for idx_c, ch_txt in enumerate(bt.get("sub_chips", [])[:3]):
-                c_bg = _make_minimal_card(920, 134, radius=26, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=40)
+                c_bg = _make_minimal_card(920, 142, radius=26, fill=pal["card"], border=pal["border"], border_w=2, shadow_alpha=40)
                 n_bg = _make_minimal_card(74, 74, radius=20, fill=pal["accent_soft"], border=pal["accent"], border_w=2, pad=8, shadow_alpha=0)
                 draw_mixed_text(ImageDraw.Draw(n_bg), n_bg.width // 2, n_bg.height // 2, bn_nums[idx_c % 4], _get_style2_font(34), 34, pal["accent"], anchor="mm")
-                t_sp = _make_text_sprite(ch_txt, _get_style2_font, 42, 28, 725, 2, pal["ink"], align="lm")
+                t_sp = _make_text_sprite(ch_txt, _get_style2_font, 40, 26, 735, 2, pal["ink"], align="lm")
                 chips.append({"bg": c_bg, "num": n_bg, "txt": t_sp})
             a["chips"] = chips
 
@@ -255,7 +246,7 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
             for idx_w, (wsp, wx, wy) in enumerate(a["org_words"]):
                 st = 0.12 + idx_w * 0.08
                 if local_t > st:
-                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.30, rise_px=50)
+                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.30, rise_px=42)
             if local_t > 0.28:
                 hl = int(210 * ease_out_cubic((local_t - 0.28) / 0.32))
                 fd.rounded_rectangle([W // 2 - hl, 845, W // 2 + hl, 852], radius=3, fill=pal["accent"])
@@ -265,7 +256,7 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
             for idx_h, (wsp, wx, wy) in enumerate(a["hook_words"]):
                 st = 0.56 + idx_h * 0.07
                 if local_t > st:
-                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.28, rise_px=38)
+                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.28, rise_px=34)
 
         elif k == "vacancy":
             arc_p = ease_out_cubic(min(1.0, max(0.0, local_t - 0.08) / 1.25))
@@ -293,18 +284,18 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
 
         elif k == "post_spotlight":
             cp = ease_out_back(min(1.0, local_t / 0.35))
-            _paste_sprite(frame, a["card_bg"], W // 2, 840, scale=0.90 + 0.10 * cp, opacity=min(1.0, local_t / 0.20))
+            _paste_sprite(frame, a["card_bg"], W // 2, 855, scale=0.90 + 0.10 * cp, opacity=min(1.0, local_t / 0.20))
             bar_p = ease_out_cubic(min(1.0, max(0.0, local_t - 0.12) / 0.38))
             if bar_p > 0.02:
-                fd.rounded_rectangle([96, 595, 108, 595 + max(12, int(490 * bar_p))], radius=6, fill=pal["accent"])
+                fd.rounded_rectangle([96, 595, 108, 595 + max(12, int(515 * bar_p))], radius=6, fill=pal["accent"])
             if local_t > 0.10:
-                _paste_sprite(frame, a["idx_badge"], 195, 675, scale=0.65 + 0.35 * ease_out_back((local_t - 0.10) / 0.30))
+                _paste_sprite(frame, a["idx_badge"], 195, 660, scale=0.65 + 0.35 * ease_out_back((local_t - 0.10) / 0.30))
             if local_t > 0.20:
-                _render_masked_rise(frame, a["title_sp"], 610, 675, (local_t - 0.20) / 0.30, rise_px=30)
+                _render_masked_rise(frame, a["title_sp"], 610, 660, (local_t - 0.20) / 0.30, rise_px=28)
             if local_t > 0.65:
                 vp = ease_out_back((local_t - 0.65) / 0.34)
                 pulse = 1.0 + (0.025 * math.sin(abs_t * 4.5) if local_t > 1.4 else 0.0)
-                _paste_sprite(frame, a["vac_sp"], W // 2, 825, scale=(0.68 + 0.32 * vp) * pulse)
+                _paste_sprite(frame, a["vac_sp"], W // 2, 822, scale=(0.68 + 0.32 * vp) * pulse)
             if local_t > 1.15:
                 qp = ease_out_cubic((local_t - 1.15) / 0.32)
                 _paste_sprite(frame, a["qual_sp"], W // 2 + int(90 * (1.0 - qp)), 965, opacity=qp)
@@ -354,14 +345,14 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
             for idx_c, ch in enumerate(a["chips"]):
                 st = 0.70 + idx_c * 0.72
                 if local_t <= st: continue
-                cy = 875 + idx_c * 165
+                cy = 880 + idx_c * 170
                 chp = ease_out_cubic((local_t - st) / 0.32)
                 dx = int(160 * (1.0 - chp)) * (-1 if idx_c % 2 == 0 else 1)
                 act_sc = 1.022 if (local_t > 2.2 and idx_c == active_chip) else 1.0
                 _paste_sprite(frame, ch["bg"], W // 2 + dx, cy, scale=act_sc, opacity=chp)
                 _paste_sprite(frame, ch["num"], 158 + dx, cy, scale=0.65 + 0.35 * ease_out_back((local_t - st) / 0.30), opacity=chp)
                 if local_t > st + 0.14:
-                    _render_masked_rise(frame, ch["txt"], 600 + dx, cy, (local_t - (st + 0.14)) / 0.26, rise_px=20)
+                    _render_masked_rise(frame, ch["txt"], 605 + dx, cy, (local_t - (st + 0.14)) / 0.26, rise_px=20)
 
         elif k == "deadline":
             cp = ease_out_back(min(1.0, local_t / 0.38))
@@ -411,7 +402,7 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
             for idx_w, (wsp, wx, wy) in enumerate(a["title_words"]):
                 st = 0.14 + idx_w * 0.08
                 if local_t > st:
-                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.26, rise_px=34)
+                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.26, rise_px=30)
             if local_t > 0.30:
                 pp = ease_out_back((local_t - 0.30) / 0.38)
                 pill_sc = a["pill_bg"].resize((max(40, int(a["pill_bg"].width * max(0.15, min(1.0, pp)))), a["pill_bg"].height), Image.BILINEAR)
@@ -450,11 +441,11 @@ def render_motion_style_2(job_data, audio_path, output_path, fps=24, script_inde
                 b_idx = i
                 break
         local_t = max(0.0, abs_t - beats[b_idx]["start"])
-        frame_cur = render_beat_frame(b_idx, local_t, abs_t)
         if b_idx > 0 and local_t < trans_sec:
             prev_bt = beats[b_idx - 1]
             frame_prev = render_beat_frame(b_idx - 1, max(0.0, prev_bt["end"] - prev_bt["start"]), abs_t)
-            return _apply_transition(frame_prev, frame_cur, local_t / trans_sec, trans_styles[(b_idx - 1) % 2], curl_sp)
-        return frame_cur
+            frame_settled = render_beat_frame(b_idx, max(local_t, 0.38), abs_t)
+            return _apply_transition(frame_prev, frame_settled, local_t / trans_sec, trans_styles[(b_idx - 1) % 2], curl_sp)
+        return render_beat_frame(b_idx, local_t, abs_t)
 
     return _stream_frames_to_ffmpeg(total_frames, fps, W, H, audio_path, output_path, get_frame)
