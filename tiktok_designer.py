@@ -3,11 +3,20 @@ import os
 import re
 import math
 import random
+import unicodedata
 from PIL import Image, ImageDraw, ImageFont
 
 FONTS_DIR = "Fonts"
 ELEMENTS_DIR = "Element"
 ALL_DESIGN_IDS = list(range(1, 26))
+
+_DEVA_SPECIAL_MAP = {
+    '\u0929': 'ন', '\u0931': 'র', '\u0933': 'ল', '\u0934': 'ল', '\u0935': 'ব',
+    '\u0945': 'ে', '\u0946': 'ে', '\u0949': 'ো', '\u094A': 'ো',
+    '\u0958': 'ক', '\u0959': 'খ', '\u095A': 'গ', '\u095B': 'জ',
+    '\u095C': 'ড়', '\u095D': 'ঢ়', '\u095E': 'ফ', '\u095F': 'য়',
+    '\u0964': '।', '\u0965': '।',
+}
 
 def find_whatsapp_logo():
     for d in [ELEMENTS_DIR, "Elements", "element", "elements", ".", "Images", "images"]:
@@ -71,8 +80,24 @@ def get_english_bold_font(font_size):
 
 def remove_emojis(text):
     if not text: return ""
+    s = str(text).replace('\u09af\u09bc', '\u09df').replace('\u09a1\u09bc', '\u09dc').replace('\u09a2\u09bc', '\u09dd')
     pat = re.compile("[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf\u2b00-\u2bff\u2300-\u23ff\u200d\ufe0f]", flags=re.UNICODE)
-    return re.sub(r'[⎚💻👥📱📞🏢]+', '', pat.sub('', str(text)))
+    s = re.sub(r'[⎚💻👥📱📞🏢]+', '', pat.sub('', s))
+    out = []
+    for ch in s:
+        cp = ord(ch)
+        if 0x0900 <= cp <= 0x097F:
+            if ch in _DEVA_SPECIAL_MAP:
+                out.append(_DEVA_SPECIAL_MAP[ch])
+            else:
+                cand = chr(cp + 0x80)
+                if 0x0980 <= ord(cand) <= 0x09FF and unicodedata.name(cand, ""):
+                    out.append(cand)
+        else:
+            out.append(ch)
+    cleaned = "".join(out).replace('\u09af\u09bc', '\u09df').replace('\u09a1\u09bc', '\u09dc').replace('\u09a2\u09bc', '\u09dd')
+    cleaned = re.sub(r'[^\u0980-\u09FF\x20-\x7E।–—‘’“”৳]', '', cleaned)
+    return re.sub(r' +', ' ', cleaned).strip()
 
 def split_text_by_script(text):
     clean = remove_emojis(text)
@@ -186,13 +211,13 @@ def fit_multiline_font(draw, text, font_fn, start_size, min_size, max_width, max
     return f, min_size, wrap_mixed_text(draw, text, f, min_size, max_width=max_width)
 
 def clean_org_name(org_name):
-    if not org_name: return "নিয়োগ বিজ্ঞপ্তি"
-    clean = re.sub(r'[\r\n\t]+', ' ', str(org_name)).strip()
-    clean = re.sub(r'(?:নতুন\s*)?নিয়োগ\s*বিজ্ঞপ্তি.*$', '', clean, flags=re.IGNORECASE)
+    if not org_name: return "নিয়োগ বিজ্ঞপ্তি"
+    clean = remove_emojis(re.sub(r'[\r\n\t]+', ' ', str(org_name)).strip())
+    clean = re.sub(r'(?:নতুন\s*)?নিয়োগ\s*বিজ্ঞপ্তি.*$', '', clean, flags=re.IGNORECASE)
     clean = re.sub(r'Job\s*Circular.*$', '', clean, flags=re.IGNORECASE)
     clean = re.sub(r'সার্কুলার.*$', '', clean, flags=re.IGNORECASE)
     clean = re.sub(r'202[0-9]|২০২[০-৯]', '', clean).strip(" -|,")
-    return clean if len(clean) > 2 else org_name
+    return clean if len(clean) > 2 else remove_emojis(org_name)
 
 def quad_bezier(p0, p1, p2, steps=48):
     pts = []
@@ -395,9 +420,27 @@ def _draw_stadium_cta(draw, info, y0, bg_col, border_col, prefix_col, num_col):
     draw_mixed_text(draw, wx, y0 + 162, p1, wf, 58, prefix_col, anchor="lm")
     draw_mixed_text(draw, wx + w1, y0 + 162, p2, wf, 58, num_col, anchor="lm")
 
-# =========================================================================
-# 🎨 DESIGN 1–10
-# =========================================================================
+def _draw_twin_df_boxes(draw, info, box_y0, border_col, body_bg, red_col, black_col):
+    box_y1 = box_y0 + 220
+    for bx0, bx1, cx, title_t, val_t, start_sz in [
+        (45, 520, 282, info["date_title"], info["date_text"], 40),
+        (560, 1035, 798, info["fee_title"], info["fee_text"], 48),
+    ]:
+        _draw_headered_box(draw, [bx0, box_y0, bx1, box_y1], 68, 24, border_col, border_col, body_bg)
+        hf, hsz = fit_single_line_font(draw, title_t, get_body_font, 40, 28, 430)
+        draw_mixed_text(draw, cx, box_y0 + 34, title_t, hf, hsz, (255, 255, 255), anchor="mm")
+        vf, vsz, vlines = fit_multiline_font(draw, val_t, get_body_font, start_sz, 28, 425, 2)
+        vy = box_y0 + ((118 if start_sz == 40 else 120) if len(vlines) > 1 else 144)
+        for vl in vlines:
+            draw_mixed_text(draw, cx, vy, vl, vf, vsz, red_col, anchor="mm")
+            vy += vsz + 10
+    return box_y1
+
+def _save_poster(im, output_path):
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    im.save(output_path, "PNG", quality=95)
+    return output_path
+
 def _render_design_1(info, output_path):
     W, H = 1080, 1920
     GREEN, BORDER_G, RED, BLACK = (6, 78, 21), (11, 94, 28), (204, 17, 0), (17, 24, 39)
@@ -443,8 +486,7 @@ def _render_design_1(info, output_path):
         for dl in dlines: draw_mixed_text(draw, tx, ty, dl, df, dsz, BLACK, anchor="lm"); ty += lh
         cur_y += ch + 32
     _draw_stadium_cta(draw, info, cur_y + 20, GREEN, (250, 204, 21), (255, 255, 255), (253, 224, 71))
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_2(info, output_path):
     W, H = 1080, 1920
@@ -474,8 +516,7 @@ def _render_design_2(info, output_path):
         for rl in rlines: draw_mixed_text(draw, W // 2, cur_y, rl, rf, rsz, BLACK, anchor="mm"); cur_y += rsz + 14
         cur_y += 32
     _draw_stadium_cta(draw, info, cur_y + 18, NAVY, GOLD, GOLD, GOLD)
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_3(info, output_path):
     W, H = 1080, 1920
@@ -497,8 +538,7 @@ def _render_design_3(info, output_path):
     for dy in [139, 162]:
         draw.line([(72, cta_y0 + dy), (165, cta_y0 + dy)], fill=GOLD, width=4)
         draw.line([(915, cta_y0 + dy), (1008, cta_y0 + dy)], fill=GOLD, width=4)
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_4(info, output_path):
     W, H = 1080, 1920
@@ -519,8 +559,7 @@ def _render_design_4(info, output_path):
     draw_mixed_text(draw, W // 2, cta_y0 + 56, "আবেদন করতে যোগাযোগ করুন।", get_body_font(46), 46, (255, 255, 255), anchor="mm")
     draw.rounded_rectangle([115, cta_y0 + 104, 965, cta_y0 + 198], radius=47, fill=GOLD)
     draw_mixed_text(draw, W // 2, cta_y0 + 151, "whatsapp: " + info["wa_number"], get_english_bold_font(58), 58, BLACK, anchor="mm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_5(info, output_path):
     W, H = 1080, 1920
@@ -547,8 +586,7 @@ def _render_design_5(info, output_path):
     w1, w2 = get_advance_width(p1, wf), get_advance_width(p2, wf); wx = (W - (w1 + w2)) // 2
     draw_mixed_text(draw, wx, cta_y0 + 162, p1, wf, 58, (255, 255, 255), anchor="lm")
     draw_mixed_text(draw, wx + w1, cta_y0 + 162, p2, wf, 58, (250, 204, 21), anchor="lm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_6(info, output_path):
     W, H = 1080, 1920
@@ -574,8 +612,7 @@ def _render_design_6(info, output_path):
     w1, w2 = get_advance_width(p1, wf), get_advance_width(p2, wf); wx = (W - (w1 + w2)) // 2
     draw_mixed_text(draw, wx, line_y + 193, p1, wf, 58, BLACK, anchor="lm")
     draw_mixed_text(draw, wx + w1, line_y + 193, p2, wf, 58, GREEN, anchor="lm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_7(info, output_path):
     W, H = 1080, 1920
@@ -619,20 +656,17 @@ def _render_design_7(info, output_path):
     draw.rectangle([0, fy0, W, fy0 + 12], fill=(245, 158, 11)); draw.rectangle([0, fy0 + 12, W, H], fill=GREEN)
     draw_mixed_text(draw, W // 2, fy0 + 76, "আবেদন করতে যোগাযোগ করুন।", get_body_font(46), 46, (255, 255, 255), anchor="mm")
     draw_mixed_text(draw, W // 2, fy0 + 152, "whatsapp: " + info["wa_number"], get_english_bold_font(60), 60, (250, 204, 21), anchor="mm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_8(info, output_path):
     W, H = 1080, 1920
     GREEN, MINT_BG, ORANGE, RED, BLACK = (6, 78, 21), (240, 253, 244), (234, 88, 12), (220, 38, 38), (17, 24, 39)
     im = Image.new("RGB", (W, H), (255, 255, 255))
     def decor(od, SW, SH, s):
-        od.polygon([(0, SH), (0, SH - 180 * s), (150 * s, SH)], fill=(6, 78, 21, 255))
-        od.polygon([(150 * s, SH), (185 * s, SH), (0, SH - 215 * s), (0, SH - 180 * s)], fill=(255, 255, 255, 255))
-        od.polygon([(185 * s, SH), (225 * s, SH), (0, SH - 255 * s), (0, SH - 215 * s)], fill=(6, 78, 21, 255))
-        od.polygon([(SW, SH), (SW, SH - 180 * s), (SW - 150 * s, SH)], fill=(6, 78, 21, 255))
-        od.polygon([(SW - 150 * s, SH), (SW - 185 * s, SH), (SW, SH - 215 * s), (SW, SH - 180 * s)], fill=(255, 255, 255, 255))
-        od.polygon([(SW - 185 * s, SH), (SW - 225 * s, SH), (SW, SH - 255 * s), (SW, SH - 215 * s)], fill=(6, 78, 21, 255))
+        for sign, base in [(1, 0), (-1, SW)]:
+            od.polygon([(base, SH), (base, SH - 180 * s), (base + sign * 150 * s, SH)], fill=(6, 78, 21, 255))
+            od.polygon([(base + sign * 150 * s, SH), (base + sign * 185 * s, SH), (base, SH - 215 * s), (base, SH - 180 * s)], fill=(255, 255, 255, 255))
+            od.polygon([(base + sign * 185 * s, SH), (base + sign * 225 * s, SH), (base, SH - 255 * s), (base, SH - 215 * s)], fill=(6, 78, 21, 255))
     im = _aa_overlay_draw(im, decor); draw = ImageDraw.Draw(im)
     draw.rounded_rectangle([125, 152, 955, 372], radius=46, fill=GREEN)
     for dy in [250, 272]: draw.line([(25, dy), (108, dy)], fill=GREEN, width=4); draw.line([(972, dy), (1055, dy)], fill=GREEN, width=4)
@@ -641,19 +675,7 @@ def _render_design_8(info, output_path):
     draw_mixed_text(draw, W // 2, 218, info["hook_top"], tf, tsz, (255, 255, 255), anchor="mm")
     draw_mixed_text(draw, W // 2, 304, info["hook_bottom"], bf, bsz, (250, 204, 21), anchor="mm")
     cur_y = _draw_summary(draw, info, 428, BLACK)
-    box_y0 = cur_y + 24; box_y1 = box_y0 + 220
-    _draw_headered_box(draw, [45, box_y0, 520, box_y1], 68, 24, GREEN, GREEN, MINT_BG)
-    df_h, dsz_h = fit_single_line_font(draw, info["date_title"], get_body_font, 40, 28, 430)
-    draw_mixed_text(draw, 282, box_y0 + 34, info["date_title"], df_h, dsz_h, (255, 255, 255), anchor="mm")
-    df, dsz, dlines = fit_multiline_font(draw, info["date_text"], get_body_font, 40, 28, 425, 2)
-    dy = box_y0 + (118 if len(dlines) > 1 else 144)
-    for dl in dlines: draw_mixed_text(draw, 282, dy, dl, df, dsz, RED, anchor="mm"); dy += dsz + 10
-    _draw_headered_box(draw, [560, box_y0, 1035, box_y1], 68, 24, GREEN, GREEN, MINT_BG)
-    ff_h, fsz_h = fit_single_line_font(draw, info["fee_title"], get_body_font, 40, 28, 430)
-    draw_mixed_text(draw, 798, box_y0 + 34, info["fee_title"], ff_h, fsz_h, (255, 255, 255), anchor="mm")
-    ff, fsz, flines = fit_multiline_font(draw, info["fee_text"], get_body_font, 48, 28, 425, 2)
-    fy = box_y0 + (120 if len(flines) > 1 else 144)
-    for fl in flines: draw_mixed_text(draw, 798, fy, fl, ff, fsz, RED, anchor="mm"); fy += fsz + 10
+    box_y1 = _draw_twin_df_boxes(draw, info, cur_y + 24, GREEN, MINT_BG, RED, BLACK)
     cur_y = box_y1 + 28
     for row in info["rows"]:
         rf, rsz, rlines = fit_multiline_font(draw, row["details"], get_body_font, 42, 30, 910, 3)
@@ -668,8 +690,7 @@ def _render_design_8(info, output_path):
     draw.rounded_rectangle([75, cta_y0, 1005, cta_y0 + 215], radius=107, fill=ORANGE)
     draw_mixed_text(draw, W // 2, cta_y0 + 64, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
     draw_mixed_text(draw, W // 2, cta_y0 + 144, "whatsapp: " + info["wa_number"], get_english_bold_font(58), 58, (253, 224, 71), anchor="mm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_9(info, output_path):
     W, H = 1080, 1920
@@ -688,19 +709,7 @@ def _render_design_9(info, output_path):
     draw_mixed_text(draw, W // 2, 212, info["hook_top"], tf, tsz, (255, 255, 255), anchor="mm")
     draw_mixed_text(draw, W // 2, 300, info["hook_bottom"], bf, bsz, GOLD, anchor="mm")
     cur_y = _draw_summary(draw, info, 432, BLACK)
-    box_y0 = cur_y + 24; box_y1 = box_y0 + 220
-    _draw_headered_box(draw, [45, box_y0, 520, box_y1], 68, 24, GREEN, GREEN, CREAM)
-    df_h, dsz_h = fit_single_line_font(draw, info["date_title"], get_body_font, 40, 28, 430)
-    draw_mixed_text(draw, 282, box_y0 + 34, info["date_title"], df_h, dsz_h, (255, 255, 255), anchor="mm")
-    df, dsz, dlines = fit_multiline_font(draw, info["date_text"], get_body_font, 40, 28, 425, 2)
-    dy = box_y0 + (118 if len(dlines) > 1 else 144)
-    for dl in dlines: draw_mixed_text(draw, 282, dy, dl, df, dsz, RED, anchor="mm"); dy += dsz + 10
-    _draw_headered_box(draw, [560, box_y0, 1035, box_y1], 68, 24, GREEN, GREEN, CREAM)
-    ff_h, fsz_h = fit_single_line_font(draw, info["fee_title"], get_body_font, 40, 28, 430)
-    draw_mixed_text(draw, 798, box_y0 + 34, info["fee_title"], ff_h, fsz_h, (255, 255, 255), anchor="mm")
-    ff, fsz, flines = fit_multiline_font(draw, info["fee_text"], get_body_font, 48, 28, 425, 2)
-    fy = box_y0 + (120 if len(flines) > 1 else 144)
-    for fl in flines: draw_mixed_text(draw, 798, fy, fl, ff, fsz, RED, anchor="mm"); fy += fsz + 10
+    box_y1 = _draw_twin_df_boxes(draw, info, cur_y + 24, GREEN, CREAM, RED, BLACK)
     cur_y = box_y1 + 30
     for row in info["rows"]:
         rf, rsz, rlines = fit_multiline_font(draw, row["details"], get_body_font, 42, 30, 575, 3)
@@ -721,8 +730,7 @@ def _render_design_9(info, output_path):
     draw_mixed_text(draw, W // 2, cta_y0 + 56, "আবেদন করতে যোগাযোগ করুন।", get_body_font(44), 44, (255, 255, 255), anchor="mm")
     draw.rounded_rectangle([95, cta_y0 + 102, 985, cta_y0 + 202], radius=50, fill=GOLD)
     draw_mixed_text(draw, W // 2, cta_y0 + 152, "whatsapp: " + info["wa_number"], get_english_bold_font(60), 60, GREEN, anchor="mm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 def _render_design_10(info, output_path):
     W, H = 1080, 1920
@@ -766,8 +774,7 @@ def _render_design_10(info, output_path):
     cta_font = get_body_font(52)
     draw_mixed_text(draw, W // 2, wa_y + 85, "আবেদন করতে হোয়াটসঅ্যাপে", cta_font, 52, BLACK, anchor="mm")
     draw_mixed_text(draw, W // 2, wa_y + 150, "যোগাযোগ করুন।", cta_font, 52, BLACK, anchor="mm")
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True); im.save(output_path, "PNG", quality=95)
-    return output_path
+    return _save_poster(im, output_path)
 
 DESIGN_RENDERERS = {
     1: _render_design_1, 2: _render_design_2, 3: _render_design_3,
