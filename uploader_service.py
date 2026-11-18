@@ -158,75 +158,27 @@ def get_all_tiktok_buffer_targets(config=None):
                 targets.append({"profile_id": p, "token": tok_def, "account_index": 1, "index": len(targets) + 1})
     return targets[:8]
 
-def upload_to_public_host(video_path):
+def _verify_direct_video_url(url):
+    """লিংকটি HTML রিডাইরেক্ট পেজ নয় বরং সরাসরি MP4 ভিডিও সার্ভ করছে কি না তা যাচাই করে"""
+    if not url or not str(url).startswith("http"):
+        return False
+    try:
+        r = requests.get(url, headers={"Range": "bytes=0-31", "User-Agent": "Mozilla/5.0"}, stream=True, allow_redirects=True, timeout=18)
+        if r.status_code not in (200, 206):
+            return False
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        if "text/html" in ctype:
+            return False
+        first_chunk = next(r.iter_content(chunk_size=32), b"")
+        r.close()
+        if b"<html" in first_chunk.lower() or b"<!doctype" in first_chunk.lower():
+            return False
+        return len(first_chunk) >= 8
+    except Exception:
+        return False
+
+def iter_public_host_urls(video_path):
     clean_filename = f"reel_{random.randint(100000, 999999)}.mp4"
-
-    try:
-        with open(video_path, 'rb') as vf:
-            r = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": (clean_filename, vf, "video/mp4")}, timeout=120)
-        if r.status_code == 200:
-            raw_u = (r.json().get("data") or {}).get("url", "").strip()
-            if raw_u.startswith("http"):
-                pub_url = raw_u.replace("http://", "https://").replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
-                print(f"    🌐 [Host OK (tmpfiles.org)] {pub_url}")
-                return pub_url
-        print(f"    ⚠️ [Host Notice (tmpfiles.org)] HTTP {r.status_code}: {r.text[:100]}")
-    except Exception as e:
-        print(f"    ⚠️ [Host Error (tmpfiles.org)] {e}")
-
-    try:
-        with open(video_path, 'rb') as vf:
-            r = requests.post("https://tmpfile.link/api/upload", files={"file": (clean_filename, vf, "video/mp4")}, headers={"Accept": "application/json"}, timeout=120)
-        if r.status_code in [200, 201]:
-            body = r.json()
-            pub_url = (body.get("downloadLink") or body.get("downloadUrl") or "").strip()
-            if pub_url.startswith("http"):
-                print(f"    🌐 [Host OK (tmpfile.link)] {pub_url}")
-                return pub_url
-        print(f"    ⚠️ [Host Notice (tmpfile.link)] HTTP {r.status_code}: {r.text[:100]}")
-    except Exception as e:
-        print(f"    ⚠️ [Host Error (tmpfile.link)] {e}")
-
-    try:
-        with open(video_path, 'rb') as vf:
-            r = requests.post("https://uguu.se/upload", files={"files[]": (clean_filename, vf, "video/mp4")}, timeout=120)
-        if r.status_code == 200:
-            files_arr = r.json().get("files") or []
-            if files_arr and str(files_arr[0].get("url", "")).startswith("http"):
-                pub_url = files_arr[0]["url"].strip()
-                print(f"    🌐 [Host OK (uguu.se)] {pub_url}")
-                return pub_url
-        print(f"    ⚠️ [Host Notice (uguu.se)] HTTP {r.status_code}: {r.text[:100]}")
-    except Exception as e:
-        print(f"    ⚠️ [Host Error (uguu.se)] {e}")
-
-    try:
-        with open(video_path, 'rb') as vf:
-            r = requests.put(f"https://ul.sto.care/{clean_filename}", data=vf, headers={"Content-Type": "video/mp4"}, timeout=120)
-        if r.status_code in [200, 201]:
-            m_url = re.search(r'https?://\S+', r.text.strip())
-            if m_url:
-                pub_url = m_url.group(0)
-                print(f"    🌐 [Host OK (sto.care)] {pub_url}")
-                return pub_url
-        print(f"    ⚠️ [Host Notice (sto.care)] HTTP {r.status_code}: {r.text[:100]}")
-    except Exception as e:
-        print(f"    ⚠️ [Host Error (sto.care)] {e}")
-
-    for name, url, data, file_key in [
-        ("Litterbox", "https://litterbox.catbox.moe/resources/internals/api.php", {"reqtype": "fileupload", "time": "24h"}, "fileToUpload"),
-        ("Catbox", "https://catbox.moe/user/api.php", {"reqtype": "fileupload"}, "fileToUpload"),
-    ]:
-        try:
-            with open(video_path, 'rb') as vf:
-                r = requests.post(url, data=data, files={file_key: (clean_filename, vf, "video/mp4")}, headers={"User-Agent": "curl/8.5.0"}, timeout=90)
-            if r.status_code in [200, 201] and r.text.strip().startswith("http"):
-                pub_url = r.text.strip()
-                print(f"    🌐 [Host OK ({name})] {pub_url}")
-                return pub_url
-            print(f"    ⚠️ [Host Notice ({name})] HTTP {r.status_code}: {r.text[:100]}")
-        except Exception as e:
-            print(f"    ⚠️ [Host Error ({name})] {e}")
 
     pd_key = os.environ.get("PIXELDRAIN_API_KEY", "").strip()
     if pd_key:
@@ -235,12 +187,98 @@ def upload_to_public_host(video_path):
                 r = requests.post("https://pixeldrain.com/api/file", files={"file": (clean_filename, vf, "video/mp4")}, auth=("", pd_key), timeout=90)
             if r.status_code in [200, 201] and r.json().get("id"):
                 pub_url = f"https://pixeldrain.com/api/file/{r.json()['id']}"
-                print(f"    🌐 [Host OK (Pixeldrain)] {pub_url}")
-                return pub_url
+                if _verify_direct_video_url(pub_url):
+                    print(f"    🌐 [Host OK (Pixeldrain)] {pub_url}")
+                    yield pub_url
         except Exception as e:
             print(f"    ⚠️ [Host Error (Pixeldrain)] {e}")
 
-    print("    ❌ [Public Host FAILED] All media hosts rejected the video upload!")
+    for name, url, data, file_key in [
+        ("Litterbox", "https://litterbox.catbox.moe/resources/internals/api.php", {"reqtype": "fileupload", "time": "24h"}, "fileToUpload"),
+        ("Catbox", "https://catbox.moe/user/api.php", {"reqtype": "fileupload"}, "fileToUpload"),
+    ]:
+        try:
+            with open(video_path, 'rb') as vf:
+                r = requests.post(url, data=data, files={file_key: (clean_filename, vf, "video/mp4")}, headers={"User-Agent": "curl/8.5.0"}, timeout=120)
+            if r.status_code in [200, 201] and r.text.strip().startswith("http"):
+                pub_url = r.text.strip()
+                if _verify_direct_video_url(pub_url):
+                    print(f"    🌐 [Host OK ({name})] {pub_url}")
+                    yield pub_url
+            else:
+                print(f"    ⚠️ [Host Notice ({name})] HTTP {r.status_code}: {r.text[:100]}")
+        except Exception as e:
+            print(f"    ⚠️ [Host Error ({name})] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://uguu.se/upload", files={"files[]": (clean_filename, vf, "video/mp4")}, timeout=120)
+        if r.status_code == 200:
+            files_arr = r.json().get("files") or []
+            if files_arr and str(files_arr[0].get("url", "")).startswith("http"):
+                pub_url = files_arr[0]["url"].strip()
+                if _verify_direct_video_url(pub_url):
+                    print(f"    🌐 [Host OK (uguu.se)] {pub_url}")
+                    yield pub_url
+        else:
+            print(f"    ⚠️ [Host Notice (uguu.se)] HTTP {r.status_code}: {r.text[:100]}")
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (uguu.se)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://0x0.st", files={"file": (clean_filename, vf, "video/mp4")}, headers={"User-Agent": "curl/8.5.0"}, timeout=120)
+        if r.status_code in [200, 201] and r.text.strip().startswith("http"):
+            pub_url = r.text.strip()
+            if _verify_direct_video_url(pub_url):
+                print(f"    🌐 [Host OK (0x0.st)] {pub_url}")
+                yield pub_url
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (0x0.st)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://tmpfile.link/api/upload", files={"file": (clean_filename, vf, "video/mp4")}, headers={"Accept": "application/json"}, timeout=120)
+        if r.status_code in [200, 201]:
+            body = r.json()
+            pub_url = (body.get("downloadLink") or body.get("downloadUrl") or "").strip()
+            if pub_url.startswith("http") and _verify_direct_video_url(pub_url):
+                print(f"    🌐 [Host OK (tmpfile.link)] {pub_url}")
+                yield pub_url
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (tmpfile.link)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.put(f"https://ul.sto.care/{clean_filename}", data=vf, headers={"Content-Type": "video/mp4"}, timeout=120)
+        if r.status_code in [200, 201]:
+            m_url = re.search(r'https?://\S+', r.text.strip())
+            if m_url and _verify_direct_video_url(m_url.group(0)):
+                pub_url = m_url.group(0)
+                print(f"    🌐 [Host OK (sto.care)] {pub_url}")
+                yield pub_url
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (sto.care)] {e}")
+
+    try:
+        with open(video_path, 'rb') as vf:
+            r = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": (clean_filename, vf, "video/mp4")}, timeout=120)
+        if r.status_code == 200:
+            raw_u = (r.json().get("data") or {}).get("url", "").strip()
+            if raw_u.startswith("http"):
+                pub_url = raw_u.replace("http://", "https://").replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
+                if _verify_direct_video_url(pub_url):
+                    print(f"    🌐 [Host OK (tmpfiles.org)] {pub_url}")
+                    yield pub_url
+                else:
+                    print("    ⚠️ [Host Skip (tmpfiles.org)] Served HTML/non-video response.")
+    except Exception as e:
+        print(f"    ⚠️ [Host Error (tmpfiles.org)] {e}")
+
+def upload_to_public_host(video_path):
+    for pub_url in iter_public_host_urls(video_path):
+        return pub_url
+    print("    ❌ [Public Host FAILED] All media hosts failed direct-video verification!")
     return None
 
 def upload_to_specific_buffer_account(video_path, description, profile_id, access_token):
@@ -248,11 +286,7 @@ def upload_to_specific_buffer_account(video_path, description, profile_id, acces
         print("    ⚠️ [Buffer Skip] Missing profile_id or access_token.")
         return False
 
-    video_url = upload_to_public_host(video_path)
-    if not video_url:
-        return False
-
-    clean_desc = description[:100] + " #jobcircular #jobs #bangladesh"
+    clean_desc = re.sub(r'\s+', ' ', str(description or "")).strip()[:120] + " #jobcircular #jobs #bangladesh"
     graphql_url = "https://api.buffer.com"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"}
     mutation = """
@@ -263,33 +297,47 @@ def upload_to_specific_buffer_account(video_path, description, profile_id, acces
       }
     }
     """
-    for mode in ["shareNow", "addToQueue"]:
-        payload = {
-            "query": mutation,
-            "variables": {
-                "input": {
-                    "channelId": profile_id,
-                    "text": clean_desc,
-                    "schedulingType": "automatic",
-                    "mode": mode,
-                    "assets": [{"video": {"url": video_url}}]
+
+    any_host_tried = False
+    for video_url in iter_public_host_urls(video_path):
+        any_host_tried = True
+        url_rejected = False
+        for mode in ["shareNow", "addToQueue"]:
+            payload = {
+                "query": mutation,
+                "variables": {
+                    "input": {
+                        "channelId": profile_id,
+                        "text": clean_desc,
+                        "schedulingType": "automatic",
+                        "mode": mode,
+                        "assets": [{"video": {"url": video_url}}]
+                    }
                 }
             }
-        }
-        try:
-            res = requests.post(graphql_url, json=payload, headers=headers, timeout=120)
-            if res.status_code == 200:
-                body = res.json()
-                cp = body.get("data", {}).get("createPost", {}) or {}
-                if "post" in cp and cp["post"].get("id"):
-                    print(f"    ✅ [TikTok Buffer SUCCESS] Mode={mode}, PostID={cp['post']['id']}, Channel={profile_id}")
-                    return True
+            try:
+                res = requests.post(graphql_url, json=payload, headers=headers, timeout=120)
+                if res.status_code == 200:
+                    body = res.json()
+                    cp = body.get("data", {}).get("createPost", {}) or {}
+                    if "post" in cp and cp["post"].get("id"):
+                        print(f"    ✅ [TikTok Buffer SUCCESS] Mode={mode}, PostID={cp['post']['id']}, Channel={profile_id}")
+                        return True
+                    err_msg = str(cp.get("message") or json.dumps(body, ensure_ascii=False))
+                    print(f"    ⚠️ [Buffer Mutation Notice ({mode})] {err_msg[:220]}")
+                    if "could not be read" in err_msg.lower() or "invalid post" in err_msg.lower():
+                        url_rejected = True
+                        break
                 else:
-                    print(f"    ⚠️ [Buffer Mutation Notice ({mode})] {json.dumps(body, ensure_ascii=False)[:220]}")
-            else:
-                print(f"    ⚠️ [Buffer HTTP {res.status_code} ({mode})] {res.text[:180]}")
-        except Exception as e:
-            print(f"    ⚠️ [Buffer Request Notice ({mode})] {e}")
+                    print(f"    ⚠️ [Buffer HTTP {res.status_code} ({mode})] {res.text[:180]}")
+            except Exception as e:
+                print(f"    ⚠️ [Buffer Request Notice ({mode})] {e}")
+        if url_rejected:
+            print("    🔄 [Buffer Failover] Trying next direct video host...")
+            continue
+
+    if not any_host_tried:
+        print("    ❌ [Buffer Failed] No direct video host URL could be obtained.")
     return False
 
 def upload_video_to_tiktok_buffer(video_path, description, config=None):
