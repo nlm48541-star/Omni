@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import re
 import math
 import random
 import subprocess
@@ -8,10 +7,9 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from tiktok_designer import (
     find_whatsapp_logo, get_header_font, get_body_font, get_english_bold_font,
-    remove_emojis, measure_mixed_text, draw_mixed_text,
-    fit_single_line_font, fit_multiline_font, clean_org_name
+    measure_mixed_text, draw_mixed_text, fit_single_line_font, fit_multiline_font
 )
-from motion_storyboard import build_dynamic_storyboard, to_bn_num, EN_DIGITS
+from motion_storyboard import build_dynamic_storyboard, to_bn_num
 
 MINIMAL_PALETTES = [
     {
@@ -74,18 +72,13 @@ def _paste_sprite(canvas, sp, cx, cy, scale=1.0, opacity=1.0):
         alpha = alpha.point([int(i * opacity) for i in range(256)])
     canvas.paste(sp, (int(round(cx - sp.width / 2)), int(round(cy - sp.height / 2))), alpha)
 
-def _render_masked_rise(canvas, sp, cx, cy, prog, rise_px=48):
+def _render_masked_rise(canvas, sp, cx, cy, prog, rise_px=38):
     p = ease_out_cubic(prog)
     if p <= 0.02 or sp is None:
         return
-    vis_h = max(2, int(round(sp.height * min(1.0, p * 1.15))))
     dy = int(round(rise_px * (1.0 - p)))
-    cropped = sp.crop((0, 0, sp.width, vis_h))
-    alpha = cropped.getchannel("A")
-    if p < 0.72:
-        f = p / 0.72
-        alpha = alpha.point([int(i * f) for i in range(256)])
-    canvas.paste(cropped, (int(round(cx - sp.width / 2)), int(round(cy - sp.height / 2 + dy))), alpha)
+    op = min(1.0, p * 1.35)
+    _paste_sprite(canvas, sp, cx, cy + dy, opacity=op)
 
 def _make_minimal_card(w, h, radius=36, fill=(255, 255, 255), border=None, border_w=2, pad=22, shadow_alpha=24):
     cw, ch = w + pad * 2, h + pad * 2
@@ -97,11 +90,11 @@ def _make_minimal_card(w, h, radius=36, fill=(255, 255, 255), border=None, borde
     return sh
 
 def _make_text_sprite(text, font_fn, start_sz, min_sz, max_w, max_lines, color, align="mm"):
-    tmp = Image.new("RGBA", (max_w + 40, 420), (0, 0, 0, 0))
+    tmp = Image.new("RGBA", (max_w + 40, 480), (0, 0, 0, 0))
     td = ImageDraw.Draw(tmp)
     f, sz, lines = fit_multiline_font(td, text, font_fn, start_sz, min_sz, max_w, max_lines)
-    lh = sz + 14
-    h = max(sz + 30, len(lines) * lh + 24)
+    lh = sz + 16
+    h = max(sz + 44, len(lines) * lh + 34)
     sp = Image.new("RGBA", (max_w + 40, h), (0, 0, 0, 0))
     sd = ImageDraw.Draw(sp)
     cx = sp.width // 2 if align == "mm" else (sp.width - 14 if align == "rm" else 14)
@@ -126,7 +119,7 @@ def _make_word_sprites(text, font_fn, start_sz, min_sz, max_w, max_lines, color,
         line_w = sum(widths) + sp_w * max(0, len(words) - 1)
         cur_x = center_x - line_w / 2.0
         for w, ww in zip(words, widths):
-            pad_w, pad_h = ww + 28, sz + 36
+            pad_w, pad_h = ww + 28, sz + 40
             wsp = Image.new("RGBA", (max(16, pad_w), max(24, pad_h)), (0, 0, 0, 0))
             draw_mixed_text(ImageDraw.Draw(wsp), pad_w // 2, pad_h // 2, w, f, sz, color, anchor="mm")
             word_items.append((wsp, cur_x + ww / 2.0, cur_y))
@@ -290,6 +283,17 @@ def _make_icon_badge(kind, pal, size=118):
     _draw_minimal_icon(d, size // 2, size // 2, kind, pal["accent"] + (255,))
     return sp
 
+def _draw_box_text(box_w, box_h, text, font_fn, start_sz, min_sz, color, fill, border, max_lines=2, pad=10, radius=28):
+    sp = _make_minimal_card(box_w, box_h, radius=radius, fill=fill, border=border, border_w=2, pad=pad, shadow_alpha=0)
+    d = ImageDraw.Draw(sp)
+    f, sz, lines = fit_multiline_font(d, text, font_fn, start_sz, min_sz, box_w - 44, max_lines)
+    lh = sz + 10
+    y = sp.height // 2 - ((len(lines) - 1) * lh) // 2
+    for l in lines:
+        draw_mixed_text(d, sp.width // 2, y, l, f, sz, color, anchor="mm")
+        y += lh
+    return sp
+
 def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, script_index=0):
     if not os.path.exists(audio_path):
         return False
@@ -315,7 +319,6 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
     hd.rounded_rectangle([714, 48, 916, 120], radius=24, fill=pal["accent_soft"] + (255,))
     draw_mixed_text(hd, 815, 84, "বিজ্ঞপ্তি", get_body_font(34), 34, pal["accent"], anchor="mm")
 
-    # প্রতিটি বিটের জন্য স্প্রাইট প্রি-রেন্ডার করা (মেমরি ও স্পিড অপ্টিমাইজড)
     beat_assets = []
     bn_step_nums = ["০১", "০২", "০৩", "০৪"]
     countup_cache = {}
@@ -329,7 +332,7 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             bf, bsz = fit_single_line_font(ImageDraw.Draw(b_sp), core["cat_badge"], get_body_font, 60, 40, 540)
             draw_mixed_text(ImageDraw.Draw(b_sp), b_sp.width // 2, b_sp.height // 2, core["cat_badge"], bf, bsz, (255, 255, 255), anchor="mm")
             a["badge_sp"] = b_sp
-            a["hook_words"] = _make_word_sprites(core["hook_short"], get_body_font, 56, 38, 900, 2, pal["muted"], W // 2, 1170)
+            a["hook_words"] = _make_word_sprites(core["hook_short"], get_body_font, 56, 36, 900, 2, pal["muted"], W // 2, 1170)
 
         elif k == "vacancy":
             a["card_sp"] = _make_minimal_card(900, 380, radius=44, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
@@ -341,36 +344,29 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
                 draw_mixed_text(ImageDraw.Draw(tag_sp), tag_sp.width // 2, ty2, l2, tf2, tsz2, pal["accent"], anchor="mm")
                 ty2 += tsz2 + 10
             a["tag_sp"] = tag_sp
-            a["chips"] = [_make_minimal_card(880, 114, radius=28, fill=(255, 255, 255), border=pal["hairline"], border_w=2) for _ in bt.get("sub_chips", [])[:1]]
-            for csp, txt in zip(a["chips"], bt.get("sub_chips", [])[:1]):
-                cf, csz = fit_single_line_font(ImageDraw.Draw(csp), txt, get_body_font, 42, 28, 810)
-                draw_mixed_text(ImageDraw.Draw(csp), csp.width // 2, csp.height // 2, txt, cf, csz, pal["muted"], anchor="mm")
+            a["chips"] = [_draw_box_text(880, 126, txt, get_body_font, 40, 26, pal["muted"], (255, 255, 255), pal["hairline"], max_lines=2, pad=22) for txt in bt.get("sub_chips", [])[:1]]
 
         elif k == "post_spotlight":
             it = bt["post"]
-            a["card_bg"] = _make_minimal_card(930, 560, radius=42, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
-            a["title_sp"] = _make_text_sprite(it["post_name"], get_body_font, 62, 34, 830, 2, pal["ink"])
+            a["card_bg"] = _make_minimal_card(930, 610, radius=42, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
+            a["title_sp"] = _make_text_sprite(it["post_name"], get_body_font, 54, 28, 830, 3, pal["ink"])
             b_sp = _make_minimal_card(320, 118, radius=59, fill=pal["accent_soft"], border=pal["accent"], border_w=2, pad=12, shadow_alpha=0)
             vf_b, vsz_b = fit_single_line_font(ImageDraw.Draw(b_sp), it["vacancy"], get_body_font, 58, 32, 275)
             draw_mixed_text(ImageDraw.Draw(b_sp), b_sp.width // 2, b_sp.height // 2, it["vacancy"], vf_b, vsz_b, pal["accent"], anchor="mm")
             a["vac_sp"] = b_sp
-            a["qual_sp"] = _make_minimal_card(840, 116, radius=28, fill=pal["bg"], border=pal["hairline"], border_w=2, pad=10, shadow_alpha=0)
-            qf, qsz = fit_single_line_font(ImageDraw.Draw(a["qual_sp"]), f"যোগ্যতা: {it['qualification']}", get_body_font, 42, 28, 780)
-            draw_mixed_text(ImageDraw.Draw(a["qual_sp"]), a["qual_sp"].width // 2, a["qual_sp"].height // 2, f"যোগ্যতা: {it['qualification']}", qf, qsz, pal["ink"], anchor="mm")
-            a["grade_sp"] = _make_minimal_card(840, 116, radius=28, fill=pal["bg"], border=pal["hairline"], border_w=2, pad=10, shadow_alpha=0)
-            gf, gsz = fit_single_line_font(ImageDraw.Draw(a["grade_sp"]), f"গ্রেড/বেতন: {it['salary_grade']}", get_body_font, 42, 28, 780)
-            draw_mixed_text(ImageDraw.Draw(a["grade_sp"]), a["grade_sp"].width // 2, a["grade_sp"].height // 2, f"গ্রেড/বেতন: {it['salary_grade']}", gf, gsz, pal["muted"], anchor="mm")
+            a["qual_sp"] = _draw_box_text(840, 118, f"যোগ্যতা: {it['qualification']}", get_body_font, 40, 26, pal["ink"], pal["bg"], pal["hairline"], max_lines=2)
+            a["grade_sp"] = _draw_box_text(840, 118, f"গ্রেড/বেতন: {it['salary_grade']}", get_body_font, 40, 26, pal["muted"], pal["bg"], pal["hairline"], max_lines=2)
 
         elif k == "post_pair":
             cards = []
             for idx_p, it in enumerate(bt["posts"]):
                 cy = 670 if len(bt["posts"]) == 1 else ([660, 1020][idx_p])
                 bg_c = _make_minimal_card(940, 300, radius=34, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
-                t_sp = _make_text_sprite(it["post_name"], get_body_font, 54, 32, 535, 2, pal["ink"], align="lm")
+                t_sp = _make_text_sprite(it["post_name"], get_body_font, 50, 28, 535, 2, pal["ink"], align="lm")
                 b_sp = _make_minimal_card(255, 108, radius=26, fill=pal["accent_soft"], pad=12, shadow_alpha=0)
-                vf_b, vsz_b = fit_single_line_font(ImageDraw.Draw(b_sp), it["vacancy"], get_body_font, 56, 30, 225)
+                vf_b, vsz_b = fit_single_line_font(ImageDraw.Draw(b_sp), it["vacancy"], get_body_font, 54, 28, 225)
                 draw_mixed_text(ImageDraw.Draw(b_sp), b_sp.width // 2, b_sp.height // 2, it["vacancy"], vf_b, vsz_b, pal["accent"], anchor="mm")
-                m_sp = _make_text_sprite(it["meta"], get_body_font, 42, 28, 820, 2, pal["muted"], align="lm")
+                m_sp = _make_text_sprite(it["meta"], get_body_font, 40, 26, 820, 2, pal["muted"], align="lm")
                 cards.append({"bg": bg_c, "title": t_sp, "badge": b_sp, "meta": m_sp, "cy": cy, "h": 300})
             a["cards"] = cards
 
@@ -378,13 +374,13 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             a["hero_bg"] = _make_minimal_card(920, 270, radius=38, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
             a["icon_sp"] = _make_icon_badge(bt.get("icon", "info"), pal, size=124)
             a["lbl_sp"] = _make_text_sprite(bt.get("main_label", ""), get_body_font, 40, 28, 680, 1, pal["muted"], align="lm")
-            a["val_sp"] = _make_text_sprite(bt.get("main_val", ""), get_body_font, 54, 32, 690, 2, pal["accent"] if k == "focus_card" else pal["ink"], align="lm")
+            a["val_sp"] = _make_text_sprite(bt.get("main_val", ""), get_body_font, 52, 30, 690, 2, pal["accent"] if k == "focus_card" else pal["ink"], align="lm")
             chip_entries = []
             for idx_c, ch_txt in enumerate(bt.get("sub_chips", [])[:3]):
-                c_bg = _make_minimal_card(920, 134, radius=30, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
+                c_bg = _make_minimal_card(920, 142, radius=30, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
                 num_bg = _make_minimal_card(74, 74, radius=20, fill=pal["accent_soft"], border=pal["accent"], border_w=2, pad=8, shadow_alpha=0)
                 draw_mixed_text(ImageDraw.Draw(num_bg), num_bg.width // 2, num_bg.height // 2, bn_step_nums[idx_c % 4], get_body_font(34), 34, pal["accent"], anchor="mm")
-                t_sp = _make_text_sprite(ch_txt, get_body_font, 44, 28, 725, 2, pal["ink"], align="lm")
+                t_sp = _make_text_sprite(ch_txt, get_body_font, 40, 26, 735, 2, pal["ink"], align="lm")
                 chip_entries.append({"bg": c_bg, "num": num_bg, "txt": t_sp})
             a["chips"] = chip_entries
 
@@ -392,8 +388,8 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             a["card_bg"] = _make_minimal_card(940, 440, radius=42, fill=(255, 255, 255), border=pal["hairline"], border_w=2)
             a["lbl1"] = _make_text_sprite("শুরু", get_body_font, 44, 32, 300, 1, pal["muted"])
             a["lbl2"] = _make_text_sprite("শেষ তারিখ", get_body_font, 44, 32, 300, 1, pal["accent"])
-            a["d1"] = _make_text_sprite(bt["start_date"], get_body_font, 60, 36, 370, 2, pal["ink"])
-            a["d2"] = _make_text_sprite(bt["end_date"], get_body_font, 60, 36, 370, 2, pal["accent"])
+            a["d1"] = _make_text_sprite(bt["start_date"], get_body_font, 58, 34, 370, 2, pal["ink"])
+            a["d2"] = _make_text_sprite(bt["end_date"], get_body_font, 58, 34, 370, 2, pal["accent"])
             a["urg_sp"] = _make_minimal_card(740, 120, radius=60, fill=pal["accent_soft"], border=pal["accent"], border_w=2)
             draw_mixed_text(ImageDraw.Draw(a["urg_sp"]), a["urg_sp"].width // 2, a["urg_sp"].height // 2, "সময়মতো আবেদন করুন", get_body_font(46), 46, pal["accent"], anchor="mm")
 
@@ -428,7 +424,6 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
         bt = beats[b_idx]
         a = beat_assets[b_idx]
         k = bt["kind"]
-        b_dur = max(1.0, bt["end"] - bt["start"])
 
         frame = bg_base.copy()
         fd = ImageDraw.Draw(frame)
@@ -450,7 +445,7 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             for idx_w, (wsp, wx, wy) in enumerate(a["org_words"]):
                 st = 0.12 + idx_w * 0.08
                 if local_t > st:
-                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.30, rise_px=50)
+                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.30, rise_px=42)
             if local_t > 0.28:
                 hl = int(190 * ease_out_cubic((local_t - 0.28) / 0.32))
                 fd.rounded_rectangle([W // 2 - hl, 868, W // 2 + hl, 875], radius=3, fill=pal["accent"])
@@ -460,7 +455,7 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             for idx_h, (wsp, wx, wy) in enumerate(a["hook_words"]):
                 st = 0.58 + idx_h * 0.07
                 if local_t > st:
-                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.28, rise_px=38)
+                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.28, rise_px=34)
 
         elif k == "vacancy":
             cp = ease_out_back(min(1.0, local_t / 0.38))
@@ -481,26 +476,26 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
                 _paste_sprite(frame, a["tag_sp"], W // 2, 975 + int(35 * (1.0 - min(1.0, tp))), scale=0.82 + 0.18 * tp, opacity=min(1.0, (local_t - 0.65) / 0.20))
             if a["chips"] and local_t > 1.35:
                 chp = ease_out_back((local_t - 1.35) / 0.36)
-                _paste_sprite(frame, a["chips"][0], W // 2, 1175 + int(28 * (1.0 - min(1.0, chp))), scale=0.88 + 0.12 * chp, opacity=min(1.0, (local_t - 1.35) / 0.20))
+                _paste_sprite(frame, a["chips"][0], W // 2, 1185 + int(28 * (1.0 - min(1.0, chp))), scale=0.88 + 0.12 * chp, opacity=min(1.0, (local_t - 1.35) / 0.20))
 
         elif k == "post_spotlight":
             cp = ease_out_back(min(1.0, local_t / 0.35))
-            _paste_sprite(frame, a["card_bg"], W // 2, 840, scale=0.88 + 0.12 * cp, opacity=min(1.0, local_t / 0.20))
+            _paste_sprite(frame, a["card_bg"], W // 2, 855, scale=0.88 + 0.12 * cp, opacity=min(1.0, local_t / 0.20))
             bar_p = ease_out_cubic(min(1.0, max(0.0, local_t - 0.12) / 0.38))
             if bar_p > 0.02:
-                fd.rounded_rectangle([96, 595, 112, 595 + max(12, int(490 * bar_p))], radius=8, fill=pal["accent"])
+                fd.rounded_rectangle([96, 595, 112, 595 + max(12, int(515 * bar_p))], radius=8, fill=pal["accent"])
             if local_t > 0.18:
-                _render_masked_rise(frame, a["title_sp"], W // 2, 665, (local_t - 0.18) / 0.30, rise_px=34)
+                _render_masked_rise(frame, a["title_sp"], W // 2, 650, (local_t - 0.18) / 0.30, rise_px=30)
             if local_t > 0.65:
                 vp = ease_out_back((local_t - 0.65) / 0.34)
                 pulse = 1.0 + (0.025 * math.sin(abs_t * 4.5) if local_t > 1.4 else 0.0)
                 _paste_sprite(frame, a["vac_sp"], W // 2, 815, scale=(0.65 + 0.35 * vp) * pulse, opacity=min(1.0, (local_t - 0.65) / 0.18))
             if local_t > 1.15:
                 qp = ease_out_cubic((local_t - 1.15) / 0.32)
-                _paste_sprite(frame, a["qual_sp"], W // 2 + int(80 * (1.0 - qp)), 960, opacity=qp)
+                _paste_sprite(frame, a["qual_sp"], W // 2 + int(80 * (1.0 - qp)), 958, opacity=qp)
             if local_t > 1.75:
                 gp = ease_out_cubic((local_t - 1.75) / 0.32)
-                _paste_sprite(frame, a["grade_sp"], W // 2 - int(80 * (1.0 - gp)), 1095, opacity=gp)
+                _paste_sprite(frame, a["grade_sp"], W // 2 - int(80 * (1.0 - gp)), 1092, opacity=gp)
 
         elif k == "post_pair":
             active_c = int(local_t / 1.4) % max(1, len(a["cards"]))
@@ -532,28 +527,28 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             if local_t > 0.18:
                 _render_masked_rise(frame, a["lbl_sp"], 625, 545, (local_t - 0.18) / 0.26, rise_px=22)
             if local_t > 0.32:
-                _render_masked_rise(frame, a["val_sp"], 625, 640, (local_t - 0.32) / 0.32, rise_px=30)
+                _render_masked_rise(frame, a["val_sp"], 625, 640, (local_t - 0.32) / 0.32, rise_px=28)
 
             n_ch = len(a["chips"])
             active_chip = int(max(0, local_t - 1.8) / 1.1) % max(1, n_ch)
             for idx_c, ch in enumerate(a["chips"]):
                 st = 0.72 + idx_c * 0.75
                 if local_t <= st: continue
-                cy = 880 + idx_c * 165
+                cy = 880 + idx_c * 170
                 chp = ease_out_cubic((local_t - st) / 0.32)
                 dx = int(120 * (1.0 - chp)) * (-1 if idx_c % 2 == 0 else 1)
                 act_sc = 1.022 if (local_t > 2.2 and idx_c == active_chip) else 1.0
                 _paste_sprite(frame, ch["bg"], W // 2 + dx, cy, scale=act_sc, opacity=chp)
                 _paste_sprite(frame, ch["num"], 158 + dx, cy, scale=0.65 + 0.35 * ease_out_back((local_t - st) / 0.30), opacity=chp)
                 if local_t > st + 0.14:
-                    _render_masked_rise(frame, ch["txt"], 600 + dx, cy, (local_t - (st + 0.14)) / 0.26, rise_px=20)
+                    _render_masked_rise(frame, ch["txt"], 605 + dx, cy, (local_t - (st + 0.14)) / 0.26, rise_px=20)
 
         elif k == "deadline":
             cp = ease_out_back(min(1.0, local_t / 0.38))
             _paste_sprite(frame, a["card_bg"], W // 2, 725, scale=0.84 + 0.16 * cp, opacity=min(1.0, local_t / 0.22))
             if local_t > 0.18:
                 _render_masked_rise(frame, a["lbl1"], 255, 605, (local_t - 0.18) / 0.26, rise_px=24)
-                _render_masked_rise(frame, a["d1"], 255, 765, (local_t - 0.32) / 0.30, rise_px=36)
+                _render_masked_rise(frame, a["d1"], 255, 765, (local_t - 0.32) / 0.30, rise_px=34)
             if local_t > 0.50:
                 _render_masked_rise(frame, a["lbl2"], 825, 605, (local_t - 0.50) / 0.26, rise_px=24)
                 dp2 = ease_out_back((local_t - 0.65) / 0.34)
@@ -591,7 +586,7 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
             for idx_w, (wsp, wx, wy) in enumerate(a["title_words"]):
                 st = 0.14 + idx_w * 0.08
                 if local_t > st:
-                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.26, rise_px=34)
+                    _render_masked_rise(frame, wsp, wx, wy, (local_t - st) / 0.26, rise_px=30)
             if local_t > 0.30:
                 pp = ease_out_back((local_t - 0.30) / 0.38)
                 pill_sc = a["pill_bg"].resize((max(40, int(a["pill_bg"].width * max(0.15, min(1.0, pp)))), a["pill_bg"].height), Image.BILINEAR)
@@ -630,11 +625,11 @@ def render_motion_graphics_video(job_data, audio_path, output_path, fps=24, scri
                 b_idx = i
                 break
         local_t = max(0.0, abs_t - beats[b_idx]["start"])
-        frame_cur = render_beat_frame(b_idx, local_t, abs_t)
         if b_idx > 0 and local_t < trans_sec:
             prev_bt = beats[b_idx - 1]
             frame_prev = render_beat_frame(b_idx - 1, max(0.0, prev_bt["end"] - prev_bt["start"]), abs_t)
-            return _apply_transition(frame_prev, frame_cur, local_t / trans_sec, trans_styles[(b_idx - 1) % 2], curl_sp)
-        return frame_cur
+            frame_settled = render_beat_frame(b_idx, max(local_t, 0.38), abs_t)
+            return _apply_transition(frame_prev, frame_settled, local_t / trans_sec, trans_styles[(b_idx - 1) % 2], curl_sp)
+        return render_beat_frame(b_idx, local_t, abs_t)
 
     return _stream_frames_to_ffmpeg(total_frames, fps, W, H, audio_path, output_path, get_frame)
