@@ -5,8 +5,6 @@ import time
 import shutil
 import subprocess
 from pathlib import Path
-import numpy as np
-import soundfile as sf
 
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "300"
@@ -16,6 +14,13 @@ _NINADA_INSTANCE = None
 PHONE_DIGIT_WORDS = {
     '0': "জিরো", '1': "ওয়ান", '2': "টু", '3': "থ্রি", '4': "ফোর",
     '5': "ফাইভ", '6': "সিক্স", '7': "সেভেন", '8': "এইট", '9': "নাইন"
+}
+
+BN_ORDINALS = {
+    "১ম": "প্রথম", "২য়": "দ্বিতীয়", "২য়": "দ্বিতীয়",
+    "৩য়": "তৃতীয়", "৩য়": "তৃতীয়", "৪র্থ": "চতুর্থ",
+    "৫ম": "পঞ্চম", "৬ষ্ঠ": "ষষ্ঠ", "৭ম": "সপ্তম",
+    "৮ম": "অষ্টম", "৯ম": "নবম", "১০ম": "দশম"
 }
 
 NUM_WORDS_1_TO_99 = {
@@ -36,53 +41,101 @@ COMMON_ENG_TO_BN = {
     "bsc": "বিএসসি", "msc": "এমএসসি", "bba": "বিবিএ", "mba": "এমবিএ",
     "cgpa": "সিজিপিএ", "gpa": "জিপিএ", "ngo": "এনজিও", "pdf": "পিডিএফ",
     "online": "অনলাইন", "email": "ইমেইল", "circular": "সার্কুলার",
-    "job": "জব", "bank": "ব্যাংক", "diploma": "ডিপ্লোমা"
+    "job": "জব", "bank": "ব্যাংক", "diploma": "ডিপ্লোমা",
+    "sms": "এসএমএস", "cv": "সিভি", "nid": "এনআইডি"
 }
 
+
 def int_to_bangla_words(n):
-    if n in NUM_WORDS_1_TO_99: return NUM_WORDS_1_TO_99[n]
+    if n in NUM_WORDS_1_TO_99:
+        return NUM_WORDS_1_TO_99[n]
     parts = []
-    if n >= 10000000: parts.append(int_to_bangla_words(n // 10000000) + " কোটি"); n %= 10000000
-    if n >= 100000: parts.append(int_to_bangla_words(n // 100000) + " লক্ষ"); n %= 100000
-    if n >= 1000: parts.append(int_to_bangla_words(n // 1000) + " হাজার"); n %= 1000
+    if n >= 10000000:
+        parts.append(int_to_bangla_words(n // 10000000) + " কোটি")
+        n %= 10000000
+    if n >= 100000:
+        parts.append(int_to_bangla_words(n // 100000) + " লক্ষ")
+        n %= 100000
+    if n >= 1000:
+        parts.append(int_to_bangla_words(n // 1000) + " হাজার")
+        n %= 1000
     if n >= 100:
-        h = n // 100; n %= 100
+        h = n // 100
+        n %= 100
         parts.append("একশত" if h == 1 else (int_to_bangla_words(h) + " শত"))
-    if n > 0: parts.append(NUM_WORDS_1_TO_99.get(n, str(n)))
+    if n > 0:
+        parts.append(NUM_WORDS_1_TO_99.get(n, str(n)))
     return " ".join(parts)
 
+
 def convert_all_numbers_to_bangla_words(text):
-    if not text: return ""
+    if not text:
+        return ""
+    text = str(text)
     bn_to_en = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+
+    # সংখ্যার ভেতরের কমা সরানো (যেমন: ৮,২৫০ -> ৮২৫০)
+    text = re.sub(r'(?<=[0-9০-৯]),(?=[0-9০-৯])', '', text)
 
     def phone_replacer(match):
         raw_num = match.group(0)
         digits = [d for d in raw_num.translate(bn_to_en) if d.isdigit()]
-        if "".join(digits).startswith("8801"): digits = digits[2:]
+        if "".join(digits).startswith("8801"):
+            digits = digits[2:]
         return " ".join([PHONE_DIGIT_WORDS.get(d, d) for d in digits])
 
-    text = re.sub(r'(\+?88)?01[\d০-৯]{9}', phone_replacer, text)
+    text = re.sub(r'(?:\+?88)?[\s\-]?(?:01|০১)[\d০-৯]{3,4}[-\s]?[\d০-৯]{5,6}', phone_replacer, text)
+
+    # টাকা, শতাংশ, পরিসর (১৮-৩২), ক্রমবাচক ও দশমিক সংখ্যা রূপান্তর
+    text = re.sub(r'([0-9০-৯]+)\s*(?:/=|/-|৳)(?:\s*টাকা)?', r'\1 টাকা', text)
+    text = re.sub(r'৳\s*([0-9০-৯]+)(?:\s*টাকা)?', r'\1 টাকা', text)
+    text = re.sub(r'([0-9০-৯]+(?:\.[0-9০-৯]+)?)\s*%', r'\1 শতাংশ', text)
+    text = re.sub(r'([0-9০-৯]+)\s*[-–—]\s*([0-9০-৯]+)', r'\1 থেকে \2', text)
+
+    ord_pat = "|".join(re.escape(k) for k in BN_ORDINALS)
+    text = re.sub(
+        rf'(?<![\u0980-\u09FF0-9০-৯])({ord_pat})(?![\u0980-\u09FF0-9০-৯])',
+        lambda m: BN_ORDINALS.get(m.group(1), m.group(1)),
+        text,
+    )
+
+    def dec_replacer(match):
+        try:
+            left = int_to_bangla_words(int(match.group(1).translate(bn_to_en)))
+            right = " ".join(NUM_WORDS_1_TO_99.get(int(ch.translate(bn_to_en)), ch) for ch in match.group(2))
+            return f"{left} দশমিক {right}"
+        except Exception:
+            return match.group(0)
+
+    text = re.sub(r'([0-9০-৯]+)\.([0-9০-৯]+)', dec_replacer, text)
 
     def num_replacer(match):
         num_str = match.group(0)
-        try: return int_to_bangla_words(int(num_str.translate(bn_to_en)))
-        except Exception: return num_str
+        if len(num_str) > 10:
+            return " ".join(NUM_WORDS_1_TO_99.get(int(ch.translate(bn_to_en)), ch) for ch in num_str)
+        try:
+            return int_to_bangla_words(int(num_str.translate(bn_to_en)))
+        except Exception:
+            return num_str
 
     text = re.sub(r'[\d০-৯]+', num_replacer, text)
     return text
 
+
 def clean_script_for_speech(raw_text):
-    if not raw_text: return ""
-    text = str(raw_text)
+    if not raw_text:
+        return ""
+    text = re.sub(r'<think>.*?</think>', '', str(raw_text), flags=re.DOTALL | re.IGNORECASE)
     for eng, bn in COMMON_ENG_TO_BN.items():
         text = re.sub(rf'\b{eng}\b', bn, text, flags=re.IGNORECASE)
-    text = convert_all_numbers_to_bangla_words(text)
     text = re.sub(r'https?://\S+|wa\.me/\S+', '', text)
+    text = convert_all_numbers_to_bangla_words(text)
     text = re.sub(r'[\*\_\|\#\~\[\]\{\}\<\>\@\$\^\&\+\=\_\\\/\(\)]', ' ', text)
-    # Ninada বাংলা মডেলের জন্য স্বাভাবিক দাঁড়ি ও কমা অক্ষুণ্ণ রাখা
+    # বাংলা TTS মডেলের (IndicF5 ও Ninada) জন্য স্বাভাবিক দাঁড়ি ও কমা অক্ষুণ্ণ রাখা
     text = re.sub(r'[^\u0980-\u09FF\s,।?!\-]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
 
 def _get_ninada_tts():
     global _NINADA_INSTANCE
@@ -91,6 +144,7 @@ def _get_ninada_tts():
         print("  [🎙️ Ninada TTS] Initializing Ninada v5 (lang='bn', voice='male')...")
         _NINADA_INSTANCE = Ninada(lang="bn")
     return _NINADA_INSTANCE
+
 
 def _apply_ninada_tempo_and_mastering(raw_wav_path: Path, out_audio_path: Path):
     if not shutil.which("ffmpeg"):
@@ -116,13 +170,48 @@ def _apply_ninada_tempo_and_mastering(raw_wav_path: Path, out_audio_path: Path):
     if res.returncode != 0 or not out_audio_path.exists() or out_audio_path.stat().st_size < 1000:
         shutil.copy2(raw_wav_path, out_audio_path)
 
+
+def _finalize_kaggle_audio(raw_wav_path: Path, out_audio_path: Path):
+    """Kaggle IndicF5 থেকে পাওয়া WAV-কে broadcast loudness সহ MP3/WAV ফরম্যাটে সেভ করে"""
+    out_audio_path.parent.mkdir(parents=True, exist_ok=True)
+    if not shutil.which("ffmpeg"):
+        shutil.copy2(raw_wav_path, out_audio_path)
+        return
+
+    af_chain = "highpass=f=80,loudnorm=I=-16:TP=-1.5:LRA=11"
+    is_mp3 = str(out_audio_path).lower().endswith(".mp3")
+
+    cmd = ["ffmpeg", "-y", "-i", str(raw_wav_path), "-af", af_chain]
+    if is_mp3:
+        cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "1"])
+    else:
+        cmd.extend(["-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1"])
+    cmd.append(str(out_audio_path))
+
+    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode != 0 or not out_audio_path.exists() or out_audio_path.stat().st_size < 1000:
+        if is_mp3:
+            fallback_cmd = [
+                "ffmpeg", "-y", "-i", str(raw_wav_path),
+                "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "1",
+                str(out_audio_path),
+            ]
+            subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            shutil.copy2(raw_wav_path, out_audio_path)
+
+
 def synthesize_with_ninada(speech_text, output_audio_path):
+    """ব্যাকআপ (Priority #2): Ninada Bangla Male TTS"""
     out_path = Path(output_audio_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_wav = out_path.with_suffix(".ninada_raw.wav")
 
     for attempt in range(3):
         try:
+            import numpy as np
+            import soundfile as sf
+
             tts = _get_ninada_tts()
             wav_bytes = None
             try:
@@ -134,7 +223,6 @@ def synthesize_with_ninada(speech_text, output_audio_path):
                 with open(tmp_wav, "wb") as f:
                     f.write(wav_bytes)
             else:
-                # বড় স্ক্রিপ্টের ক্ষেত্রে বাক্য ভেঙে সেফটি সিন্থেসিস
                 sentences = [s.strip() for s in re.split(r'(?<=[।!?])\s+', speech_text) if len(s.strip()) > 3]
                 if not sentences:
                     sentences = [speech_text]
@@ -167,33 +255,179 @@ def synthesize_with_ninada(speech_text, output_audio_path):
                 tmp_wav.unlink()
 
             if out_path.exists() and out_path.stat().st_size > 1000:
-                print(f"  ✅ [Ninada Male SUCCESS] Mastered audio ready ({round(out_path.stat().st_size / 1024, 1)} KB)")
+                print(f"  ✅ [Ninada Backup SUCCESS] Mastered audio ready ({round(out_path.stat().st_size / 1024, 1)} KB)")
                 return True
         except Exception as e:
             print(f"  ⚠️ [Ninada Attempt #{attempt+1}] {e}")
             if tmp_wav.exists():
-                try: tmp_wav.unlink()
-                except Exception: pass
+                try:
+                    tmp_wav.unlink()
+                except Exception:
+                    pass
             time.sleep(1.5)
 
     print("  ❌ [Ninada Error] Audio synthesis failed after retries.")
     return False
 
-def generate_single_audio_task(text, output_path, key_idx=0):
+
+def _is_kaggle_enabled():
+    if os.environ.get("DISABLE_KAGGLE_TTS", "").strip().lower() in {"true", "1", "yes", "on"}:
+        return False
+    try:
+        from kaggle_tts import has_kaggle_credentials
+        return has_kaggle_credentials()
+    except Exception:
+        return False
+
+
+def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_audio", allow_ninada_backup=True):
+    """
+    ১. প্রাইমারি (Priority #1): Kaggle IndicF5_Bangladeshi (সবগুলো অডিও মাত্র ১টি ব্যাচ রিকোয়েস্টে)
+    ২. ব্যাকআপ (Priority #2): Ninada Bangla Male TTS (যদি Kaggle বন্ধ বা ব্যর্থ হয়)
+    """
+    if not batch_items:
+        return {}
+
+    os.makedirs(batch_work_dir, exist_ok=True)
+    cleaned_tasks = []
+    for idx, item in enumerate(batch_items):
+        target_path = str(item["target_path"])
+        fname = item.get("filename") or os.path.basename(target_path)
+        sp_text = clean_script_for_speech(item["text"])
+        if not sp_text:
+            continue
+        cleaned_tasks.append({
+            "filename": fname,
+            "text": sp_text,
+            "target_path": target_path,
+            "idx": idx,
+        })
+
+    if not cleaned_tasks:
+        return {}
+
+    print("\n" + "=" * 65)
+    print("🎙️ [AUDIO ENGINE] Priority #1: Kaggle IndicF5_Bangladeshi | Priority #2 (Backup): Ninada TTS")
+    print(f"📦 Total Scripts Queued: {len(cleaned_tasks)}")
+    for idx, t in enumerate(cleaned_tasks, 1):
+        print(f"  #{idx}: {t['filename']} | {len(t['text'].split())} words | {len(t['text'])} chars")
+    print("=" * 65)
+
+    results = {}
+
+    # একই স্ক্রিপ্ট থাকলে Kaggle-এ ডুপ্লিকেট জেনারেট না করে একবারই তৈরি করা
+    unique_text_to_key = {}
+    kaggle_tasks = []
+    task_to_unique_key = {}
+    for t in cleaned_tasks:
+        sp_text = t["text"]
+        if sp_text not in unique_text_to_key:
+            u_key = f"kaggle_u{len(unique_text_to_key)}.wav"
+            unique_text_to_key[sp_text] = u_key
+            kaggle_tasks.append({"filename": u_key, "text": sp_text})
+        task_to_unique_key[t["filename"]] = unique_text_to_key[sp_text]
+
+    # ১. প্রাইমারি: Kaggle IndicF5_Bangladeshi
+    if _is_kaggle_enabled():
+        try:
+            from kaggle_tts import generate_voices_batch
+            default_voice = os.environ.get("KAGGLE_DEFAULT_VOICE", "male").strip().lower() or "male"
+            speech_speed = float(os.environ.get("KAGGLE_SPEECH_SPEED", "0.93") or "0.93")
+            nfe_step = int(os.environ.get("KAGGLE_NFE_STEP", "16") or "16")
+
+            generated_map = generate_voices_batch(
+                tasks=kaggle_tasks,
+                output_dir=batch_work_dir,
+                default_voice=default_voice,
+                speech_speed=speech_speed,
+                nfe_step=nfe_step,
+            )
+
+            converted_by_ukey = {}
+            for t in cleaned_tasks:
+                u_key = task_to_unique_key[t["filename"]]
+                src = generated_map.get(u_key)
+                dst = Path(t["target_path"]).resolve()
+                if u_key in converted_by_ukey and Path(converted_by_ukey[u_key]).exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(converted_by_ukey[u_key], str(dst))
+                    results[t["filename"]] = str(dst)
+                    print(f"  🎵 Copied '{t['filename']}' -> {dst}")
+                elif src and Path(src).exists() and Path(src).stat().st_size > 1000:
+                    _finalize_kaggle_audio(Path(src), dst)
+                    if dst.exists() and dst.stat().st_size > 1000:
+                        converted_by_ukey[u_key] = str(dst)
+                        results[t["filename"]] = str(dst)
+                        print(f"  🎵 Saved '{t['filename']}' -> {dst}")
+
+            for src in generated_map.values():
+                if src and Path(src).exists():
+                    try:
+                        Path(src).unlink()
+                    except Exception:
+                        pass
+
+            if len(results) == len(cleaned_tasks):
+                return results
+        except Exception as e:
+            print(f"\n⚠️ [Kaggle TTS Failed] ({e}) — Switching to Priority #2 (Ninada TTS) backup...")
+    else:
+        print("\nℹ️ [Kaggle TTS Skipped] KAGGLE_API_TOKEN/Credentials unavailable or disabled — Using Priority #2 (Ninada TTS)...")
+
+    # ২. ব্যাকআপ (Priority #2): শুধু যেগুলো Kaggle থেকে আসেনি সেগুলোর জন্য Ninada TTS
+    if allow_ninada_backup:
+        ninada_cache = {}
+        for t in cleaned_tasks:
+            if t["filename"] in results:
+                continue
+            sp_text = t["text"]
+            dst = Path(t["target_path"]).resolve()
+            if sp_text in ninada_cache and Path(ninada_cache[sp_text]).exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ninada_cache[sp_text], str(dst))
+                results[t["filename"]] = str(dst)
+                continue
+            print(f"  🔄 [Ninada Backup] Synthesizing '{t['filename']}'...")
+            if synthesize_with_ninada(sp_text, str(dst)) and dst.exists() and dst.stat().st_size > 1000:
+                ninada_cache[sp_text] = str(dst)
+                results[t["filename"]] = str(dst)
+
+    return results
+
+
+def generate_single_audio_task(text, output_path, key_idx=0, skip_kaggle=False):
     speech_text = clean_script_for_speech(text)
     if not speech_text:
         print("  ⚠️ Empty text provided for audio synthesis.")
         return False
-    return synthesize_with_ninada(speech_text, output_path)
+    if skip_kaggle:
+        return synthesize_with_ninada(speech_text, output_path)
 
-def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None):
-    return generate_single_audio_task(text, output_audio_path, key_idx=key_offset)
+    fname = os.path.basename(output_path)
+    work_dir = os.path.join(os.path.dirname(os.path.abspath(output_path)), "_tmp_single_audio")
+    res = generate_voiceover_batch_pipeline(
+        [{"filename": fname, "text": text, "target_path": output_path}],
+        batch_work_dir=work_dir,
+        allow_ninada_backup=True,
+    )
+    shutil.rmtree(work_dir, ignore_errors=True)
+    return fname in res and os.path.exists(output_path)
+
+
+def generate_voiceover_audio_pipeline(text, output_audio_path, key_offset=0, memory=None, skip_kaggle=False):
+    return generate_single_audio_task(text, output_audio_path, key_idx=key_offset, skip_kaggle=skip_kaggle)
+
 
 def generate_audios_in_parallel(scripts_list, base_hash, total_needed):
-    audio_paths = []
+    if not scripts_list or total_needed <= 0:
+        return []
+    batch_items = []
     for idx in range(total_needed):
         s_text = scripts_list[idx % len(scripts_list)]
         out_file = f"tmp_voice_{base_hash}_{idx+1}.mp3"
-        if generate_single_audio_task(s_text, out_file, idx):
-            audio_paths.append(out_file)
-    return audio_paths
+        batch_items.append({"filename": out_file, "text": s_text, "target_path": out_file})
+
+    work_dir = f"_tmp_batch_{base_hash}"
+    res = generate_voiceover_batch_pipeline(batch_items, batch_work_dir=work_dir, allow_ninada_backup=True)
+    shutil.rmtree(work_dir, ignore_errors=True)
+    return [it["target_path"] for it in batch_items if it["filename"] in res and os.path.exists(it["target_path"])]
