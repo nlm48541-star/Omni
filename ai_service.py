@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import re
+import time
 import json
 import base64
 import requests
@@ -10,10 +11,10 @@ from PIL import Image
 TRACKER_FILE = "key_tracker.json"
 
 OPENROUTER_MODELS = [
-    "google/gemma-4-31b-it:free",                 # 31B Vision (সেরা বাংলা OCR)
+    "google/gemma-4-31b-it:free",                 # 31B Vision
     "google/gemma-4-26b-a4b-it:free",             # 26B Vision
-    "dots-studio/dots-3-note-preview:free",       # Multimodal Vision (512K)
     "nvidia/nemotron-3.5-super-vl:free",          # 120B Vision
+    "dots-studio/dots-3-note-preview:free",       # Multimodal Vision
     "openrouter/free",                            # Auto-router fallback
     "nvidia/nemotron-3-ultra-550b-a55b:free"      # 550B Text fallback
 ]
@@ -21,23 +22,15 @@ OPENROUTER_MODELS = [
 OPENROUTER_VISION_MODELS = {
     "google/gemma-4-31b-it:free",
     "google/gemma-4-26b-a4b-it:free",
-    "dots-studio/dots-3-note-preview:free",
     "nvidia/nemotron-3.5-super-vl:free",
+    "dots-studio/dots-3-note-preview:free",
     "openrouter/free"
 }
 
 OLLAMA_MODELS = [
-    "kimi-k2.6",               # 1.04T (Vision)
-    "glm-5.2",                 # 753B
-    "mistral-large-3:675b",    # 675B (Vision)
-    "deepseek-v4.1-flash",     # 552B (Vision)
-    "deepseek-v4-pro",
-    "qwen3.5:397b",            # 397B
-    "minimax-m3",
-    "glm-5.3-flash",           # Vision
-    "gpt-oss:120b",            # 120B
-    "nemotron-3-super",        # 120B
-    "gemma4:31b"               # 31B (Vision)
+    "kimi-k2.6", "glm-5.2", "mistral-large-3:675b", "deepseek-v4.1-flash",
+    "deepseek-v4-pro", "qwen3.5:397b", "minimax-m3", "glm-5.3-flash",
+    "gpt-oss:120b", "nemotron-3-super", "gemma4:31b"
 ]
 
 OLLAMA_VISION_MODELS = {
@@ -45,9 +38,13 @@ OLLAMA_VISION_MODELS = {
     "glm-5.3-flash", "gemma4:31b"
 }
 
-GROQ_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+GROQ_MODELS = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+GROQ_VISION_MODELS = {"qwen/qwen3.8-27b"}
 CEREBRAS_MODELS = ["zai-glm-4.7", "qwen-3-235b-a22b-instruct-2507", "gpt-oss-120b"]
 GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash-lite"]
+
+_DEAD_KEYS = set()
+_COOLDOWN_MODELS = {}
 
 _DEVA_TO_BN = {
     '\u0901': 'ঁ', '\u0902': 'ং', '\u0903': 'ঃ',
@@ -75,8 +72,7 @@ _DEVA_TO_BN = {
 def normalize_bengali_nukta(text):
     if not text:
         return ""
-    s = str(text)
-    return s.replace('\u09af\u09bc', '\u09df').replace('\u09a1\u09bc', '\u09dc').replace('\u09a2\u09bc', '\u09dd')
+    return str(text).replace('\u09af\u09bc', '\u09df').replace('\u09a1\u09bc', '\u09dc').replace('\u09a2\u09bc', '\u09dd')
 
 
 def clean_bengali_text(text):
@@ -160,7 +156,7 @@ def get_ollama_chat_endpoint():
     return f"{base.rstrip('/')}/api/chat"
 
 
-def encode_image_base64(image_path, max_dim=1600):
+def encode_image_base64(image_path, max_dim=1280):
     try:
         with Image.open(image_path) as img:
             img = img.convert("RGB")
@@ -168,7 +164,7 @@ def encode_image_base64(image_path, max_dim=1600):
                 img.thumbnail((max_dim, max_dim), Image.LANCZOS)
             from io import BytesIO
             buf = BytesIO()
-            img.save(buf, format="JPEG", quality=90)
+            img.save(buf, format="JPEG", quality=85)
             return base64.b64encode(buf.getvalue()).decode('utf-8')
     except Exception:
         return None
@@ -236,7 +232,16 @@ def _is_quality_ai_result(data):
         return False
     scripts = data.get("scripts", [])
     s0 = scripts[0] if (isinstance(scripts, list) and scripts) else data.get("voiceover_script", "")
-    return len(str(s0).split()) >= 110
+    return len(str(s0).split()) >= 85
+
+
+def _describe_failure(raw_out, data, finish_reason=""):
+    chars = len(str(raw_out or ""))
+    if not isinstance(data, dict):
+        return f"invalid JSON (finish={finish_reason}, chars={chars})"
+    scripts = data.get("scripts", [])
+    s0 = scripts[0] if (isinstance(scripts, list) and scripts) else data.get("voiceover_script", "")
+    return f"short script={len(str(s0).split())} words (finish={finish_reason}, chars={chars})"
 
 
 def extract_dates_and_posts_from_html_or_text(html_text, plain_text, title=""):
@@ -452,10 +457,13 @@ def normalize_scripts_count(data, target_count):
     return data
 
 
+def _is_model_cooled_down(platform, model):
+    return _COOLDOWN_MODELS.get((platform, model), 0.0) > time.time()
+
+
 def generate_job_data_and_script(title, article_text, raw_html, image_paths, scripts_count=8, memory=None):
     clean_title = clean_bengali_text(remove_years(re.sub(r'[\r\n\t]+', ' ', str(title)).strip()))
-    full_content = f"Title: {clean_title}\n\nStructured Webpage Content:\n{clean_bengali_text(article_text[:12000])}"
-    llm_scripts_target = max(1, min(scripts_count, 2))
+    full_content = f"Title: {clean_title}\n\nStructured Webpage Content:\n{clean_bengali_text(article_text[:10500])}"
 
     prompt = f"""You are an expert Bengali Job Circular Analyst, Motion Graphics Copywriter, and Voiceover Writer.
 Read BOTH the structured webpage text/tables AND ALL attached official job circular image(s) carefully!
@@ -464,14 +472,14 @@ YOU decide what belongs in each JSON field based strictly on verified facts from
 
 {full_content}
 
-TASK 1 — VOICEOVER SCRIPTS (TARGET DURATION: 1.5 TO 2.5 MINUTES):
-- Write "scripts": Array of {llm_scripts_target} detailed, fluent spoken Bengali script(s), EACH **250 to 310 words long**.
+TASK 1 — VOICEOVER SCRIPT (TARGET: 1 SCRIPT, ~200 TO 260 WORDS):
+- Write "scripts": Array of 1 detailed, fluent spoken Bengali script (200 to 260 words long).
 - Cover ALL real facts from text & circular images: Organization name, total vacancies, ALL real posts with exact vacancy counts, educational qualifications, salary grade/scale, age limit, exact application fee, and exact application start & end dates.
 - CRITICAL SPEECH & SCRIPT RULES:
-  1) Write ONLY 100% pure standard Bengali Unicode script (বাংলা বর্ণমালা) + Bengali/English digits. NEVER mix Hindi/Devanagari or Chinese characters!
-  2) Write ALL numbers, dates, fees, and ages using clear digits (e.g. "১৮–৫৫ বছর", "২১ নভেম্বর ২০২৬", "৮ম পাশ", "১১২ টাকা", "৩.৫০"). Our TTS engine converts digits accurately — NEVER spell numbers into broken words like "পঞ্চান্নোবেন" or "এককুশ"!
-  3) Write English acronyms phonetically in Bengali (e.g. "আইডিআরএ", "আইইউবি", "এসএসসি", "এইচএসসি", "টিওআর", "ই-মেইল", "বিডিজবস").
-  4) NEVER include website URLs, domain names (e.g. teletalk.com.bd, gov.bd), or phone numbers inside "scripts". End EVERY script strictly with:
+  1) Write ONLY 100% pure standard Bengali Unicode script (বাংলা বর্ণমালা) + digits. NEVER mix Hindi/Devanagari or Chinese characters!
+  2) Write numbers, dates, fees, and ages using clear digits (e.g. "১৮–৫৫ বছর", "২১ নভেম্বর ২০২৬", "৮ম পাশ", "১১২ টাকা", "৩.৫০").
+  3) Write English acronyms phonetically in Bengali (e.g. "আইডিআরএ", "আইইউবি", "এসএসসি", "এইচএসসি", "ই-মেইল", "বিডিজবস").
+  4) NEVER include website URLs, domain names, or phone numbers inside "scripts". End strictly with:
      "আমাদের মাধ্যমে নির্ভুলভাবে আবেদন সম্পন্ন করতে স্ক্রিনে দেওয়া হোয়াটসঅ্যাপ নাম্বারে যোগাযোগ করুন।"
 
 TASK 2 — POSTER SLOTS ("poster"):
@@ -481,7 +489,7 @@ TASK 2 — POSTER SLOTS ("poster"):
   * "hero_bottom": Short punchy hook (2-3 words).
   * "hero_single_line": 1-line headline (max 6 words).
   * "main_summary": 1 crisp Bengali summary sentence (12-18 words).
-  * "date_box_title": e.g. "আবেদনের সময়" or "সাক্ষাৎকারের তারিখ".
+  * "date_box_title": e.g. "আবেদনের সময়".
   * "date_box_text": Exact date phrase (e.g. "১০ নভেম্বর থেকে ১০ ডিসেম্বর পর্যন্ত").
   * "fee_box_title": "আবেদন ফি" (or "আবেদন মাধ্যম" if free).
   * "fee_box_text": Exact fee or "বিনামূল্যে" / "বিজ্ঞপ্তি অনুযায়ী".
@@ -489,15 +497,15 @@ TASK 2 — POSTER SLOTS ("poster"):
   * "highlight_1_badge" & "highlight_1_text": 1st highlight block.
   * "highlight_2_badge" & "highlight_2_text": 2nd highlight block.
 
-TASK 3 — MOTION GRAPHICS SLOTS ("motion", ACCURATE & CONSISTENT WITH SCRIPTS):
+TASK 3 — MOTION GRAPHICS SLOTS ("motion", ACCURATE & CONSISTENT WITH SCRIPT):
 - "motion":
   * "org_name": Short official org name.
   * "category_badge": e.g. "সরকারি নিয়োগ" or "নিয়োগ বিজ্ঞপ্তি" (2-3 words).
   * "hook_subtitle": Concise qualification tag (3-5 words, e.g. "৮ম/এসএসসি/স্নাতক পাশ").
-  * "total_vacancy_num": Integer total vacancy count (e.g. 16, or 0 if unspecified/অসংখ্য).
+  * "total_vacancy_num": Integer total vacancy count (e.g. 16, or 0 if unspecified).
   * "total_vacancy_display": e.g. "১৬টি" or "বিভিন্ন পদ".
   * "highlights": Array with 1 concise 3-4 word tag (e.g. ["স্থায়ী সরকারি চাকরি"]).
-  * "posts": Array of REAL job posts extracted from tables/circular images (up to 20): [{{"post_name": "...", "vacancy": "৮৫টি or নিয়োগ", "qualification": "এসএসসি পাশ", "salary_grade": "২০তম গ্রেড"}}]. NEVER put "নির্দিষ্ট নয়", "উল্লেখ নেই", "বয়সসীমা" or "সর্বোচ্চ বেতন"! If count unspecified, use "নিয়োগ".
+  * "posts": Array of REAL job posts from tables/circular images (up to 16): [{{"post_name": "...", "vacancy": "৮৫টি or নিয়োগ", "qualification": "এসএসসি পাশ", "salary_grade": "২০তম গ্রেড"}}]. NEVER put "নির্দিষ্ট নয়" or "উল্লেখ নেই"!
   * "age_limit": Concise (e.g. "১৮–৩২ বছর").
   * "salary_range": Concise (e.g. "৮,২৫০ – ২৪,৬৮০/-" or "বিজ্ঞপ্তি অনুযায়ী").
   * "application_fee": Exact fee (e.g. "১১২/- ও ৫৬/-" or "বিনামূল্যে" or "বিজ্ঞপ্তি অনুযায়ী").
@@ -513,14 +521,14 @@ Return strictly valid JSON only:
   "scripts": ["..."]
 }}"""
 
-    base64_imgs = [b for b in (encode_image_base64(p) for p in image_paths[:4]) if b]
+    base64_imgs = [b for b in (encode_image_base64(p) for p in image_paths[:3]) if b]
 
     def _try_openrouter(vision_only):
-        openrouter_keys = parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"])
+        openrouter_keys = [k for k in parse_multi_keys(["OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"]) if ("openrouter", k) not in _DEAD_KEYS]
         if not openrouter_keys:
             return None
         total_k, start_idx = len(openrouter_keys), get_saved_key_index("openrouter", len(openrouter_keys))
-        models = [m for m in OPENROUTER_MODELS if (m in OPENROUTER_VISION_MODELS) == vision_only]
+        models = [m for m in OPENROUTER_MODELS if (m in OPENROUTER_VISION_MODELS) == vision_only and not _is_model_cooled_down("openrouter", m)]
         if not models:
             return None
         print(f"\n--- [OpenRouter Cloud API | Vision={vision_only}] ({total_k} keys, {len(base64_imgs)} imgs) ---")
@@ -529,36 +537,117 @@ Return strictly valid JSON only:
             api_key = openrouter_keys[k_idx]
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://github.com/omnisync", "X-Title": "OmniSync"}
             for model in models:
+                if _is_model_cooled_down("openrouter", model):
+                    continue
                 use_imgs = vision_only and bool(base64_imgs)
                 mc = [{"type": "text", "text": prompt}] if use_imgs else prompt
                 if use_imgs:
-                    for b64 in base64_imgs[:4]:
+                    for b64 in base64_imgs[:3]:
                         mc.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-                try:
-                    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json={"model": model, "messages": [{"role": "user", "content": mc}], "temperature": 0.3, "max_tokens": 5500}, timeout=75)
-                    if resp.status_code == 200:
-                        msg_obj = resp.json().get('choices', [{}])[0].get('message', {})
-                        raw_out = msg_obj.get('content') or msg_obj.get('reasoning') or ""
-                        data = parse_json_safely(raw_out)
-                        if _is_quality_ai_result(data):
-                            save_key_index("openrouter", k_idx, total_k)
-                            print(f"  ✅ [OpenRouter SUCCESS] Model: '{model}' (Key #{k_idx+1})")
-                            return normalize_scripts_count(data, scripts_count)
-                        print(f"  ⚠️ [OpenRouter] '{model}' returned incomplete JSON/short script, trying next...")
-                    else:
-                        print(f"  ⚠️ [OpenRouter] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                        if resp.status_code in [401, 402]:
-                            save_key_index("openrouter", (k_idx + 1) % total_k, total_k)
+
+                reasoning_cfg = {"enabled": False} if "nemotron" in model else ({"effort": "low"} if ("dots" in model or "openrouter/free" in model) else None)
+                for use_r in ([True, False] if reasoning_cfg else [False]):
+                    pl = {"model": model, "messages": [{"role": "user", "content": mc}], "temperature": 0.3, "max_tokens": 12000}
+                    if use_r and reasoning_cfg:
+                        pl["reasoning"] = reasoning_cfg
+                    try:
+                        resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=pl, timeout=75)
+                        if resp.status_code == 200:
+                            choice = (resp.json().get('choices') or [{}])[0]
+                            msg_obj = choice.get('message', {})
+                            raw_out = msg_obj.get('content') or msg_obj.get('reasoning') or ""
+                            data = parse_json_safely(raw_out)
+                            if _is_quality_ai_result(data):
+                                save_key_index("openrouter", k_idx, total_k)
+                                print(f"  ✅ [OpenRouter SUCCESS] Model: '{model}' (Key #{k_idx+1})")
+                                return normalize_scripts_count(data, scripts_count)
+                            print(f"  ⚠️ [OpenRouter] '{model}' -> {_describe_failure(raw_out, data, choice.get('finish_reason', ''))}, trying next...")
                             break
-                        if resp.status_code == 429:
-                            continue  # পরের free মডেলগুলো চেষ্টা করবে
-                except Exception as e:
-                    print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
+                        else:
+                            print(f"  ⚠️ [OpenRouter] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
+                            if resp.status_code == 400 and use_r:
+                                continue
+                            if resp.status_code in [401, 402]:
+                                _DEAD_KEYS.add(("openrouter", api_key))
+                                break
+                            if resp.status_code == 429:
+                                _COOLDOWN_MODELS[("openrouter", model)] = time.time() + 180
+                                break
+                            break
+                    except Exception as e:
+                        print(f"  ⚠️ [OpenRouter] '{model}' error: {e}")
+                        break
+                if ("openrouter", api_key) in _DEAD_KEYS:
+                    break
             save_key_index("openrouter", (k_idx + 1) % total_k, total_k)
         return None
 
+    def _try_groq(vision_only):
+        groq_keys = [k for k in parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"]) if ("groq", k) not in _DEAD_KEYS]
+        if not groq_keys:
+            return None
+        models = [m for m in GROQ_MODELS if (not vision_only or m in GROQ_VISION_MODELS)]
+        if not models:
+            return None
+        total_k, start_idx = len(groq_keys), get_saved_key_index("groq", len(groq_keys))
+        print(f"\n--- [Groq Cloud API | Vision={vision_only}] ({total_k} keys) ---")
+        for offset in range(total_k):
+            k_idx = (start_idx + offset) % total_k
+            api_key = groq_keys[k_idx]
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            for g_model in models:
+                use_imgs = vision_only and bool(base64_imgs) and (g_model in GROQ_VISION_MODELS)
+                mc = [{"type": "text", "text": prompt}] if use_imgs else prompt
+                if use_imgs:
+                    for b64 in base64_imgs[:3]:
+                        mc.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+                for use_jf, use_re in ([(False, True), (False, False)] if use_imgs else [(True, True), (False, True), (False, False)]):
+                    pl = {
+                        "model": g_model,
+                        "messages": [
+                            {"role": "system", "content": "Output strictly valid JSON in pure Bengali script only."},
+                            {"role": "user", "content": mc}
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 10000
+                    }
+                    if use_jf:
+                        pl["response_format"] = {"type": "json_object"}
+                    if use_re:
+                        pl["reasoning_effort"] = "low"
+                    try:
+                        resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=pl, timeout=60)
+                        if resp.status_code == 200:
+                            choice = (resp.json().get('choices') or [{}])[0]
+                            msg_obj = choice.get('message', {})
+                            raw_out = msg_obj.get('content') or msg_obj.get('reasoning') or ""
+                            data = parse_json_safely(raw_out)
+                            if _is_quality_ai_result(data):
+                                save_key_index("groq", k_idx, total_k)
+                                print(f"  ✅ [Groq SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
+                                return normalize_scripts_count(data, scripts_count)
+                            print(f"  ⚠️ [Groq] '{g_model}' -> {_describe_failure(raw_out, data, choice.get('finish_reason', ''))}, trying next...")
+                            break
+                        else:
+                            print(f"  ⚠️ [Groq] '{g_model}' HTTP {resp.status_code}: {resp.text[:140]}")
+                            if resp.status_code == 400:
+                                continue
+                            if resp.status_code in [401, 402, 403]:
+                                _DEAD_KEYS.add(("groq", api_key))
+                                break
+                            if resp.status_code == 429:
+                                save_key_index("groq", (k_idx + 1) % total_k, total_k)
+                                break
+                            break
+                    except Exception as e:
+                        print(f"  ⚠️ [Groq] '{g_model}' error: {e}")
+                        break
+                if ("groq", api_key) in _DEAD_KEYS:
+                    break
+        return None
+
     def _try_ollama(vision_only):
-        ollama_keys = parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"])
+        ollama_keys = [k for k in parse_multi_keys(["OLLAMA_API_KEYS", "OLLAMA_API_KEY", "Ollama_API_Key"]) if ("ollama", k) not in _DEAD_KEYS]
         if not ollama_keys:
             return None
         total_k, start_idx = len(ollama_keys), get_saved_key_index("ollama", len(ollama_keys))
@@ -576,7 +665,7 @@ Return strictly valid JSON only:
                 if vision_only and base64_imgs:
                     mo["images"] = base64_imgs[:3]
                 try:
-                    resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.3}}, timeout=100)
+                    resp = requests.post(ep, headers=headers, json={"model": model, "messages": [mo], "stream": False, "options": {"temperature": 0.3}}, timeout=70)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json().get("message", {}).get("content", ""))
                         if _is_quality_ai_result(data):
@@ -585,7 +674,10 @@ Return strictly valid JSON only:
                             return normalize_scripts_count(data, scripts_count)
                     else:
                         print(f"  ⚠️ [Ollama] '{model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                        if resp.status_code in [401, 402, 429]:
+                        if resp.status_code in [401, 402, 403]:
+                            _DEAD_KEYS.add(("ollama", api_key))
+                            break
+                        if resp.status_code == 429:
                             save_key_index("ollama", (k_idx + 1) % total_k, total_k)
                             break
                 except Exception as e:
@@ -593,7 +685,7 @@ Return strictly valid JSON only:
         return None
 
     def _try_gemini():
-        gemini_keys = parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"])
+        gemini_keys = [k for k in parse_multi_keys(["GEMINI_API_KEYS", "GEMINI_API_KEY"]) if ("gemini", k) not in _DEAD_KEYS]
         if not gemini_keys:
             return None
         total_k, start_idx = len(gemini_keys), get_saved_key_index("gemini", len(gemini_keys))
@@ -604,10 +696,10 @@ Return strictly valid JSON only:
             for g_model in GEMINI_MODELS:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={api_key}"
                 parts = [{"text": prompt}]
-                for b64 in base64_imgs[:4]:
+                for b64 in base64_imgs[:3]:
                     parts.append({"inlineData": {"mimeType": "image/jpeg", "data": b64}})
                 try:
-                    resp = requests.post(url, json={"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}, timeout=60)
+                    resp = requests.post(url, json={"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}, timeout=50)
                     if resp.status_code == 200:
                         cands = resp.json().get("candidates", [])
                         if cands:
@@ -618,7 +710,10 @@ Return strictly valid JSON only:
                                 return normalize_scripts_count(data, scripts_count)
                     else:
                         print(f"  ⚠️ [Gemini] '{g_model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                        if resp.status_code in [400, 401, 403, 429]:
+                        if resp.status_code in [400, 401, 403]:
+                            _DEAD_KEYS.add(("gemini", api_key))
+                            break
+                        if resp.status_code == 429:
                             save_key_index("gemini", (k_idx + 1) % total_k, total_k)
                             break
                 except Exception as e:
@@ -626,66 +721,37 @@ Return strictly valid JSON only:
         return None
 
     if base64_imgs:
-        for fn in [lambda: _try_openrouter(True), lambda: _try_ollama(True), _try_gemini]:
+        for fn in [lambda: _try_openrouter(True), lambda: _try_groq(True), lambda: _try_ollama(True), _try_gemini]:
             res = fn()
             if res:
                 return res
 
-    for fn in [lambda: _try_openrouter(False), lambda: _try_ollama(False)]:
+    for fn in [lambda: _try_groq(False), lambda: _try_openrouter(False), lambda: _try_ollama(False)]:
         res = fn()
         if res:
             return res
 
-    groq_keys = parse_multi_keys(["GROQ_API_KEYS", "GROQ_API_KEY", "GROQ_API"])
-    if groq_keys:
-        total_k, start_idx = len(groq_keys), get_saved_key_index("groq", len(groq_keys))
-        print(f"\n--- [Groq Cloud API] ({total_k} keys) ---")
-        for offset in range(total_k):
-            k_idx = (start_idx + offset) % total_k
-            api_key = groq_keys[k_idx]
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-            for g_model in GROQ_MODELS:
-                for use_jf in [True, False]:
-                    pl = {"model": g_model, "messages": [{"role": "system", "content": "Output strictly valid JSON in pure Bengali script only."}, {"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 5500}
-                    if use_jf:
-                        pl["response_format"] = {"type": "json_object"}
-                    try:
-                        resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=pl, timeout=90)
-                        if resp.status_code == 200:
-                            data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
-                            if _is_quality_ai_result(data):
-                                save_key_index("groq", k_idx, total_k)
-                                print(f"  ✅ [Groq SUCCESS] Model: '{g_model}' (Key #{k_idx+1})")
-                                return normalize_scripts_count(data, scripts_count)
-                            break
-                        else:
-                            print(f"  ⚠️ [Groq] '{g_model}' HTTP {resp.status_code}: {resp.text[:120]}")
-                            if resp.status_code in [401, 402, 429]:
-                                save_key_index("groq", (k_idx + 1) % total_k, total_k)
-                                break
-                            if resp.status_code != 400:
-                                break
-                    except Exception as e:
-                        print(f"  ⚠️ [Groq] '{g_model}' error: {e}")
-                        break
-
-    cerebras_keys = parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"])
+    cerebras_keys = [k for k in parse_multi_keys(["CEREBRAS_API_KEYS", "CEREBRAS_API_KEY"]) if ("cerebras", k) not in _DEAD_KEYS]
     if cerebras_keys:
         total_k, start_idx = len(cerebras_keys), get_saved_key_index("cerebras", len(cerebras_keys))
         print(f"\n--- [Cerebras Cloud API] ({total_k} keys) ---")
         for offset in range(total_k):
             k_idx = (start_idx + offset) % total_k
-            headers = {"Authorization": f"Bearer {cerebras_keys[k_idx]}", "Content-Type": "application/json"}
+            api_key = cerebras_keys[k_idx]
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
             for c_model in CEREBRAS_MODELS:
                 try:
-                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json={"model": c_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 5500}, timeout=60)
+                    resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json={"model": c_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 10000}, timeout=50)
                     if resp.status_code == 200:
                         data = parse_json_safely(resp.json()['choices'][0]['message']['content'])
                         if _is_quality_ai_result(data):
                             save_key_index("cerebras", k_idx, total_k)
                             print(f"  ✅ [Cerebras SUCCESS] Model: '{c_model}' (Key #{k_idx+1})")
                             return normalize_scripts_count(data, scripts_count)
-                    elif resp.status_code in [401, 402, 429]:
+                    elif resp.status_code in [401, 402, 403]:
+                        _DEAD_KEYS.add(("cerebras", api_key))
+                        break
+                    elif resp.status_code == 429:
                         save_key_index("cerebras", (k_idx + 1) % total_k, total_k)
                         break
                 except Exception as e:
