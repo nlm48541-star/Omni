@@ -74,7 +74,6 @@ def convert_all_numbers_to_bangla_words(text):
     text = str(text)
     bn_to_en = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 
-    # সংখ্যার ভেতরের কমা সরানো (যেমন: ৮,২৫০ -> ৮২৫০)
     text = re.sub(r'(?<=[0-9০-৯]),(?=[0-9০-৯])', '', text)
 
     def phone_replacer(match):
@@ -86,7 +85,6 @@ def convert_all_numbers_to_bangla_words(text):
 
     text = re.sub(r'(?:\+?88)?[\s\-]?(?:01|০১)[\d০-৯]{3,4}[-\s]?[\d০-৯]{5,6}', phone_replacer, text)
 
-    # টাকা, শতাংশ, পরিসর (১৮-৩২), ক্রমবাচক ও দশমিক সংখ্যা রূপান্তর
     text = re.sub(r'([0-9০-৯]+)\s*(?:/=|/-|৳)(?:\s*টাকা)?', r'\1 টাকা', text)
     text = re.sub(r'৳\s*([0-9০-৯]+)(?:\s*টাকা)?', r'\1 টাকা', text)
     text = re.sub(r'([0-9০-৯]+(?:\.[0-9০-৯]+)?)\s*%', r'\1 শতাংশ', text)
@@ -131,7 +129,6 @@ def clean_script_for_speech(raw_text):
     text = re.sub(r'https?://\S+|wa\.me/\S+', '', text)
     text = convert_all_numbers_to_bangla_words(text)
     text = re.sub(r'[\*\_\|\#\~\[\]\{\}\<\>\@\$\^\&\+\=\_\\\/\(\)]', ' ', text)
-    # বাংলা TTS মডেলের (IndicF5 ও Ninada) জন্য স্বাভাবিক দাঁড়ি ও কমা অক্ষুণ্ণ রাখা
     text = re.sub(r'[^\u0980-\u09FF\s,।?!\-]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -161,7 +158,7 @@ def _apply_ninada_tempo_and_mastering(raw_wav_path: Path, out_audio_path: Path):
     )
     cmd = ["ffmpeg", "-y", "-i", str(raw_wav_path), "-af", af_chain]
     if str(out_audio_path).lower().endswith(".mp3"):
-        cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "1"])
+        cmd.extend(["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-ac", "1"])
     else:
         cmd.extend(["-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1"])
     cmd.append(str(out_audio_path))
@@ -172,18 +169,24 @@ def _apply_ninada_tempo_and_mastering(raw_wav_path: Path, out_audio_path: Path):
 
 
 def _finalize_kaggle_audio(raw_wav_path: Path, out_audio_path: Path):
-    """Kaggle IndicF5 থেকে পাওয়া WAV-কে broadcast loudness সহ MP3/WAV ফরম্যাটে সেভ করে"""
+    """Kaggle IndicF5 থেকে পাওয়া WAV-কে স্টুডিও মাস্টারিং ও 320k MP3/WAV ফরম্যাটে সেভ করে"""
     out_audio_path.parent.mkdir(parents=True, exist_ok=True)
     if not shutil.which("ffmpeg"):
         shutil.copy2(raw_wav_path, out_audio_path)
         return
 
-    af_chain = "highpass=f=80,loudnorm=I=-16:TP=-1.5:LRA=11"
+    af_chain = (
+        "highpass=f=75,"
+        "equalizer=f=220:t=q:w=1.2:g=1.8,"
+        "equalizer=f=6000:t=q:w=1.5:g=-1.5,"
+        "acompressor=threshold=-20dB:ratio=2.2:attack=10:release=120,"
+        "loudnorm=I=-14:TP=-1.0:LRA=9"
+    )
     is_mp3 = str(out_audio_path).lower().endswith(".mp3")
 
     cmd = ["ffmpeg", "-y", "-i", str(raw_wav_path), "-af", af_chain]
     if is_mp3:
-        cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "1"])
+        cmd.extend(["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-ac", "1"])
     else:
         cmd.extend(["-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1"])
     cmd.append(str(out_audio_path))
@@ -193,7 +196,7 @@ def _finalize_kaggle_audio(raw_wav_path: Path, out_audio_path: Path):
         if is_mp3:
             fallback_cmd = [
                 "ffmpeg", "-y", "-i", str(raw_wav_path),
-                "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "1",
+                "-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-ac", "1",
                 str(out_audio_path),
             ]
             subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -272,17 +275,27 @@ def synthesize_with_ninada(speech_text, output_audio_path):
 
 def _is_kaggle_enabled():
     if os.environ.get("DISABLE_KAGGLE_TTS", "").strip().lower() in {"true", "1", "yes", "on"}:
+        print("  ℹ️ [Kaggle Debug] DISABLE_KAGGLE_TTS is enabled.")
         return False
     try:
         from kaggle_tts import has_kaggle_credentials
-        return has_kaggle_credentials()
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️ [Kaggle Debug] Cannot import kaggle_tts.py: {e}")
         return False
+    if not has_kaggle_credentials():
+        print(
+            f"  ℹ️ [Kaggle Debug] Credentials empty -> "
+            f"KAGGLE_API_TOKEN={'SET' if os.environ.get('KAGGLE_API_TOKEN', '').strip() else 'EMPTY'}, "
+            f"KAGGLE_USERNAME={'SET' if os.environ.get('KAGGLE_USERNAME', '').strip() else 'EMPTY'}, "
+            f"KAGGLE_KEY={'SET' if os.environ.get('KAGGLE_KEY', '').strip() else 'EMPTY'}"
+        )
+        return False
+    return True
 
 
 def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_audio", allow_ninada_backup=True):
     """
-    ১. প্রাইমারি (Priority #1): Kaggle IndicF5_Bangladeshi (সবগুলো অডিও মাত্র ১টি ব্যাচ রিকোয়েস্টে)
+    ১. প্রাইমারি (Priority #1): Kaggle IndicF5_Bangladeshi (সর্বোচ্চ স্টুডিও কোয়ালিটি nfe=64)
     ২. ব্যাকআপ (Priority #2): Ninada Bangla Male TTS (যদি Kaggle বন্ধ বা ব্যর্থ হয়)
     """
     if not batch_items:
@@ -315,7 +328,6 @@ def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_au
 
     results = {}
 
-    # একই স্ক্রিপ্ট থাকলে Kaggle-এ ডুপ্লিকেট জেনারেট না করে একবারই তৈরি করা
     unique_text_to_key = {}
     kaggle_tasks = []
     task_to_unique_key = {}
@@ -327,13 +339,14 @@ def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_au
             kaggle_tasks.append({"filename": u_key, "text": sp_text})
         task_to_unique_key[t["filename"]] = unique_text_to_key[sp_text]
 
-    # ১. প্রাইমারি: Kaggle IndicF5_Bangladeshi
     if _is_kaggle_enabled():
         try:
             from kaggle_tts import generate_voices_batch
             default_voice = os.environ.get("KAGGLE_DEFAULT_VOICE", "male").strip().lower() or "male"
             speech_speed = float(os.environ.get("KAGGLE_SPEECH_SPEED", "0.93") or "0.93")
-            nfe_step = int(os.environ.get("KAGGLE_NFE_STEP", "16") or "16")
+            nfe_step = int(os.environ.get("KAGGLE_NFE_STEP", "64") or "64")
+            cfg_strength = float(os.environ.get("KAGGLE_CFG_STRENGTH", "2.0") or "2.0")
+            sway_coef = float(os.environ.get("KAGGLE_SWAY_COEF", "-1.0") or "-1.0")
 
             generated_map = generate_voices_batch(
                 tasks=kaggle_tasks,
@@ -341,6 +354,8 @@ def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_au
                 default_voice=default_voice,
                 speech_speed=speech_speed,
                 nfe_step=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_coef=sway_coef,
             )
 
             converted_by_ukey = {}
@@ -358,7 +373,7 @@ def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_au
                     if dst.exists() and dst.stat().st_size > 1000:
                         converted_by_ukey[u_key] = str(dst)
                         results[t["filename"]] = str(dst)
-                        print(f"  🎵 Saved '{t['filename']}' -> {dst}")
+                        print(f"  🎵 Mastered '{t['filename']}' -> {dst}")
 
             for src in generated_map.values():
                 if src and Path(src).exists():
@@ -372,9 +387,8 @@ def generate_voiceover_batch_pipeline(batch_items, batch_work_dir="tmp_kaggle_au
         except Exception as e:
             print(f"\n⚠️ [Kaggle TTS Failed] ({e}) — Switching to Priority #2 (Ninada TTS) backup...")
     else:
-        print("\nℹ️ [Kaggle TTS Skipped] KAGGLE_API_TOKEN/Credentials unavailable or disabled — Using Priority #2 (Ninada TTS)...")
+        print("\nℹ️ [Kaggle TTS Skipped] Using Priority #2 (Ninada TTS)...")
 
-    # ২. ব্যাকআপ (Priority #2): শুধু যেগুলো Kaggle থেকে আসেনি সেগুলোর জন্য Ninada TTS
     if allow_ninada_backup:
         ninada_cache = {}
         for t in cleaned_tasks:
