@@ -49,6 +49,8 @@ worker_id = int(sys.argv[5])
 num_workers = int(sys.argv[6])
 speech_speed = float(sys.argv[7])
 nfe_step = int(sys.argv[8])
+cfg_strength = float(sys.argv[9])
+sway_coef = float(sys.argv[10])
 
 sys.path.insert(0, str(bundle_dir))
 import numpy as np
@@ -112,12 +114,14 @@ clean_ref, clean_ref_txt = preprocess_ref_audio_text(ref_wav, ref_text)
 
 all_jobs = json.loads(Path(jobs_path).read_text(encoding="utf-8"))
 my_jobs = [job for idx, job in enumerate(all_jobs) if idx % num_workers == worker_id]
-print(f"[Worker {worker_id}] Assigned {len(my_jobs)} / {len(all_jobs)} chunks on {device} (nfe={nfe_step}, speed={speech_speed})")
+print(f"[Worker {worker_id}] Assigned {len(my_jobs)} / {len(all_jobs)} chunks on {device} (MAX Quality: nfe={nfe_step}, cfg={cfg_strength}, speed={speech_speed})")
 
 for job in my_jobs:
     wav_seg, sr_final, _ = infer_process(
         clean_ref, clean_ref_txt, job["text"], model, vocoder,
-        mel_spec_type="vocos", nfe_step=nfe_step, speed=speech_speed, device=device,
+        mel_spec_type="vocos", cross_fade_duration=0.15,
+        nfe_step=nfe_step, cfg_strength=cfg_strength, sway_sampling_coef=sway_coef,
+        speed=speech_speed, device=device,
     )
     sf.write(job["out_path"], np.asarray(wav_seg, dtype=np.float32).reshape(-1), sr_final)
 
@@ -142,7 +146,6 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 t_boot = time.time()
 
-# ১. প্রাইভেট ডাটাসেট পাথ খুঁজে বের করা (safetensors বা pt উভয়ই সাপোর্ট করে)
 BUNDLE_DIR = None
 for fname in ("indicf5_bd_ema.safetensors", "model_40000.pt"):
     for p in Path("/kaggle/input").rglob(fname):
@@ -154,7 +157,6 @@ for fname in ("indicf5_bd_ema.safetensors", "model_40000.pt"):
 if BUNDLE_DIR is None:
     raise FileNotFoundError("indicf5-bd-fast / indicf5-bd-bundle ডাটাসেট খুঁজে পাওয়া যায়নি!")
 
-# ২. অফলাইন wheels ইনস্টল
 wheels = sorted(str(p) for p in (BUNDLE_DIR / "wheels").glob("*.whl"))
 if wheels:
     subprocess.run(
@@ -175,9 +177,10 @@ CUSTOM_REF_TEXT = json.loads(__REF_TEXT_JSON__)
 DEFAULT_VOICE = __DEFAULT_VOICE__
 SPEECH_SPEED = __SPEECH_SPEED__
 NFE_STEP = __NFE_STEP__
+CFG_STRENGTH = __CFG_STRENGTH__
+SWAY_COEF = __SWAY_COEF__
 GPU_WORKER_CODE = base64.b64decode(__GPU_WORKER_B64__).decode("utf-8")
 
-# ৩. রেফারেন্স অডিও সেটআপ
 if REF_AUDIO_B64:
     raw_ref = Path(f"/tmp/custom_ref_raw{REF_EXT}")
     raw_ref.write_bytes(base64.b64decode(REF_AUDIO_B64))
@@ -196,10 +199,9 @@ else:
     ref_wav = BUNDLE_DIR / "ref_voice" / voice_file
     ref_text = (BUNDLE_DIR / "ref_voice" / "ref_text.txt").read_text(encoding="utf-8").strip()
 
-# রেফারেন্স অডিওর দৈর্ঘ্য অনুযায়ী নিরাপদ সর্বোচ্চ চাংক সাইজ
 ref_dur = sf.info(str(ref_wav)).duration
-avail_sec = max(10.0, 26.0 - ref_dur)
-MAX_CHARS = int(min(240, max(140, avail_sec * 13)))
+avail_sec = max(10.0, 25.0 - ref_dur)
+MAX_CHARS = int(min(220, max(140, avail_sec * 12)))
 
 
 def split_bengali_for_indicf5(text: str, max_chars: int = MAX_CHARS):
@@ -250,7 +252,6 @@ def split_bengali_for_indicf5(text: str, max_chars: int = MAX_CHARS):
     return merged
 
 
-# ৪. সব ভিডিওর সবগুলো চাংক একটি প্যারালাল তালিকায় সাজানো
 CHUNKS_DIR = Path("/tmp/all_chunks")
 CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
 flat_jobs = []
@@ -271,7 +272,6 @@ jobs_file.write_text(json.dumps(flat_jobs, ensure_ascii=False), encoding="utf-8"
 worker_py = Path("/tmp/gpu_chunk_worker.py")
 worker_py.write_text(GPU_WORKER_CODE, encoding="utf-8")
 
-# ৫. ডুয়াল-GPU প্যারালাল রান (আলাদা TMPDIR যাতে jieba ক্যাশে কোনো সংঘর্ষ না হয়)
 num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 num_workers = 2 if (num_gpus >= 2 and len(flat_jobs) >= 2) else 1
 print(f"⚡ Boot & Setup: {round(time.time() - t_boot, 1)}s | GPUs: {num_gpus} | Workers: {num_workers} | Chunks: {len(flat_jobs)} | nfe_step: {NFE_STEP}")
@@ -291,6 +291,7 @@ for wid in range(num_workers):
             sys.executable, str(worker_py),
             str(BUNDLE_DIR), str(ref_wav), ref_text, str(jobs_file),
             str(wid), str(num_workers), str(SPEECH_SPEED), str(NFE_STEP),
+            str(CFG_STRENGTH), str(SWAY_COEF),
         ],
         env=env,
         stdout=subprocess.PIPE,
@@ -306,7 +307,6 @@ for wid, p in procs:
     if p.returncode != 0:
         raise RuntimeError(f"GPU Worker {wid} failed with exit code {p.returncode}")
 
-# ৬. সবগুলো চাংক জোড়া লাগিয়ে মূল অডিও ফাইল ও ZIP তৈরি
 out_dir = Path("/tmp/generated_wavs")
 out_dir.mkdir(parents=True, exist_ok=True)
 zip_path = Path("/kaggle/working/audio_bundle.zip")
@@ -317,11 +317,18 @@ with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         chunk_paths = task_chunk_map.get(item["filename"], [])
         sr_final = 24000
         parts = []
-        pause = np.zeros(int(sr_final * 0.14), dtype=np.float32)
+        pause = np.zeros(int(sr_final * 0.16), dtype=np.float32)
 
         for idx_c, cp in enumerate(chunk_paths):
             seg, sr_final = sf.read(cp, dtype="float32")
-            parts.append(np.asarray(seg, dtype=np.float32).reshape(-1))
+            seg_arr = np.asarray(seg, dtype=np.float32).reshape(-1).copy()
+            # ১২ মিলিসেকেন্ডের স্মুথ ফেড-ইন/ফেড-আউট যাতে বাক্যের সংযোগে কোনো ক্লিক সাউন্ড না আসে
+            fade_n = min(int(sr_final * 0.012), len(seg_arr) // 4)
+            if fade_n > 1:
+                ramp = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+                seg_arr[:fade_n] *= ramp
+                seg_arr[-fade_n:] *= ramp[::-1]
+            parts.append(seg_arr)
             if idx_c < len(chunk_paths) - 1:
                 parts.append(pause)
 
@@ -330,7 +337,7 @@ with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         else:
             final_wav = np.concatenate(parts) if len(parts) > 1 else parts[0]
         wav_path = out_dir / fname
-        sf.write(str(wav_path), final_wav, sr_final)
+        sf.write(str(wav_path), final_wav, sr_final, subtype="PCM_16")
         zf.write(wav_path, arcname=fname)
 
 print(f"✅ Total Dual-GPU Wall Time: {round(time.time() - t_boot, 1)}s")
@@ -415,7 +422,9 @@ def _build_worker_script(
     ref_text: str,
     default_voice: str,
     speech_speed: float = 0.93,
-    nfe_step: int = 16,
+    nfe_step: int = 64,
+    cfg_strength: float = 2.0,
+    sway_coef: float = -1.0,
 ) -> str:
     tasks_json = json.dumps(tasks, ensure_ascii=False)
     ref_text_json = json.dumps(ref_text, ensure_ascii=False)
@@ -429,6 +438,8 @@ def _build_worker_script(
     script = script.replace("__DEFAULT_VOICE__", json.dumps(default_voice))
     script = script.replace("__SPEECH_SPEED__", repr(float(speech_speed)))
     script = script.replace("__NFE_STEP__", repr(int(nfe_step)))
+    script = script.replace("__CFG_STRENGTH__", repr(float(cfg_strength)))
+    script = script.replace("__SWAY_COEF__", repr(float(sway_coef)))
     script = script.replace("__GPU_WORKER_B64__", json.dumps(gpu_worker_b64))
     return script
 
@@ -485,14 +496,18 @@ def generate_voices_batch(
     ref_text: str = "",
     default_voice: str = "male",
     speech_speed: float = 0.93,
-    nfe_step: int = 16,
+    nfe_step: int = 64,
+    cfg_strength: float = 2.0,
+    sway_coef: float = -1.0,
     poll_interval: int = 15,
     max_attempts: int = 3,
     retry_interval_sec: int = 1200,
-    run_timeout_sec: int = 1800,
+    run_timeout_sec: int = 7200,
 ) -> Dict[str, Path]:
     if not tasks:
         return {}
+
+    run_timeout_sec = int(os.environ.get("KAGGLE_RUN_TIMEOUT_SEC", str(run_timeout_sec)) or run_timeout_sec)
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -515,6 +530,7 @@ def generate_voices_batch(
     script_code = _build_worker_script(
         tasks, ref_b64, ref_ext, ref_text, default_voice,
         speech_speed=speech_speed, nfe_step=nfe_step,
+        cfg_strength=cfg_strength, sway_coef=sway_coef,
     )
 
     _cleanup_stale_workers()
@@ -528,7 +544,7 @@ def generate_voices_batch(
             job_dir.mkdir()
             dl_dir.mkdir()
 
-            print(f"\n🚀 [Kaggle TTS | Attempt {attempt}/{max_attempts}] Pushing {len(tasks)} script(s) (T4 x2 | nfe={nfe_step} | speed={speech_speed})...")
+            print(f"\n🚀 [Kaggle TTS | Attempt {attempt}/{max_attempts}] Pushing {len(tasks)} script(s) (T4 x2 | MAX Quality nfe={nfe_step} | speed={speech_speed})...")
             attempt_start = time.time()
             active_kernel_id = _push_with_fallback_slug(job_dir, script_code, run_timeout_sec)
 
