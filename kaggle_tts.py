@@ -2,6 +2,8 @@
 import base64
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -322,7 +324,6 @@ with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for idx_c, cp in enumerate(chunk_paths):
             seg, sr_final = sf.read(cp, dtype="float32")
             seg_arr = np.asarray(seg, dtype=np.float32).reshape(-1).copy()
-            # ১২ মিলিসেকেন্ডের স্মুথ ফেড-ইন/ফেড-আউট যাতে বাক্যের সংযোগে কোনো ক্লিক সাউন্ড না আসে
             fade_n = min(int(sr_final * 0.012), len(seg_arr) // 4)
             if fade_n > 1:
                 ramp = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
@@ -415,6 +416,31 @@ def _find_repo_reference_voice() -> tuple[Optional[Path], str]:
     return None, ""
 
 
+def _prepare_compressed_ref_audio(ref_path: Path) -> tuple[str, str]:
+    """Kaggle SaveKernel-এর ১ MB লিমিট এড়াতে রেফারেন্স অডিওকে কমপ্যাক্ট 24kHz mono 64k MP3 করে নেয়"""
+    raw_bytes = ref_path.read_bytes()
+    if shutil.which("ffmpeg"):
+        with tempfile.TemporaryDirectory() as td:
+            out_mp3 = Path(td) / "ref_compact.mp3"
+            cmd = [
+                "ffmpeg", "-y", "-i", str(ref_path),
+                "-t", "14", "-ar", "24000", "-ac", "1",
+                "-c:a", "libmp3lame", "-b:a", "64k",
+                str(out_mp3),
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and out_mp3.exists() and 1000 < out_mp3.stat().st_size < 450_000:
+                comp_bytes = out_mp3.read_bytes()
+                print(f"  🗜️ [Kaggle Ref] Compressed {len(raw_bytes)/1024:.1f} KB -> {len(comp_bytes)/1024:.1f} KB MP3")
+                return base64.b64encode(comp_bytes).decode("ascii"), ".mp3"
+
+    if len(raw_bytes) <= 450_000:
+        return base64.b64encode(raw_bytes).decode("ascii"), ref_path.suffix.lower() or ".wav"
+
+    print(f"  ⚠️ [Kaggle Ref] '{ref_path.name}' ({len(raw_bytes)/1024:.1f} KB) too large for SaveKernel; using dataset default voice.")
+    return "", ".wav"
+
+
 def _build_worker_script(
     tasks: List[Dict[str, str]],
     ref_audio_b64: str,
@@ -456,12 +482,16 @@ def _push_with_fallback_slug(job_dir: Path, base_script: str, run_timeout_sec: i
     dataset_slug = _get_dataset_slug()
     suffixes = ("", "-r2", "-r3")
     last_err = None
+    timeout_arg = str(min(7200, max(600, int(run_timeout_sec))))
+    print(f"  📦 [Kaggle Push] Owner='{username}', Dataset='{dataset_slug}', Script={len(base_script)/1024:.1f} KB")
+
     for suffix in suffixes:
         slug = f"{slug_base}{suffix}"
         kernel_id = f"{username}/{slug}"
+        title = re.sub(r'[^a-zA-Z0-9]+', ' ', slug).strip().title()
         metadata = {
             "id": kernel_id,
-            "title": f"IndicF5 TTS Worker{suffix.upper()}",
+            "title": title,
             "code_file": "tts_job.py",
             "language": "python",
             "kernel_type": "script",
@@ -477,15 +507,23 @@ def _push_with_fallback_slug(job_dir: Path, base_script: str, run_timeout_sec: i
         }
         (job_dir / "kernel-metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         (job_dir / "tts_job.py").write_text(base_script, encoding="utf-8")
-        try:
-            push_out = _run_kaggle(["kernels", "push", "-p", str(job_dir), "-t", str(run_timeout_sec + 1200)])
-            print("  ", push_out.strip())
-            return kernel_id
-        except Exception as exc:
-            last_err = exc
-            if _is_fatal_kaggle_error(str(exc)):
-                raise RuntimeError(f"Kaggle auth/quota error on '{kernel_id}': {exc}") from exc
-            print(f"⚠️ Slug '{kernel_id}' push failed ({exc}). Trying next slug...")
+
+        for push_cmd in (
+            ["kernels", "push", "-p", str(job_dir), "-t", timeout_arg],
+            ["kernels", "push", "-p", str(job_dir)],
+        ):
+            try:
+                push_out = _run_kaggle(push_cmd)
+                print("  ", push_out.strip())
+                return kernel_id
+            except Exception as exc:
+                last_err = exc
+                if _is_fatal_kaggle_error(str(exc)):
+                    raise RuntimeError(f"Kaggle auth/quota error on '{kernel_id}': {exc}") from exc
+                if "-t" in push_cmd and "400" in str(exc):
+                    continue
+                print(f"⚠️ Slug '{kernel_id}' push failed ({exc}). Trying next slug...")
+                break
     raise RuntimeError(f"Kaggle push failed on all slugs: {last_err}")
 
 
@@ -524,14 +562,20 @@ def generate_voices_batch(
         rp = Path(ref_audio_path)
         if rp.exists() and ref_text.strip():
             print(f"🎤 [Kaggle TTS] Using Custom Reference Voice: {rp}")
-            ref_b64 = base64.b64encode(rp.read_bytes()).decode("ascii")
-            ref_ext = rp.suffix.lower() or ".wav"
+            ref_b64, ref_ext = _prepare_compressed_ref_audio(rp)
 
     script_code = _build_worker_script(
         tasks, ref_b64, ref_ext, ref_text, default_voice,
         speech_speed=speech_speed, nfe_step=nfe_step,
         cfg_strength=cfg_strength, sway_coef=sway_coef,
     )
+    if len(script_code) > 900_000 and ref_b64:
+        print("  ⚠️ [Kaggle Push] Script exceeded 900 KB with custom ref; switching to dataset built-in voice.")
+        script_code = _build_worker_script(
+            tasks, "", ".wav", "", default_voice,
+            speech_speed=speech_speed, nfe_step=nfe_step,
+            cfg_strength=cfg_strength, sway_coef=sway_coef,
+        )
 
     _cleanup_stale_workers()
 
